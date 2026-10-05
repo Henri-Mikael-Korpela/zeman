@@ -46,17 +46,35 @@ int main(void) {
         today = DateToday();
 
         // ---- Input -------------------------------------------------------
-        if (IsKeyPressed(KEY_LEFT))  selected = DateAddDays(selected, -1);
-        if (IsKeyPressed(KEY_RIGHT)) selected = DateAddDays(selected, 1);
-        if (IsKeyPressed(KEY_UP))    selected = DateAddDays(selected, -7);
-        if (IsKeyPressed(KEY_DOWN))  selected = DateAddDays(selected, 7);
-        if (IsKeyPressed(KEY_PAGE_UP))   selected = DateAddMonths(selected, -1);
-        if (IsKeyPressed(KEY_PAGE_DOWN)) selected = DateAddMonths(selected, 1);
-        if (IsKeyPressed(KEY_HOME))      selected = today;
+        if (IsKeyPressed(KEY_LEFT)) {
+            selected = DateAddDays(selected, -1);
+        }
+        if (IsKeyPressed(KEY_RIGHT)) {
+            selected = DateAddDays(selected, 1);
+        }
+        if (IsKeyPressed(KEY_UP)) {
+            selected = DateAddDays(selected, -7);
+        }
+        if (IsKeyPressed(KEY_DOWN)) {
+            selected = DateAddDays(selected, 7);
+        }
+        if (IsKeyPressed(KEY_PAGE_UP)) {
+            selected = DateAddMonths(selected, -1);
+        }
+        if (IsKeyPressed(KEY_PAGE_DOWN)) {
+            selected = DateAddMonths(selected, 1);
+        }
+        if (IsKeyPressed(KEY_HOME)) {
+            selected = today;
+        }
 
         float wheel = GetMouseWheelMove();
-        if (wheel > 0) selected = DateAddMonths(selected, -1);
-        if (wheel < 0) selected = DateAddMonths(selected, 1);
+        if (wheel > 0) {
+            selected = DateAddMonths(selected, -1);
+        }
+        if (wheel < 0) {
+            selected = DateAddMonths(selected, 1);
+        }
 
         // Keep the viewed month in sync with keyboard/wheel navigation.
         view = (Date){ selected.year, selected.month, 1 };
@@ -79,12 +97,15 @@ int main(void) {
         ClearBackground(StyleColor(BACKGROUND_COLOR));
 
         // Header: navigation buttons and month title.
-        if (GuiButton((Rectangle){ header.x, header.y, 40, header.height }, "<"))
+        if (GuiButton((Rectangle){ header.x, header.y, 40, header.height }, "<")) {
             selected = DateAddMonths(selected, -1);
-        if (GuiButton((Rectangle){ header.x + 48, header.y, 40, header.height }, ">"))
+        }
+        if (GuiButton((Rectangle){ header.x + 48, header.y, 40, header.height }, ">")) {
             selected = DateAddMonths(selected, 1);
-        if (GuiButton((Rectangle){ header.x + 96, header.y, 90, header.height }, "Today"))
+        }
+        if (GuiButton((Rectangle){ header.x + 96, header.y, 90, header.height }, "Today")) {
             selected = today;
+        }
 
         const char *title = TextFormat("%s %d", MonthName(view.month), view.year);
         const float titleSize = textSize*1.5f;
@@ -112,10 +133,14 @@ int main(void) {
             bool isSelected = DateEqual(date, selected);
             bool hovered = CheckCollisionPointRec(mouse, r);
 
-            if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) selected = date;
+            if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                selected = date;
+            }
 
             Color fill = inMonth ? StyleColor(BASE_COLOR_NORMAL) : StyleColor(BACKGROUND_COLOR);
-            if (hovered) fill = StyleColor(BASE_COLOR_FOCUSED);
+            if (hovered) {
+                fill = StyleColor(BASE_COLOR_FOCUSED);
+            }
             DrawRectangleRec(r, fill);
             DrawRectangleLinesEx(r, 1, StyleColor(BORDER_COLOR_NORMAL));
 

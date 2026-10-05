@@ -31,7 +31,9 @@ static bool IsLeapYear(int year) {
 
 int DaysInMonth(int year, int month) {
     static const int days[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    if (month == 2 && IsLeapYear(year)) return 29;
+    if (month == 2 && IsLeapYear(year)) {
+        return 29;
+    }
     return days[month - 1];
 }
 
@@ -47,13 +49,19 @@ Date DateAddDays(Date d, int n) {
     d.day += n;
     while (d.day < 1) {
         d.month--;
-        if (d.month < 1) { d.month = 12; d.year--; }
+        if (d.month < 1) {
+            d.month = 12;
+            d.year--;
+        }
         d.day += DaysInMonth(d.year, d.month);
     }
     while (d.day > DaysInMonth(d.year, d.month)) {
         d.day -= DaysInMonth(d.year, d.month);
         d.month++;
-        if (d.month > 12) { d.month = 1; d.year++; }
+        if (d.month > 12) {
+            d.month = 1;
+            d.year++;
+        }
     }
     return d;
 }
@@ -62,7 +70,9 @@ Date DateAddMonths(Date d, int n) {
     int index = d.year*12 + (d.month - 1) + n;
     Date r = { index / 12, index % 12 + 1, d.day };
     int dim = DaysInMonth(r.year, r.month);
-    if (r.day > dim) r.day = dim;
+    if (r.day > dim) {
+        r.day = dim;
+    }
     return r;
 }
 
