@@ -17,7 +17,8 @@ enum {
     // Below this the grid cells get too small for an event bar and the panel too narrow for
     // its text.
     WINDOW_WIDTH_PIXELS_MIN = 1000,
-    WINDOW_HEIGHT_PIXELS_MIN = 640,
+    // Tall enough for every row of the event form and its buttons.
+    WINDOW_HEIGHT_PIXELS_MIN = 720,
     // Each size is rasterized once at startup (see fonts_load), so that text is drawn at the
     // size its glyphs were made for. Calendar entries and cards use the small size, so that
     // more of each title fits.
@@ -32,12 +33,23 @@ enum {
     STATUS_HEIGHT_PIXELS = 28,
     PANEL_WIDTH_PIXELS = 400,
     BUTTON_HEIGHT_PIXELS = 36,
-    FIELD_HEIGHT_PIXELS = 32,
+    // Form rows are compact so that all of them, and the buttons, fit in the panel at the
+    // minimum window height.
+    FIELD_HEIGHT_PIXELS = 28,
+    FORM_LABEL_HEIGHT_PIXELS = 20,
+    FORM_ROW_GAP_PIXELS = 8,
+    // Title, start, end, location, description, repeat and repeat until. The rows keep their
+    // place for every kind of entry, so that the buttons below never move.
+    FORM_ROW_COUNT = 7,
     GRID_COLUMN_COUNT = 7,
     // Six weeks always cover a whole month, whatever weekday it starts on.
     GRID_ROW_COUNT = 6,
     GRID_CELL_COUNT = GRID_COLUMN_COUNT * GRID_ROW_COUNT,
     // Day number and creation markers share the top line of a cell; bars start below it.
+    // Card text starts 16 pixels in from the left and keeps 12 from the right edge.
+    CARD_TEXT_MARGIN_PIXELS = 28,
+    // Longer descriptions are cut off with "..." on the last line.
+    DESCRIPTION_LINES_MAX = 3,
     CELL_TOP_LINE_PIXELS = 32,
     EVENT_BAR_HEIGHT_PIXELS = 19,
     EVENT_BAR_GAP_PIXELS = 2,
@@ -45,8 +57,9 @@ enum {
     EVENT_CARD_HEIGHT_PIXELS = 8 + 4 * TEXT_LINE_HEIGHT_PIXELS_SMALL + 8,
     EVENT_CARD_GAP_PIXELS = 8,
     CREATION_MARKER_RADIUS_PIXELS = 5,
-    // Per cell. Past this a "+" is drawn, because more dots would run into the day number.
-    CREATION_MARKER_COUNT_MAX = 5,
+    // Room kept free for the day number, and today's circle around it, left of the creation
+    // markers. The markers that fit beside it depend on the cell width; past that a "+" is drawn.
+    DAY_NUMBER_WIDTH_PIXELS = 44,
     LEGEND_HEIGHT_PIXELS = 56,
     // Events loaded for one six-week view. If more match, the status bar says so.
     EVENT_COUNT_MAX = 512,
@@ -79,6 +92,9 @@ typedef enum FormField {
     FORM_FIELD_START_TIME,
     FORM_FIELD_END_DATE,
     FORM_FIELD_END_TIME,
+    FORM_FIELD_LOCATION_ADDRESS,  // Location fields are optional; empty means no location
+    FORM_FIELD_LOCATION_CITY,
+    FORM_FIELD_DESCRIPTION,       // Optional free text
     FORM_FIELD_REPEAT_DAYS,      // Shown only for "Every X days"
     FORM_FIELD_REPEAT_END_DATE,  // Shown only for repeating events; empty repeats forever
     FORM_FIELD_COUNT,
@@ -94,7 +110,8 @@ enum {
 // Buffer size of each field, which raygui also uses to cap how much can be typed.
 static const int32_t form_field_sizes[FORM_FIELD_COUNT] = {
     EVENT_TITLE_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
-    REPEAT_DAYS_TEXT_SIZE, DATE_ISO_SIZE,
+    LOCATION_ADDRESS_SIZE, LOCATION_CITY_SIZE, EVENT_DESCRIPTION_SIZE, REPEAT_DAYS_TEXT_SIZE,
+    DATE_ISO_SIZE,
 };
 
 // Choices in the form's repeat selector, in the order shown, and the unit each one means.
@@ -118,8 +135,11 @@ static const int32_t repeat_option_units[REPEAT_OPTION_COUNT] = {
 static_assert(REPEAT_INTERVAL_MAX < 1000, "REPEAT_DAYS_TEXT_SIZE holds three digits.");
 
 // Cast because the constants come from different enums.
-static_assert((int)DATE_ISO_SIZE <= (int)EVENT_TITLE_SIZE, "Field fits the shared buffer.");
-static_assert((int)TIME_TEXT_SIZE <= (int)EVENT_TITLE_SIZE, "Field fits the shared buffer.");
+static_assert((int)DATE_ISO_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
+static_assert((int)TIME_TEXT_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
+static_assert((int)EVENT_TITLE_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
+static_assert((int)LOCATION_ADDRESS_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
+static_assert((int)LOCATION_CITY_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
 
 // Dark enough for white text. Picked by event id, so an event keeps its color in every view.
 static const Color event_colors[] = {
@@ -135,6 +155,9 @@ static const Color event_colors[] = {
 enum { EVENT_COLOR_COUNT = sizeof(event_colors) / sizeof(event_colors[0]) };
 
 static const Color error_color = { 190, 30, 30, 255 };
+// Every problem has this color, darker than any event color, so that problems read as problems
+// at a glance rather than as one more event.
+static const Color problem_color = { 130, 20, 20, 255 };
 
 typedef struct KeyStep {
     int32_t key;     // raylib KeyboardKey
@@ -158,7 +181,7 @@ typedef struct Form {
     int repeat_option;     // RepeatOption; int because raygui's combo box writes it
     int kind;              // EventKind; int because raygui's toggle group writes it
     bool open;
-    char text[FORM_FIELD_COUNT][EVENT_TITLE_SIZE];
+    char text[FORM_FIELD_COUNT][EVENT_DESCRIPTION_SIZE];
     char error[EVENT_STORE_ERROR_SIZE];  // Why the last save failed, or empty
 } Form;
 
@@ -195,6 +218,15 @@ typedef struct App {
     bool store_open;
     char status[STATUS_SIZE];       // Message for the status bar, cleared on navigation
 } App;
+
+// A text broken into lines no wider than a given width: where each line starts in the text and
+// how long it is. The text is not copied.
+typedef struct TextLines {
+    int32_t start[DESCRIPTION_LINES_MAX];
+    int32_t length[DESCRIPTION_LINES_MAX];
+    int32_t count;
+    bool cut;  // The text continues past the last line
+} TextLines;
 
 // The focused event and the days of its lead time: from its creation to the start of the
 // occurrence on the selected date.
@@ -255,6 +287,8 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
                                           Rectangle card);
 static void draw_panel_legend(const Fonts *fonts, Rectangle area);
 static void draw_panel_form(App *app, Rectangle body);
+static float draw_panel_form_fields(App *app, Rectangle body, float y);
+static void draw_panel_form_fields_problem(App *app, Rectangle body, float y);
 static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
                                   const char *label, Rectangle box);
 static void draw_status(const App *app, Rectangle status);
@@ -263,8 +297,12 @@ static void form_open_edit(Form *form, const Event *event);
 static void form_close(Form *form);
 static int32_t form_field_next(const Form *form, bool backwards);
 static bool form_field_visible(const Form *form, int32_t field);
-static float event_card_height(const Event *event);
-static const char *form_parse(const Form *form, Event *event);
+static float event_card_height(const Fonts *fonts, const Event *event, float card_width);
+static TextLines text_wrap(const TextStyle *style, const char *text, float width_pixels);
+static bool text_line_fits(const TextStyle *style, const char *text, int32_t length,
+                           float width_pixels);
+static const char *form_parse(const Form *form, Date today, Event *event);
+static const char *form_parse_problem(const Form *form, Date today, Event *event);
 static bool form_parse_time(const char *text, int32_t *minute_of_day);
 static bool form_parse_repeat_days(const char *text, int32_t *days);
 static bool event_occurs_on_day(const Event *event, int32_t day_number);
@@ -273,6 +311,8 @@ static Color event_color(const Event *event);
 static void event_format_range(const Event *event, char *buffer, size_t buffer_size);
 static void event_format_range_dates(const Event *event, char *buffer, size_t buffer_size);
 static void event_format_created(const Event *event, char *buffer, size_t buffer_size);
+static void event_format_location(const Event *event, char *buffer, size_t buffer_size);
+static void text_copy_trimmed(char *buffer, size_t buffer_size, const char *text);
 static void event_format_lead(const Event *event, char *buffer, size_t buffer_size);
 static void format_date_time_short(Date date, int32_t minute_of_day, char *buffer,
                                    size_t buffer_size);
@@ -556,14 +596,25 @@ static int64_t app_event_first_on_day(const App *app, int32_t day_number) {
 static void app_form_submit(App *app) {
     assert(app->form.open);
     Event event = { 0 };
-    const char *problem = form_parse(&app->form, &event);
-    if (problem != NULL) {
-        snprintf(app->form.error, sizeof(app->form.error), "%s", problem);
+    const char *mistake = form_parse(&app->form, app->today, &event);
+    if (mistake != NULL) {
+        snprintf(app->form.error, sizeof(app->form.error), "%s", mistake);
         return;
     }
     if (!app->store_open) {
         snprintf(app->form.error, sizeof(app->form.error), "No database: cannot save.");
         return;
+    }
+    // Typing the address and city of an existing location links to it, so that events at the
+    // same place share one location.
+    bool has_location = event.location.address[0] != '\0' || event.location.city[0] != '\0';
+    if (has_location) {
+        event.location.id = event_store_location_find_or_create(
+            &app->store, event.location.address, event.location.city);
+        if (event.location.id == 0) {
+            snprintf(app->form.error, sizeof(app->form.error), "%s", app->store.error);
+            return;
+        }
     }
     bool editing = app->form.editing_id != 0;
     int64_t id = app->form.editing_id;
@@ -771,13 +822,25 @@ static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int3
     const float radius = (float)CREATION_MARKER_RADIUS_PIXELS;
     const float spacing = 2 * radius + 6;
     Vector2 center = { cell.x + cell.width - 14, cell.y + 7 + TEXT_SIZE_PIXELS / 2.0f };
+    // Slots between the day number and the right edge, each holding a dot or the "+".
+    int32_t slot_count = (int32_t)((cell.width - 14 - DAY_NUMBER_WIDTH_PIXELS) / spacing) + 1;
+    if (slot_count < 1) {
+        slot_count = 1;
+    }
+    int32_t created_count = 0;
+    for (int32_t i = 0; i < app->event_count; i++) {
+        created_count += event_created_on_day(&app->events[i], day_number) ? 1 : 0;
+    }
+    // When not all fit, the last slot holds the "+" instead of a dot.
+    int32_t dot_count_max = created_count <= slot_count ? slot_count : slot_count - 1;
+
     int32_t marker_count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
         const Event *event = &app->events[i];
         if (!event_created_on_day(event, day_number)) {
             continue;
         }
-        if (marker_count == CREATION_MARKER_COUNT_MAX) {
+        if (marker_count == dot_count_max) {
             draw_text(&app->fonts.small, "+", center.x - radius,
                       center.y - TEXT_SIZE_PIXELS_SMALL / 2.0f, style_color(TEXT_COLOR_NORMAL));
             break;
@@ -868,7 +931,9 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
         time_format(event->start_minute, time, sizeof(time));
         snprintf(label, sizeof(label), "%s %s", time, event->title);
     } else {
-        snprintf(label, sizeof(label), "%s", event->title);
+        // A problem has no time; its "!" marks it even where its color is hard to tell apart.
+        snprintf(label, sizeof(label), "%s%s", event->kind == EVENT_KIND_PROBLEM ? "! " : "",
+                 event->title);
     }
 
     float text_x = bar.x + 4;
@@ -938,10 +1003,13 @@ static void draw_panel(App *app, Rectangle panel) {
 }
 
 static void draw_panel_events(App *app, Rectangle body) {
-    const float button_width = (body.width - PADDING_PIXELS) / 2;
+    const float gap = 8;
+    const float button_width = (body.width - 2 * gap) / 3;
     Rectangle event_button = { body.x, body.y, button_width, BUTTON_HEIGHT_PIXELS };
-    Rectangle task_button = { body.x + button_width + PADDING_PIXELS, body.y, button_width,
+    Rectangle task_button = { body.x + button_width + gap, body.y, button_width,
                               BUTTON_HEIGHT_PIXELS };
+    Rectangle problem_button = { body.x + 2 * (button_width + gap), body.y, button_width,
+                                 BUTTON_HEIGHT_PIXELS };
     if (!app->store_open) {
         GuiDisable();
     }
@@ -952,6 +1020,11 @@ static void draw_panel_events(App *app, Rectangle body) {
     if (GuiButton(task_button, "New task")) {
         app->event_delete_id = 0;
         form_open(&app->form, app->selected, EVENT_KIND_TASK);
+    }
+    // A problem is recorded today, whichever day is selected.
+    if (GuiButton(problem_button, "New problem")) {
+        app->event_delete_id = 0;
+        form_open(&app->form, app->today, EVENT_KIND_PROBLEM);
     }
     GuiEnable();
 
@@ -968,7 +1041,7 @@ static void draw_panel_events(App *app, Rectangle body) {
         if (!event_occurrence_on_day(event, selected_day, &start_day)) {
             continue;
         }
-        float card_height = event_card_height(event);
+        float card_height = event_card_height(&app->fonts, event, body.width);
         if (y + card_height > list_bottom) {
             hidden_count++;
             continue;
@@ -1038,6 +1111,7 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     if (confirming) {
         const char *question = event->repeat_unit != REPEAT_NONE ? "Delete it and all repeats?"
                                : task                            ? "Delete this task?"
+                               : event->kind == EVENT_KIND_PROBLEM ? "Delete this problem?"
                                                                  : "Delete this event?";
         draw_text(&app->fonts.small, question, x, card.y + 8 + TEXT_LINE_HEIGHT_PIXELS_SMALL,
                   error_color);
@@ -1067,7 +1141,8 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     return hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !on_button;
 }
 
-// The lines below the title: dates and repeat, repeat end, creation, and lead time.
+// The lines below the title: dates and repeat, location, description, repeat end, creation,
+// and lead time. A problem shows only its kind, description and creation.
 static void draw_panel_event_card_details(const Fonts *fonts, const Event *event,
                                           Rectangle card) {
     const float x = card.x + 16;
@@ -1078,6 +1153,28 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
     float y = card.y + 8 + line;
     event_format_range(event, text, sizeof(text));
     draw_text(style, text, x, y, style_color(TEXT_COLOR_NORMAL));
+    if (event->location.id != 0) {
+        y += line;
+        event_format_location(event, text, sizeof(text));
+        draw_text(style, text, x, y, style_color(TEXT_COLOR_NORMAL));
+    }
+    if (event->description[0] != '\0') {
+        TextLines lines = text_wrap(style, event->description,
+                                    card.width - (float)CARD_TEXT_MARGIN_PIXELS);
+        for (int32_t i = 0; i < lines.count; i++) {
+            y += line;
+            int32_t shown = snprintf(text, sizeof(text), "%.*s", lines.length[i],
+                                     event->description + lines.start[i]);
+            if (shown > (int32_t)sizeof(text) - 4) {
+                shown = (int32_t)sizeof(text) - 4;
+            }
+            // The last line says that there is more, as the card cannot show all of it.
+            if (lines.cut && i == lines.count - 1) {
+                snprintf(text + shown, sizeof(text) - (size_t)shown, "...");
+            }
+            draw_text(style, text, x, y, style_color(TEXT_COLOR_NORMAL));
+        }
+    }
     if (event->repeat_has_end) {
         y += line;
         Date end = event->repeat_end_date;
@@ -1088,9 +1185,12 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
     y += line;
     event_format_created(event, text, sizeof(text));
     draw_text(style, text, x, y, style_color(TEXT_COLOR_DISABLED));
-    y += line;
-    event_format_lead(event, text, sizeof(text));
-    draw_text(style, text, x, y, event_color(event));
+    // A problem falls on the day it was created, so it has no lead time to show.
+    if (event->kind != EVENT_KIND_PROBLEM) {
+        y += line;
+        event_format_lead(event, text, sizeof(text));
+        draw_text(style, text, x, y, event_color(event));
+    }
     EndScissorMode();
 }
 
@@ -1109,65 +1209,43 @@ static void draw_panel_legend(const Fonts *fonts, Rectangle area) {
 
 static void draw_panel_form(App *app, Rectangle body) {
     Form *form = &app->form;
-    const float row_height = TEXT_LINE_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + 12;
     const float gap = 12;
-    const float time_width = 96;
-    const float date_width = body.width - time_width - gap;
-    const float time_x = body.x + date_width + gap;
-
-    const char *heading = form->kind == EVENT_KIND_TASK
-                              ? (form->editing_id != 0 ? "Edit task" : "New task")
-                              : (form->editing_id != 0 ? "Edit event" : "New event");
-    draw_text(&app->fonts.ui, heading, body.x, body.y, style_color(TEXT_COLOR_NORMAL));
-    // raygui lays the toggles out side by side, each the size of these bounds, 2 pixels apart.
-    const float toggle_width = 72;
-    GuiToggleGroup((Rectangle){ body.x + body.width - 2 * toggle_width - 2, body.y - 4,
-                                toggle_width, 28 },
-                   "Event;Task", &form->kind);
-    // Each field's label sits one line above its box, so leave room for the heading and it.
-    float y = body.y + 2 * TEXT_LINE_HEIGHT_PIXELS + 12;
-    draw_panel_form_field(&app->fonts, form, FORM_FIELD_TITLE, "Title",
-                          (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
-    y += row_height;
-    draw_panel_form_field(&app->fonts, form, FORM_FIELD_START_DATE, "Start date",
-                          (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
-    draw_panel_form_field(&app->fonts, form, FORM_FIELD_START_TIME, "Time",
-                          (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
-    y += row_height;
-    draw_panel_form_field(&app->fonts, form, FORM_FIELD_END_DATE, "End date",
-                          (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
-    draw_panel_form_field(&app->fonts, form, FORM_FIELD_END_TIME, "Time",
-                          (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
-    y += row_height;
-    draw_text(&app->fonts.ui, "Repeat", body.x, y - TEXT_LINE_HEIGHT_PIXELS,
+    static const char *const headings[EVENT_KIND_COUNT][2] = {
+        { "New event", "Edit event" },
+        { "New task", "Edit task" },
+        { "New problem", "Edit problem" },
+    };
+    const bool editing = form->editing_id != 0;
+    draw_text(&app->fonts.ui, headings[form->kind][editing ? 1 : 0], body.x, body.y,
               style_color(TEXT_COLOR_NORMAL));
-    GuiComboBox((Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS }, repeat_option_labels,
-                &form->repeat_option);
-    if (form_field_visible(form, FORM_FIELD_REPEAT_DAYS)) {
-        draw_panel_form_field(&app->fonts, form, FORM_FIELD_REPEAT_DAYS, "Days",
-                              (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
-    }
-    // The row is kept while hidden, so that the buttons do not move under the pointer.
-    y += row_height;
-    if (form_field_visible(form, FORM_FIELD_REPEAT_END_DATE)) {
-        draw_panel_form_field(&app->fonts, form, FORM_FIELD_REPEAT_END_DATE,
-                              "Repeat until (optional)",
-                              (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+    // A new entry can be any kind. An existing problem keeps its kind, and an existing event or
+    // task cannot become a problem, because a problem must be on the day it was created.
+    const bool problem = form->kind == EVENT_KIND_PROBLEM;
+    const int32_t toggle_count = !editing ? 3 : problem ? 0 : 2;
+    // raygui lays the toggles out side by side, each the size of these bounds, 2 pixels apart.
+    const float toggle_width = 76;
+    const float toggles_width = (float)toggle_count * (toggle_width + 2) - 2;
+    if (toggle_count > 0) {
+        GuiToggleGroup((Rectangle){ body.x + body.width - toggles_width, body.y - 4,
+                                    toggle_width, 28 },
+                       toggle_count == 3 ? "Event;Task;Problem" : "Event;Task", &form->kind);
     }
 
-    // One hint line, so that the buttons still fit in the panel at the minimum window height.
-    y += FIELD_HEIGHT_PIXELS + 12;
+    // The first field's label sits below the heading and its box below the label.
+    float y = draw_panel_form_fields(app, body, body.y + 32 + FORM_LABEL_HEIGHT_PIXELS);
     Color dim = style_color(TEXT_COLOR_DISABLED);
-    draw_text(&app->fonts.small, "Dates YYYY-MM-DD, times HH:MM (optional)", body.x, y,
-              dim);
-    y += TEXT_LINE_HEIGHT_PIXELS + 8;
+    if (form->kind != EVENT_KIND_PROBLEM) {
+        draw_text(&app->fonts.small, "Dates YYYY-MM-DD, times HH:MM (optional)", body.x, y,
+                  dim);
+    }
+    y += TEXT_LINE_HEIGHT_PIXELS_SMALL;
     if (form->error[0] != '\0') {
         BeginScissorMode((int)body.x, (int)y, (int)body.width, TEXT_LINE_HEIGHT_PIXELS);
         draw_text(&app->fonts.ui, form->error, body.x, y, error_color);
         EndScissorMode();
     }
 
-    y += TEXT_LINE_HEIGHT_PIXELS + 8;
+    y += TEXT_LINE_HEIGHT_PIXELS + 4;
     const float button_width = (body.width - gap) / 2;
     if (GuiButton((Rectangle){ body.x, y, button_width, BUTTON_HEIGHT_PIXELS }, "Cancel")) {
         form_close(form);
@@ -1178,11 +1256,98 @@ static void draw_panel_form(App *app, Rectangle body) {
     }
 }
 
+// Draws the rows of fields, the first box at y. Returns the y just below the last row.
+static float draw_panel_form_fields(App *app, Rectangle body, float y) {
+    Form *form = &app->form;
+    const Fonts *fonts = &app->fonts;
+    const float row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
+    const float gap = 12;
+    const float time_width = 96;
+    const float date_width = body.width - time_width - gap;
+    const float time_x = body.x + date_width + gap;
+    const float city_width = 136;
+    const float address_width = body.width - city_width - gap;
+    const float city_x = body.x + address_width + gap;
+    const float end_y = y + (FORM_ROW_COUNT - 1) * row_height + FIELD_HEIGHT_PIXELS +
+                        FORM_ROW_GAP_PIXELS;
+    if (form->kind == EVENT_KIND_PROBLEM) {
+        draw_panel_form_fields_problem(app, body, y);
+        return end_y;
+    }
+
+    draw_panel_form_field(fonts, form, FORM_FIELD_TITLE, "Title",
+                          (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
+    y += row_height;
+    draw_panel_form_field(fonts, form, FORM_FIELD_START_DATE, "Start date",
+                          (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+    draw_panel_form_field(fonts, form, FORM_FIELD_START_TIME, "Time",
+                          (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
+    y += row_height;
+    draw_panel_form_field(fonts, form, FORM_FIELD_END_DATE, "End date",
+                          (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+    draw_panel_form_field(fonts, form, FORM_FIELD_END_TIME, "Time",
+                          (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
+    y += row_height;
+    draw_panel_form_field(fonts, form, FORM_FIELD_LOCATION_ADDRESS, "Address (optional)",
+                          (Rectangle){ body.x, y, address_width, FIELD_HEIGHT_PIXELS });
+    draw_panel_form_field(fonts, form, FORM_FIELD_LOCATION_CITY, "City",
+                          (Rectangle){ city_x, y, city_width, FIELD_HEIGHT_PIXELS });
+    y += row_height;
+    draw_panel_form_field(fonts, form, FORM_FIELD_DESCRIPTION, "Description (optional)",
+                          (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
+    y += row_height;
+    draw_text(&fonts->ui, "Repeat", body.x, y - FORM_LABEL_HEIGHT_PIXELS,
+              style_color(TEXT_COLOR_NORMAL));
+    GuiComboBox((Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS }, repeat_option_labels,
+                &form->repeat_option);
+    if (form_field_visible(form, FORM_FIELD_REPEAT_DAYS)) {
+        draw_panel_form_field(fonts, form, FORM_FIELD_REPEAT_DAYS, "Days",
+                              (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
+    }
+    // The row is kept while hidden, so that the buttons do not move under the pointer.
+    y += row_height;
+    if (form_field_visible(form, FORM_FIELD_REPEAT_END_DATE)) {
+        draw_panel_form_field(fonts, form, FORM_FIELD_REPEAT_END_DATE, "Repeat until (optional)",
+                              (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+    }
+    assert(y + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS == end_y);
+    return end_y;
+}
+
+// A problem has a name and a description; its day is shown, not chosen.
+static void draw_panel_form_fields_problem(App *app, Rectangle body, float y) {
+    Form *form = &app->form;
+    const Fonts *fonts = &app->fonts;
+    const float row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
+    draw_panel_form_field(fonts, form, FORM_FIELD_TITLE, "Name",
+                          (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
+    y += row_height;
+    draw_panel_form_field(fonts, form, FORM_FIELD_DESCRIPTION, "Description (optional)",
+                          (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
+    y += row_height;
+
+    // A new problem is recorded today; an existing one stays on the day it was created, which
+    // form_open_edit put in the start date text.
+    Date date = app->today;
+    if (form->editing_id != 0) {
+        bool parsed = date_parse_iso(form->text[FORM_FIELD_START_DATE], &date);
+        assert(parsed);
+        (void)parsed; // Unused when assertions are compiled out.
+    }
+    char text[TEXT_LINE_SIZE];
+    snprintf(text, sizeof(text), "On %s, %" PRId32 " %s %" PRId32, weekday_name(date_weekday(date)),
+             date.day, month_name(date.month), date.year);
+    draw_text(&fonts->ui, text, body.x, y - FORM_LABEL_HEIGHT_PIXELS,
+              style_color(TEXT_COLOR_NORMAL));
+    draw_text(&fonts->small, "A problem is always on the day it is created.", body.x, y + 4,
+              style_color(TEXT_COLOR_DISABLED));
+}
+
 static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
                                   const char *label, Rectangle box) {
     assert(field >= 0);
     assert(field < FORM_FIELD_COUNT);
-    draw_text(&fonts->ui, label, box.x, box.y - TEXT_LINE_HEIGHT_PIXELS,
+    draw_text(&fonts->ui, label, box.x, box.y - FORM_LABEL_HEIGHT_PIXELS,
               style_color(TEXT_COLOR_NORMAL));
     bool editing = form->field_active == field;
     // raygui returns true when edit mode should toggle: a click on the box, or Enter or a
@@ -1249,6 +1414,12 @@ static void form_open_edit(Form *form, const Event *event) {
         date_format_iso(event->repeat_end_date, form->text[FORM_FIELD_REPEAT_END_DATE],
                         DATE_ISO_SIZE);
     }
+    snprintf(form->text[FORM_FIELD_LOCATION_ADDRESS], LOCATION_ADDRESS_SIZE, "%s",
+             event->location.address);
+    snprintf(form->text[FORM_FIELD_LOCATION_CITY], LOCATION_CITY_SIZE, "%s",
+             event->location.city);
+    snprintf(form->text[FORM_FIELD_DESCRIPTION], EVENT_DESCRIPTION_SIZE, "%s",
+             event->description);
     // Start with no field in edit mode, so that a click on Save or Cancel acts at once.
     form->field_active = FORM_FIELD_NONE;
 }
@@ -1276,6 +1447,9 @@ static int32_t form_field_next(const Form *form, bool backwards) {
 static bool form_field_visible(const Form *form, int32_t field) {
     assert(field >= 0);
     assert(field < FORM_FIELD_COUNT);
+    if (form->kind == EVENT_KIND_PROBLEM) {
+        return field == FORM_FIELD_TITLE || field == FORM_FIELD_DESCRIPTION;
+    }
     if (field == FORM_FIELD_REPEAT_DAYS) {
         return form->repeat_option == REPEAT_OPTION_DAYS;
     }
@@ -1286,15 +1460,18 @@ static bool form_field_visible(const Form *form, int32_t field) {
 }
 
 // Fills event from the form. Returns NULL on success, or a message saying what to fix.
-static const char *form_parse(const Form *form, Event *event) {
+static const char *form_parse(const Form *form, Date today, Event *event) {
     assert(event->id == 0);
     // Leading spaces would let a blank-looking title through.
     const char *title = form->text[FORM_FIELD_TITLE];
     title += strspn(title, " ");
     if (title[0] == '\0') {
-        return "Enter a title.";
+        return form->kind == EVENT_KIND_PROBLEM ? "Enter a name." : "Enter a title.";
     }
     snprintf(event->title, sizeof(event->title), "%s", title);
+    if (form->kind == EVENT_KIND_PROBLEM) {
+        return form_parse_problem(form, today, event);
+    }
 
     if (!date_parse_iso(form->text[FORM_FIELD_START_DATE], &event->start_date)) {
         return "Start date must be YYYY-MM-DD.";
@@ -1308,6 +1485,13 @@ static const char *form_parse(const Form *form, Event *event) {
     if (!form_parse_time(form->text[FORM_FIELD_END_TIME], &event->end_minute)) {
         return "End time must be HH:MM.";
     }
+    // The location id is found or created when saving, from these texts.
+    text_copy_trimmed(event->location.address, sizeof(event->location.address),
+                      form->text[FORM_FIELD_LOCATION_ADDRESS]);
+    text_copy_trimmed(event->location.city, sizeof(event->location.city),
+                      form->text[FORM_FIELD_LOCATION_CITY]);
+    text_copy_trimmed(event->description, sizeof(event->description),
+                      form->text[FORM_FIELD_DESCRIPTION]);
     assert(form->repeat_option >= 0);
     assert(form->repeat_option < REPEAT_OPTION_COUNT);
     assert(form->kind >= 0);
@@ -1354,6 +1538,30 @@ static const char *form_parse(const Form *form, Event *event) {
     return NULL;
 }
 
+// The hidden fields of the form are ignored: a problem has no times, location or repeat.
+static const char *form_parse_problem(const Form *form, Date today, Event *event) {
+    assert(form->kind == EVENT_KIND_PROBLEM);
+    event->kind = EVENT_KIND_PROBLEM;
+    // A new problem falls on today, the day it is created. An edited one keeps its day.
+    event->start_date = today;
+    if (form->editing_id != 0) {
+        if (!date_parse_iso(form->text[FORM_FIELD_START_DATE], &event->start_date)) {
+            return "Problem date is invalid.";
+        }
+    }
+    event->end_date = event->start_date;
+    event->start_minute = TIME_NONE;
+    event->end_minute = TIME_NONE;
+    event->repeat_unit = REPEAT_NONE;
+    event->repeat_interval = 1;
+    event->repeat_has_end = false;
+    text_copy_trimmed(event->description, sizeof(event->description),
+                      form->text[FORM_FIELD_DESCRIPTION]);
+    assert(event->location.id == 0);
+    assert(event->location.address[0] == '\0');
+    return NULL;
+}
+
 // An empty field means the event has no time of day at that end.
 static bool form_parse_time(const char *text, int32_t *minute_of_day) {
     if (text[0] == '\0') {
@@ -1390,19 +1598,89 @@ static bool event_created_on_day(const Event *event, int32_t day_number) {
     return date_to_day_number(event->created_date) == day_number;
 }
 
-// One more line for a repeating event that ends, to say when.
-static float event_card_height(const Event *event) {
-    float extra = event->repeat_has_end ? (float)TEXT_LINE_HEIGHT_PIXELS_SMALL : 0.0f;
-    return (float)EVENT_CARD_HEIGHT_PIXELS + extra;
+// One more line for a location, one for a repeating event that ends, to say when, and one per
+// line of description.
+static float event_card_height(const Fonts *fonts, const Event *event, float card_width) {
+    int32_t extra_lines = (event->location.id != 0 ? 1 : 0) + (event->repeat_has_end ? 1 : 0);
+    // A problem has no lead time line.
+    extra_lines -= event->kind == EVENT_KIND_PROBLEM ? 1 : 0;
+    if (event->description[0] != '\0') {
+        float width = card_width - (float)CARD_TEXT_MARGIN_PIXELS;
+        extra_lines += text_wrap(&fonts->small, event->description, width).count;
+    }
+    return (float)(EVENT_CARD_HEIGHT_PIXELS + extra_lines * TEXT_LINE_HEIGHT_PIXELS_SMALL);
+}
+
+// Breaks text at spaces into at most DESCRIPTION_LINES_MAX lines that fit width_pixels, and
+// breaks inside a word only when one word alone is wider than a line.
+static TextLines text_wrap(const TextStyle *style, const char *text, float width_pixels) {
+    TextLines lines = { .count = 0, .cut = false };
+    const int32_t length = (int32_t)strlen(text);
+    int32_t position = 0;
+    // Bounded by DESCRIPTION_LINES_MAX, and each pass either ends the loop or consumes text.
+    while (lines.count < DESCRIPTION_LINES_MAX) {
+        while (position < length && text[position] == ' ') {
+            position++;
+        }
+        if (position >= length) {
+            break;
+        }
+
+        // Extend the line one word at a time while it still fits.
+        int32_t line_end = position;
+        for (int32_t i = position; i <= length; i++) {
+            if (i == length || text[i] == ' ') {
+                if (!text_line_fits(style, text + position, i - position, width_pixels)) {
+                    break;
+                }
+                line_end = i;
+            }
+        }
+        // One word wider than the line: break it by characters, at least one per line.
+        if (line_end == position) {
+            line_end = position + 1;
+            while (line_end < length &&
+                   text_line_fits(style, text + position, line_end + 1 - position, width_pixels)) {
+                line_end++;
+            }
+        }
+        lines.start[lines.count] = position;
+        lines.length[lines.count] = line_end - position;
+        lines.count++;
+        position = line_end;
+    }
+    while (position < length && text[position] == ' ') {
+        position++;
+    }
+    lines.cut = position < length;
+    return lines;
+}
+
+static bool text_line_fits(const TextStyle *style, const char *text, int32_t length,
+                           float width_pixels) {
+    char line[EVENT_DESCRIPTION_SIZE];
+    assert(length >= 0);
+    assert(length < EVENT_DESCRIPTION_SIZE);
+    memcpy(line, text, (size_t)length);
+    line[length] = '\0';
+    return measure_text(style, line).x <= width_pixels;
 }
 
 static Color event_color(const Event *event) {
     assert(event->id > 0);
+    if (event->kind == EVENT_KIND_PROBLEM) {
+        return problem_color;
+    }
     return event_colors[event->id % EVENT_COLOR_COUNT];
 }
 
 // The dates and times, followed by how the event repeats, if it does.
 static void event_format_range(const Event *event, char *buffer, size_t buffer_size) {
+    // A problem has no range: it is on its one day, which the panel heading shows.
+    if (event->kind == EVENT_KIND_PROBLEM) {
+        snprintf(buffer, buffer_size, "Problem");
+        return;
+    }
     event_format_range_dates(event, buffer, buffer_size);
     // The longest is "every 999 days".
     char repeat[32];
@@ -1442,6 +1720,37 @@ static void event_format_range_dates(const Event *event, char *buffer, size_t bu
     } else {
         snprintf(buffer, buffer_size, "%s - %s", start, end);
     }
+}
+
+// "Address, City", or whichever of the two the location has.
+static void event_format_location(const Event *event, char *buffer, size_t buffer_size) {
+    const Location *location = &event->location;
+    assert(location->id != 0);
+    bool has_address = location->address[0] != '\0';
+    bool has_city = location->city[0] != '\0';
+    assert(has_address || has_city);
+    if (has_address && has_city) {
+        snprintf(buffer, buffer_size, "%s, %s", location->address, location->city);
+    } else {
+        snprintf(buffer, buffer_size, "%s", has_address ? location->address : location->city);
+    }
+}
+
+// Copies text without leading and trailing spaces, so that "Main St " and "Main St" are the
+// same location, and a field of only spaces counts as empty.
+static void text_copy_trimmed(char *buffer, size_t buffer_size, const char *text) {
+    assert(buffer_size > 0);
+    text += strspn(text, " ");
+    size_t length = strlen(text);
+    // Bounded by length, which shrinks to zero at most.
+    while (length > 0 && text[length - 1] == ' ') {
+        length--;
+    }
+    if (length >= buffer_size) {
+        length = buffer_size - 1;
+    }
+    memcpy(buffer, text, length);
+    buffer[length] = '\0';
 }
 
 static void event_format_created(const Event *event, char *buffer, size_t buffer_size) {

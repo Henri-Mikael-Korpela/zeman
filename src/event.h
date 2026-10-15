@@ -12,7 +12,19 @@ enum {
     EVENT_TITLE_SIZE = 64,
     // "Every X days" accepts up to this many days, so that X fits a three-digit field.
     REPEAT_INTERVAL_MAX = 999,
+    // Bytes including the terminator. The description is one line of free text.
+    EVENT_DESCRIPTION_SIZE = 200,
+    LOCATION_ADDRESS_SIZE = 64,
+    LOCATION_CITY_SIZE = 48,
 };
+
+// A place where events and tasks happen. Locations are shared: every event saved with the same
+// address and city links to the same location.
+typedef struct Location {
+    int64_t id;                           // 0 when an event has no location
+    char address[LOCATION_ADDRESS_SIZE];  // May be empty if city is not
+    char city[LOCATION_CITY_SIZE];        // May be empty if address is not
+} Location;
 
 typedef enum RepeatUnit {
     REPEAT_NONE,
@@ -23,17 +35,21 @@ typedef enum RepeatUnit {
     REPEAT_UNIT_COUNT,
 } RepeatUnit;
 
-// What kind of calendar entry an Event is. Both kinds share every field and rule; a task can
-// also be checked off as done, once per occurrence.
+// What kind of calendar entry an Event is. Events and tasks share every field and rule; a task
+// can also be checked off as done, once per occurrence. A problem records something that went
+// wrong: it has only a title, a description and its creation time, and it always falls on the
+// day it was created, so it has no times, location or repeat.
 typedef enum EventKind {
     EVENT_KIND_EVENT,
     EVENT_KIND_TASK,
+    EVENT_KIND_PROBLEM,
     EVENT_KIND_COUNT,
 } EventKind;
 
 // Any calendar entry: an event or a task, as its kind says.
 typedef struct Event {
     int64_t id;               // 0 until the event is stored
+    Location location;        // location.id is 0 for none
     Date start_date;          // Start of the first occurrence
     Date end_date;            // End of the first occurrence
     Date created_date;        // Local date when the event was inserted
@@ -46,6 +62,7 @@ typedef struct Event {
     int32_t kind;             // EventKind
     bool repeat_has_end;     // False repeats forever; always false for one-time events
     char title[EVENT_TITLE_SIZE];
+    char description[EVENT_DESCRIPTION_SIZE];  // Empty for none
 } Event;
 
 // Whole days from the start date to the end date of one occurrence; 0 for a one-day event.

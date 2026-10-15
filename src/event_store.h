@@ -12,7 +12,7 @@ enum {
     // Bytes including the terminator for messages returned to the user interface.
     EVENT_STORE_ERROR_SIZE = 160,
     // Statements prepared at open; event_store.c names them and checks this count.
-    EVENT_STORE_STATEMENT_COUNT = 7,
+    EVENT_STORE_STATEMENT_COUNT = 8,
 };
 
 // One checked-off occurrence of a task.
@@ -52,6 +52,11 @@ bool event_store_delete(EventStore *store, int64_t id);
 // event_count_max events matched, so that the caller can say that some are hidden.
 int32_t event_store_load_range(EventStore *store, Date first, Date last,
                                Event *events, int32_t event_count_max, bool *truncated);
+
+// Returns the id of the location with exactly this address and city, creating it if there is
+// none, or 0 on failure. Either text may be empty, but not both.
+int64_t event_store_location_find_or_create(EventStore *store, const char *address,
+                                            const char *city);
 
 // Marks one occurrence of a task, identified by its start date, as done or not done.
 // Marking it twice the same way is not an error.

@@ -53,6 +53,53 @@ static const char *const migrations_sql[] = {
     "        DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime')),"
     "    PRIMARY KEY (event_id, occurrence_date)"
     ");",
+    // Locations, shared between events. Deleting a location unlinks its events rather than
+    // deleting them, because the event still happens.
+    "CREATE TABLE locations ("
+    "    id INTEGER PRIMARY KEY,"
+    "    address TEXT NOT NULL,"
+    "    city TEXT NOT NULL,"
+    "    CHECK (length(address) > 0 OR length(city) > 0),"
+    "    UNIQUE (address, city)"
+    ");"
+    "ALTER TABLE events ADD COLUMN location_id INTEGER"
+    "    REFERENCES locations (id) ON DELETE SET NULL;",
+    // Free-text description. Empty, not NULL, for none, so that readers need no NULL case.
+    "ALTER TABLE events ADD COLUMN description TEXT NOT NULL DEFAULT '';",
+    // Problems. SQLite cannot change a CHECK constraint in place, so the table is rebuilt with
+    // 'problem' allowed in kind, following SQLite's documented procedure; foreign keys are off
+    // while migrating (see event_store_open), or dropping the old table would delete every
+    // task completion. The last CHECK makes a problem fall on the day it was created.
+    "CREATE TABLE events_new ("
+    "    id INTEGER PRIMARY KEY,"
+    "    title TEXT NOT NULL CHECK (length(title) > 0),"
+    "    start_date TEXT NOT NULL,"
+    "    start_time TEXT,"
+    "    end_date TEXT NOT NULL,"
+    "    end_time TEXT,"
+    "    created_at TEXT NOT NULL"
+    "        DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime')),"
+    "    repeat_unit TEXT CHECK (repeat_unit IN ('day', 'week', 'month', 'year')),"
+    "    repeat_interval INTEGER NOT NULL DEFAULT 1 CHECK (repeat_interval >= 1),"
+    "    repeat_end_date TEXT"
+    "        CHECK (repeat_end_date IS NULL OR repeat_end_date >= start_date),"
+    "    kind TEXT NOT NULL DEFAULT 'event' CHECK (kind IN ('event', 'task', 'problem')),"
+    "    location_id INTEGER REFERENCES locations (id) ON DELETE SET NULL,"
+    "    description TEXT NOT NULL DEFAULT '',"
+    "    CHECK (end_date >= start_date),"
+    "    CHECK (kind <> 'problem' OR (start_date = substr(created_at, 1, 10)"
+    "        AND end_date = start_date AND start_time IS NULL AND end_time IS NULL"
+    "        AND repeat_unit IS NULL AND location_id IS NULL))"
+    ");"
+    "INSERT INTO events_new (id, title, start_date, start_time, end_date, end_time,"
+    "    created_at, repeat_unit, repeat_interval, repeat_end_date, kind, location_id,"
+    "    description)"
+    " SELECT id, title, start_date, start_time, end_date, end_time, created_at, repeat_unit,"
+    "    repeat_interval, repeat_end_date, kind, location_id, description FROM events;"
+    "DROP TABLE events;"
+    "ALTER TABLE events_new RENAME TO events;"
+    "CREATE INDEX events_by_start_date ON events (start_date);"
+    "CREATE INDEX events_by_created_at ON events (created_at);",
 };
 enum { SCHEMA_VERSION = sizeof(migrations_sql) / sizeof(migrations_sql[0]) };
 
@@ -62,7 +109,7 @@ static const char *const repeat_unit_names[REPEAT_UNIT_COUNT] = {
 };
 
 // Text stored in kind, indexed by EventKind.
-static const char *const event_kind_names[EVENT_KIND_COUNT] = { "event", "task" };
+static const char *const event_kind_names[EVENT_KIND_COUNT] = { "event", "task", "problem" };
 
 typedef enum Statement {
     STATEMENT_INSERT,
@@ -72,6 +119,7 @@ typedef enum Statement {
     STATEMENT_COMPLETION_INSERT,
     STATEMENT_COMPLETION_DELETE,
     STATEMENT_COMPLETION_SELECT_RANGE,
+    STATEMENT_LOCATION_UPSERT,
     STATEMENT_COUNT,
 } Statement;
 
@@ -79,30 +127,33 @@ typedef enum Statement {
 static_assert((int)STATEMENT_COUNT == (int)EVENT_STORE_STATEMENT_COUNT,
               "EventStore holds every statement.");
 
-// Insert and update share parameters 1 to 9, so that both bind with event_store_bind_fields.
+// Insert and update share parameters 1 to 11, so that both bind with event_store_bind_fields.
 static const char *const statements_sql[STATEMENT_COUNT] = {
     [STATEMENT_INSERT] =
         "INSERT INTO events"
         " (title, start_date, start_time, end_date, end_time, repeat_unit, repeat_interval,"
-        "  repeat_end_date, kind)"
-        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);",
+        "  repeat_end_date, kind, location_id, description)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);",
     [STATEMENT_UPDATE] =
         "UPDATE events SET title = ?1, start_date = ?2, start_time = ?3, end_date = ?4,"
         " end_time = ?5, repeat_unit = ?6, repeat_interval = ?7, repeat_end_date = ?8,"
-        " kind = ?9 WHERE id = ?10;",
+        " kind = ?9, location_id = ?10, description = ?11 WHERE id = ?12;",
     [STATEMENT_DELETE] = "DELETE FROM events WHERE id = ?1;",
     // Ordered by time of day, all-day events first, because the caller lists the events of one
     // day at a time and a repeating event's first start date says nothing about that order.
     // A repeating event with an end is visible until its last occurrence ends: the end date
     // plus one occurrence's length.
+    // The location comes with each event through a join, so that no second query is needed.
     [STATEMENT_SELECT_RANGE] =
-        "SELECT id, title, start_date, start_time, end_date, end_time, created_at,"
-        "       repeat_unit, repeat_interval, repeat_end_date, kind FROM events"
-        " WHERE (start_date <= ?2 AND (end_date >= ?1 OR (repeat_unit IS NOT NULL"
-        "        AND (repeat_end_date IS NULL OR julianday(repeat_end_date)"
-        "             + julianday(end_date) - julianday(start_date) >= julianday(?1)))))"
-        "    OR (substr(created_at, 1, 10) BETWEEN ?1 AND ?2)"
-        " ORDER BY start_time IS NOT NULL, start_time, start_date, id"
+        "SELECT e.id, e.title, e.start_date, e.start_time, e.end_date, e.end_time,"
+        "       e.created_at, e.repeat_unit, e.repeat_interval, e.repeat_end_date, e.kind,"
+        "       l.id, l.address, l.city, e.description"
+        " FROM events e LEFT JOIN locations l ON l.id = e.location_id"
+        " WHERE (e.start_date <= ?2 AND (e.end_date >= ?1 OR (e.repeat_unit IS NOT NULL"
+        "        AND (e.repeat_end_date IS NULL OR julianday(e.repeat_end_date)"
+        "             + julianday(e.end_date) - julianday(e.start_date) >= julianday(?1)))))"
+        "    OR (substr(e.created_at, 1, 10) BETWEEN ?1 AND ?2)"
+        " ORDER BY e.start_time IS NOT NULL, e.start_time, e.start_date, e.id"
         " LIMIT ?3;",
     [STATEMENT_COMPLETION_INSERT] =
         "INSERT OR IGNORE INTO task_completions (event_id, occurrence_date) VALUES (?1, ?2);",
@@ -111,6 +162,11 @@ static const char *const statements_sql[STATEMENT_COUNT] = {
     [STATEMENT_COMPLETION_SELECT_RANGE] =
         "SELECT event_id, occurrence_date FROM task_completions"
         " WHERE occurrence_date BETWEEN ?1 AND ?2 ORDER BY event_id LIMIT ?3;",
+    // The no-op update makes RETURNING give the id of an existing row too; DO NOTHING would
+    // return no row.
+    [STATEMENT_LOCATION_UPSERT] =
+        "INSERT INTO locations (address, city) VALUES (?1, ?2)"
+        " ON CONFLICT (address, city) DO UPDATE SET city = excluded.city RETURNING id;",
 };
 
 enum {
@@ -125,10 +181,15 @@ enum {
     COLUMN_REPEAT_INTERVAL,
     COLUMN_REPEAT_END_DATE,
     COLUMN_KIND,
+    COLUMN_LOCATION_ID,
+    COLUMN_LOCATION_ADDRESS,
+    COLUMN_LOCATION_CITY,
+    COLUMN_DESCRIPTION,
 };
 
 static bool event_store_fail(EventStore *store, const char *context);
 static bool event_store_migrate(EventStore *store);
+static bool event_store_check_foreign_keys(EventStore *store);
 static bool event_store_migrate_step(EventStore *store, int32_t version);
 static bool event_store_write(EventStore *store, sqlite3_stmt *statement, int result,
                               const char *context, bool row_expected);
@@ -141,6 +202,7 @@ static bool column_parse_date(sqlite3_stmt *statement, int column, Date *date);
 static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minute_of_day);
 static bool column_parse_repeat(sqlite3_stmt *statement, Event *event);
 static bool column_parse_kind(sqlite3_stmt *statement, Event *event);
+static bool column_parse_location(sqlite3_stmt *statement, Event *event);
 
 bool event_store_open(EventStore *store, const char *path) {
     assert(store != NULL);
@@ -152,16 +214,21 @@ bool event_store_open(EventStore *store, const char *path) {
     if (result != SQLITE_OK) {
         return event_store_fail(store, "Cannot open database");
     }
+    if (sqlite3_exec(store->database, schema_sql, NULL, NULL, NULL) != SQLITE_OK) {
+        return event_store_fail(store, "Cannot create schema");
+    }
+    // Migrations run with foreign keys off, as SQLite requires for rebuilding a table, and are
+    // checked afterwards instead.
+    if (!event_store_migrate(store)) {
+        return false;
+    }
+    if (!event_store_check_foreign_keys(store)) {
+        return false;
+    }
     // Off by default in SQLite, and needed so that deleting a task deletes its completions.
     if (sqlite3_exec(store->database, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL) !=
         SQLITE_OK) {
         return event_store_fail(store, "Cannot enable foreign keys");
-    }
-    if (sqlite3_exec(store->database, schema_sql, NULL, NULL, NULL) != SQLITE_OK) {
-        return event_store_fail(store, "Cannot create schema");
-    }
-    if (!event_store_migrate(store)) {
-        return false;
     }
     // Persistent: these statements live for the whole session.
     for (int32_t i = 0; i < STATEMENT_COUNT; i++) {
@@ -214,7 +281,7 @@ bool event_store_update(EventStore *store, const Event *event) {
     sqlite3_stmt *statement = store->statements[STATEMENT_UPDATE];
     int result = event_store_bind_fields(statement, event);
     if (result == SQLITE_OK) {
-        result = sqlite3_bind_int64(statement, 10, event->id);
+        result = sqlite3_bind_int64(statement, 12, event->id);
     }
     return event_store_write(store, statement, result, "Cannot save", true);
 }
@@ -238,6 +305,36 @@ bool event_store_set_task_done(EventStore *store, int64_t id, Date occurrence_st
     }
     // No row check: marking an occurrence that is already marked the same way changes nothing.
     return event_store_write(store, statement, result, "Cannot update task", false);
+}
+
+int64_t event_store_location_find_or_create(EventStore *store, const char *address,
+                                            const char *city) {
+    assert(store != NULL);
+    assert(strlen(address) < LOCATION_ADDRESS_SIZE);
+    assert(strlen(city) < LOCATION_CITY_SIZE);
+    assert(address[0] != '\0' || city[0] != '\0');
+
+    sqlite3_stmt *statement = store->statements[STATEMENT_LOCATION_UPSERT];
+    int result = sqlite3_bind_text(statement, 1, address, -1, SQLITE_TRANSIENT);
+    if (result == SQLITE_OK) {
+        result = sqlite3_bind_text(statement, 2, city, -1, SQLITE_TRANSIENT);
+    }
+    int64_t id = 0;
+    if (result == SQLITE_OK) {
+        result = sqlite3_step(statement);
+    }
+    if (result == SQLITE_ROW) {
+        id = sqlite3_column_int64(statement, 0);
+        // RETURNING rows are only final once the statement has run to completion.
+        result = sqlite3_step(statement);
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    if (result != SQLITE_DONE || id <= 0) {
+        event_store_fail(store, "Cannot save location");
+        return 0;
+    }
+    return id;
 }
 
 int32_t event_store_load_range(EventStore *store, Date first, Date last,
@@ -414,6 +511,15 @@ static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event) 
         result = sqlite3_bind_text(statement, 9, event_kind_names[event->kind], -1,
                                    SQLITE_STATIC);
     }
+    if (result == SQLITE_OK) {
+        assert(event->location.id >= 0);
+        result = event->location.id == 0
+                     ? sqlite3_bind_null(statement, 10)
+                     : sqlite3_bind_int64(statement, 10, event->location.id);
+    }
+    if (result == SQLITE_OK) {
+        result = sqlite3_bind_text(statement, 11, event->description, -1, SQLITE_TRANSIENT);
+    }
     return result;
 }
 
@@ -483,7 +589,46 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     if (!column_parse_kind(statement, event)) {
         return false;
     }
+    if (!column_parse_location(statement, event)) {
+        return false;
+    }
+    // The database enforces this as well; checked again because drawing relies on it.
+    if (event->kind == EVENT_KIND_PROBLEM) {
+        if (!date_equal(event->start_date, event->created_date)) {
+            return false;
+        }
+        if (!date_equal(event->end_date, event->start_date)) {
+            return false;
+        }
+        if (event->repeat_unit != REPEAT_NONE) {
+            return false;
+        }
+    }
+    // Longer text from outside this program is cut to fit, as titles are.
+    const char *description = (const char *)sqlite3_column_text(statement, COLUMN_DESCRIPTION);
+    if (description == NULL) {
+        return false;
+    }
+    snprintf(event->description, sizeof(event->description), "%s", description);
     return event->id > 0;
+}
+
+// No location leaves event->location zeroed, with id 0. Longer texts from outside this program
+// are cut to fit, as titles are.
+static bool column_parse_location(sqlite3_stmt *statement, Event *event) {
+    assert(event->location.id == 0);
+    if (sqlite3_column_type(statement, COLUMN_LOCATION_ID) == SQLITE_NULL) {
+        return true;
+    }
+    const char *address = (const char *)sqlite3_column_text(statement, COLUMN_LOCATION_ADDRESS);
+    const char *city = (const char *)sqlite3_column_text(statement, COLUMN_LOCATION_CITY);
+    if (address == NULL || city == NULL) {
+        return false;
+    }
+    event->location.id = sqlite3_column_int64(statement, COLUMN_LOCATION_ID);
+    snprintf(event->location.address, sizeof(event->location.address), "%s", address);
+    snprintf(event->location.city, sizeof(event->location.city), "%s", city);
+    return event->location.id > 0;
 }
 
 static bool column_parse_date(sqlite3_stmt *statement, int column, Date *date) {
@@ -576,6 +721,26 @@ static bool event_store_migrate(EventStore *store) {
         if (!event_store_migrate_step(store, step)) {
             return false;
         }
+    }
+    return true;
+}
+
+// Reports a database whose links between tables are broken, for example by a bad migration,
+// rather than letting it fail later in confusing ways.
+static bool event_store_check_foreign_keys(EventStore *store) {
+    sqlite3_stmt *statement = NULL;
+    int result = sqlite3_prepare_v2(store->database, "PRAGMA foreign_key_check;", -1, &statement,
+                                    NULL);
+    if (result == SQLITE_OK) {
+        result = sqlite3_step(statement);
+    }
+    sqlite3_finalize(statement);
+    if (result == SQLITE_ROW) {
+        snprintf(store->error, sizeof(store->error), "Database has broken links between tables.");
+        return false;
+    }
+    if (result != SQLITE_DONE) {
+        return event_store_fail(store, "Cannot check database links");
     }
     return true;
 }
