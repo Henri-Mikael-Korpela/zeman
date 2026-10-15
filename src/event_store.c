@@ -24,16 +24,35 @@ static const char schema_sql[] =
     "CREATE INDEX IF NOT EXISTS events_by_start_date ON events (start_date);"
     "CREATE INDEX IF NOT EXISTS events_by_created_at ON events (created_at);";
 
-static const char insert_sql[] =
-    "INSERT INTO events (title, start_date, start_time, end_date, end_time)"
-    " VALUES (?1, ?2, ?3, ?4, ?5);";
+// Schema versions, kept in PRAGMA user_version. The table above is version 0, and migration i
+// moves a database from version i to i + 1, so that databases from earlier builds still open.
+static const char *const migrations_sql[] = {
+    // Repeating events. A NULL repeat_unit means that the event happens once.
+    "ALTER TABLE events ADD COLUMN repeat_unit TEXT"
+    "    CHECK (repeat_unit IN ('day', 'week', 'month', 'year'));"
+    "ALTER TABLE events ADD COLUMN repeat_interval INTEGER NOT NULL DEFAULT 1"
+    "    CHECK (repeat_interval >= 1);",
+};
+enum { SCHEMA_VERSION = sizeof(migrations_sql) / sizeof(migrations_sql[0]) };
 
-// All-day events sort before timed events on the same start date.
+// Text stored in repeat_unit, indexed by RepeatUnit. NULL is stored for REPEAT_NONE.
+static const char *const repeat_unit_names[REPEAT_UNIT_COUNT] = {
+    NULL, "day", "week", "month", "year",
+};
+
+static const char insert_sql[] =
+    "INSERT INTO events"
+    " (title, start_date, start_time, end_date, end_time, repeat_unit, repeat_interval)"
+    " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);";
+
+// Ordered by time of day, all-day events first, because the caller lists the events of one
+// day at a time and a repeating event's first start date says nothing about that order.
 static const char select_range_sql[] =
-    "SELECT id, title, start_date, start_time, end_date, end_time, created_at FROM events"
-    " WHERE (start_date <= ?2 AND end_date >= ?1)"
+    "SELECT id, title, start_date, start_time, end_date, end_time, created_at,"
+    "       repeat_unit, repeat_interval FROM events"
+    " WHERE (start_date <= ?2 AND (end_date >= ?1 OR repeat_unit IS NOT NULL))"
     "    OR (substr(created_at, 1, 10) BETWEEN ?1 AND ?2)"
-    " ORDER BY start_date, start_time IS NOT NULL, start_time, id"
+    " ORDER BY start_time IS NOT NULL, start_time, start_date, id"
     " LIMIT ?3;";
 
 enum {
@@ -44,14 +63,19 @@ enum {
     COLUMN_END_DATE,
     COLUMN_END_TIME,
     COLUMN_CREATED_AT,
+    COLUMN_REPEAT_UNIT,
+    COLUMN_REPEAT_INTERVAL,
 };
 
 static bool event_store_fail(EventStore *store, const char *context);
+static bool event_store_migrate(EventStore *store);
+static bool event_store_migrate_step(EventStore *store, int32_t version);
 static int event_store_insert_bind(sqlite3_stmt *statement, const Event *event);
 static int bind_time(sqlite3_stmt *statement, int index, int32_t minute_of_day);
 static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event);
 static bool column_parse_date(sqlite3_stmt *statement, int column, Date *date);
 static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minute_of_day);
+static bool column_parse_repeat(sqlite3_stmt *statement, Event *event);
 
 bool event_store_open(EventStore *store, const char *path) {
     assert(store != NULL);
@@ -65,6 +89,9 @@ bool event_store_open(EventStore *store, const char *path) {
     }
     if (sqlite3_exec(store->database, schema_sql, NULL, NULL, NULL) != SQLITE_OK) {
         return event_store_fail(store, "Cannot create schema");
+    }
+    if (!event_store_migrate(store)) {
+        return false;
     }
     // Persistent: these statements live for the whole session.
     result = sqlite3_prepare_v3(store->database, insert_sql, -1, SQLITE_PREPARE_PERSISTENT,
@@ -100,6 +127,9 @@ int64_t event_store_insert(EventStore *store, const Event *event) {
     assert(event != NULL);
     assert(event->id == 0);
     assert(event->title[0] != '\0');
+    assert(event->repeat_unit >= 0);
+    assert(event->repeat_unit < REPEAT_UNIT_COUNT);
+    assert(event_duration_days(event) < event_repeat_gap_days_min(event));
 
     sqlite3_stmt *statement = store->statement_insert;
     int result = event_store_insert_bind(statement, event);
@@ -208,6 +238,15 @@ static int event_store_insert_bind(sqlite3_stmt *statement, const Event *event) 
     if (result == SQLITE_OK) {
         result = bind_time(statement, 5, event->end_minute);
     }
+    if (result == SQLITE_OK) {
+        // SQLITE_STATIC: the names are string literals.
+        const char *unit = repeat_unit_names[event->repeat_unit];
+        result = unit == NULL ? sqlite3_bind_null(statement, 6)
+                              : sqlite3_bind_text(statement, 6, unit, -1, SQLITE_STATIC);
+    }
+    if (result == SQLITE_OK) {
+        result = sqlite3_bind_int(statement, 7, event->repeat_interval);
+    }
     return result;
 }
 
@@ -261,6 +300,12 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     if (!time_parse(created_time, &event->created_minute)) {
         return false;
     }
+    if (date_to_day_number(event->end_date) < date_to_day_number(event->start_date)) {
+        return false;
+    }
+    if (!column_parse_repeat(statement, event)) {
+        return false;
+    }
     return event->id > 0;
 }
 
@@ -279,4 +324,79 @@ static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minu
         return true;
     }
     return time_parse(text, minute_of_day);
+}
+
+// Checks the same rules as the form, because the rest of the program relies on them: a known
+// unit, an interval in range, and occurrences that do not overlap.
+static bool column_parse_repeat(sqlite3_stmt *statement, Event *event) {
+    const char *unit = (const char *)sqlite3_column_text(statement, COLUMN_REPEAT_UNIT);
+    event->repeat_unit = unit == NULL ? REPEAT_NONE : REPEAT_UNIT_COUNT;
+    for (int32_t i = REPEAT_NONE + 1; unit != NULL && i < REPEAT_UNIT_COUNT; i++) {
+        if (strcmp(unit, repeat_unit_names[i]) == 0) {
+            event->repeat_unit = i;
+        }
+    }
+    if (event->repeat_unit == REPEAT_UNIT_COUNT) {
+        return false;
+    }
+
+    int64_t interval = sqlite3_column_int64(statement, COLUMN_REPEAT_INTERVAL);
+    if (interval < 1 || interval > REPEAT_INTERVAL_MAX) {
+        return false;
+    }
+    event->repeat_interval = (int32_t)interval;
+    return event_duration_days(event) < event_repeat_gap_days_min(event);
+}
+
+static bool event_store_migrate(EventStore *store) {
+    sqlite3_stmt *statement = NULL;
+    int result = sqlite3_prepare_v2(store->database, "PRAGMA user_version;", -1, &statement,
+                                    NULL);
+    if (result == SQLITE_OK) {
+        result = sqlite3_step(statement);
+    }
+    int32_t version = result == SQLITE_ROW ? sqlite3_column_int(statement, 0) : -1;
+    sqlite3_finalize(statement);
+    if (version < 0) {
+        return event_store_fail(store, "Cannot read schema version");
+    }
+    if (version > SCHEMA_VERSION) {
+        snprintf(store->error, sizeof(store->error),
+                 "Database is from a newer version of this program.");
+        return false;
+    }
+    // Bounded by SCHEMA_VERSION, the number of migrations.
+    for (int32_t step = version; step < SCHEMA_VERSION; step++) {
+        if (!event_store_migrate_step(store, step)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// One transaction per step, so that a failed step leaves the database at the previous version.
+static bool event_store_migrate_step(EventStore *store, int32_t version) {
+    assert(version >= 0);
+    assert(version < SCHEMA_VERSION);
+    char set_version_sql[64];
+    snprintf(set_version_sql, sizeof(set_version_sql), "PRAGMA user_version = %d;",
+             (int)version + 1);
+
+    bool ok = sqlite3_exec(store->database, "BEGIN;", NULL, NULL, NULL) == SQLITE_OK;
+    if (ok) {
+        ok = sqlite3_exec(store->database, migrations_sql[version], NULL, NULL, NULL) ==
+             SQLITE_OK;
+    }
+    if (ok) {
+        ok = sqlite3_exec(store->database, set_version_sql, NULL, NULL, NULL) == SQLITE_OK;
+    }
+    if (ok) {
+        ok = sqlite3_exec(store->database, "COMMIT;", NULL, NULL, NULL) == SQLITE_OK;
+    }
+    if (!ok) {
+        event_store_fail(store, "Cannot migrate database");
+        // The message is already copied, so the rollback cannot overwrite it.
+        sqlite3_exec(store->database, "ROLLBACK;", NULL, NULL, NULL);
+    }
+    return ok;
 }

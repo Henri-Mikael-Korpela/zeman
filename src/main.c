@@ -58,16 +58,42 @@ typedef enum FormField {
     FORM_FIELD_START_TIME,
     FORM_FIELD_END_DATE,
     FORM_FIELD_END_TIME,
+    FORM_FIELD_REPEAT_DAYS,  // Shown only for "Every X days"
     FORM_FIELD_COUNT,
 } FormField;
 
-// No form field is being edited.
-enum { FORM_FIELD_NONE = -1 };
+enum {
+    // No form field is being edited.
+    FORM_FIELD_NONE = -1,
+    // Three digits for REPEAT_INTERVAL_MAX, plus the terminator.
+    REPEAT_DAYS_TEXT_SIZE = 4,
+};
 
 // Buffer size of each field, which raygui also uses to cap how much can be typed.
 static const int32_t form_field_sizes[FORM_FIELD_COUNT] = {
     EVENT_TITLE_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
+    REPEAT_DAYS_TEXT_SIZE,
 };
+
+// Choices in the form's repeat selector, in the order shown, and the unit each one means.
+typedef enum RepeatOption {
+    REPEAT_OPTION_NONE,
+    REPEAT_OPTION_WEEK,
+    REPEAT_OPTION_DAYS,
+    REPEAT_OPTION_MONTH,
+    REPEAT_OPTION_YEAR,
+    REPEAT_OPTION_COUNT,
+} RepeatOption;
+
+// raygui separates combo box items with semicolons.
+static const char repeat_option_labels[] =
+    "Does not repeat;Every week;Every X days;Every month;Every year";
+
+static const int32_t repeat_option_units[REPEAT_OPTION_COUNT] = {
+    REPEAT_NONE, REPEAT_WEEK, REPEAT_DAY, REPEAT_MONTH, REPEAT_YEAR,
+};
+
+static_assert(REPEAT_INTERVAL_MAX < 1000, "REPEAT_DAYS_TEXT_SIZE holds three digits.");
 
 // Cast because the constants come from different enums.
 static_assert((int)DATE_ISO_SIZE <= (int)EVENT_TITLE_SIZE, "Field fits the shared buffer.");
@@ -106,6 +132,7 @@ enum { KEY_STEP_COUNT = sizeof(key_steps) / sizeof(key_steps[0]) };
 
 typedef struct Form {
     int32_t field_active;  // FormField being edited, or FORM_FIELD_NONE
+    int repeat_option;     // RepeatOption; int because raygui's combo box writes it
     bool open;
     char text[FORM_FIELD_COUNT][EVENT_TITLE_SIZE];
     char error[EVENT_STORE_ERROR_SIZE];  // Why the last save failed, or empty
@@ -125,6 +152,14 @@ typedef struct App {
     bool store_open;
     char status[STATUS_SIZE];       // Message for the status bar, cleared on navigation
 } App;
+
+// The focused event and the days of its lead time: from its creation to the start of the
+// occurrence on the selected date.
+typedef struct Highlight {
+    const Event *event;  // NULL when nothing is highlighted
+    int32_t lead_first_day;
+    int32_t lead_last_day;
+} Highlight;
 
 typedef struct Layout {
     Rectangle header;
@@ -151,15 +186,16 @@ static Date grid_first_date(Date month);
 static void draw_header(App *app, Rectangle header);
 static void draw_weekdays(const Layout *layout);
 static void draw_grid(App *app, const Layout *layout);
+static Highlight highlight_compute(const App *app);
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
-                           const Event *focused);
+                           const Highlight *highlight);
 static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date, bool in_month);
 static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int32_t day_number,
                                             const Event *focused);
 static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_number,
                                   int32_t column);
 static void draw_grid_cell_event_bar(const Event *event, Rectangle bar_slot, int32_t day_number,
-                                     int32_t column);
+                                     int32_t start_day, int32_t column);
 static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
 static bool draw_panel_event_card(const App *app, const Event *event, Rectangle card);
@@ -169,13 +205,15 @@ static void draw_panel_form_field(Form *form, int32_t field, const char *label, 
 static void draw_status(const App *app, Rectangle status);
 static void form_open(Form *form, Date date);
 static void form_close(Form *form);
+static int32_t form_field_next(const Form *form, bool backwards);
 static const char *form_parse(const Form *form, Event *event);
 static bool form_parse_time(const char *text, int32_t *minute_of_day);
-static bool event_overlaps_day(const Event *event, int32_t day_number);
+static bool form_parse_repeat_days(const char *text, int32_t *days);
+static bool event_occurs_on_day(const Event *event, int32_t day_number);
 static bool event_created_on_day(const Event *event, int32_t day_number);
-static bool event_lead_contains_day(const Event *event, int32_t day_number);
 static Color event_color(const Event *event);
 static void event_format_range(const Event *event, char *buffer, size_t buffer_size);
+static void event_format_range_dates(const Event *event, char *buffer, size_t buffer_size);
 static void event_format_created(const Event *event, char *buffer, size_t buffer_size);
 static void event_format_lead(const Event *event, char *buffer, size_t buffer_size);
 static void format_date_time_short(Date date, int32_t minute_of_day, char *buffer,
@@ -259,8 +297,7 @@ static void app_handle_keys(App *app, const Layout *layout) {
         // Keys belong to the text box being edited; only Tab is ours, to move between fields.
         if (IsKeyPressed(KEY_TAB)) {
             bool backwards = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-            int32_t step = backwards ? FORM_FIELD_COUNT - 1 : 1;
-            app->form.field_active = (app->form.field_active + step) % FORM_FIELD_COUNT;
+            app->form.field_active = form_field_next(&app->form, backwards);
         }
         return;
     }
@@ -309,7 +346,7 @@ static void app_sync(App *app) {
 
     int32_t selected_day = date_to_day_number(app->selected);
     const Event *focused = app_event_find(app, app->event_focused_id);
-    if (focused == NULL || !event_overlaps_day(focused, selected_day)) {
+    if (focused == NULL || !event_occurs_on_day(focused, selected_day)) {
         app->event_focused_id = app_event_first_on_day(app, selected_day);
     }
 }
@@ -350,7 +387,7 @@ static const Event *app_event_find(const App *app, int64_t id) {
 
 static int64_t app_event_first_on_day(const App *app, int32_t day_number) {
     for (int32_t i = 0; i < app->event_count; i++) {
-        if (event_overlaps_day(&app->events[i], day_number)) {
+        if (event_occurs_on_day(&app->events[i], day_number)) {
             return app->events[i].id;
         }
     }
@@ -457,16 +494,37 @@ static void draw_weekdays(const Layout *layout) {
 // mid-frame never draws one month's days with another month's events.
 static void draw_grid(App *app, const Layout *layout) {
     int32_t first_day = date_to_day_number(grid_first_date(app->events_month));
-    const Event *focused = app_event_find(app, app->event_focused_id);
+    Highlight highlight = highlight_compute(app);
     for (int32_t cell_index = 0; cell_index < GRID_CELL_COUNT; cell_index++) {
         Rectangle cell = grid_cell_rectangle(layout, cell_index);
         int32_t column = cell_index % GRID_COLUMN_COUNT;
-        draw_grid_cell(app, cell, first_day + cell_index, column, focused);
+        draw_grid_cell(app, cell, first_day + cell_index, column, &highlight);
     }
 }
 
+static Highlight highlight_compute(const App *app) {
+    Highlight highlight = { NULL, 0, 0 };
+    const Event *event = app_event_find(app, app->event_focused_id);
+    if (event == NULL) {
+        return highlight;
+    }
+    // A click earlier in this frame may have moved the selection off the focused event.
+    int32_t start_day = 0;
+    if (!event_occurrence_on_day(event, date_to_day_number(app->selected), &start_day)) {
+        return highlight;
+    }
+
+    int32_t created_day = date_to_day_number(event->created_date);
+    highlight.event = event;
+    // An event added after its occurrence began runs its lead time backwards.
+    highlight.lead_first_day = created_day < start_day ? created_day : start_day;
+    highlight.lead_last_day = created_day < start_day ? start_day : created_day;
+    assert(highlight.lead_first_day <= highlight.lead_last_day);
+    return highlight;
+}
+
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
-                           const Event *focused) {
+                           const Highlight *highlight) {
     Date date = date_from_day_number(day_number);
     bool in_month = date.month == app->events_month.month;
     bool hovered = CheckCollisionPointRec(GetMousePosition(), cell);
@@ -479,15 +537,15 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
         fill = style_color(BASE_COLOR_FOCUSED);
     }
     DrawRectangleRec(cell, fill);
-    if (focused != NULL) {
-        if (event_lead_contains_day(focused, day_number)) {
-            DrawRectangleRec(cell, Fade(event_color(focused), LEAD_TINT_ALPHA));
+    if (highlight->event != NULL) {
+        if (highlight->lead_first_day <= day_number && day_number <= highlight->lead_last_day) {
+            DrawRectangleRec(cell, Fade(event_color(highlight->event), LEAD_TINT_ALPHA));
         }
     }
     DrawRectangleLinesEx(cell, 1, style_color(BORDER_COLOR_NORMAL));
 
     draw_grid_cell_day_number(app, cell, date, in_month);
-    draw_grid_cell_creation_markers(app, cell, day_number, focused);
+    draw_grid_cell_creation_markers(app, cell, day_number, highlight->event);
     draw_grid_cell_events(app, cell, day_number, column);
 
     if (date_equal(date, app->selected)) {
@@ -549,21 +607,30 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
 
     int32_t overlap_count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
-        if (event_overlaps_day(&app->events[i], day_number)) {
+        if (event_occurs_on_day(&app->events[i], day_number)) {
             overlap_count++;
         }
     }
     // When not all fit, the last slot says how many are hidden instead of showing a bar.
     int32_t bar_count = overlap_count <= slot_count ? overlap_count : slot_count - 1;
 
+    // Multi-day events first, then one-day events, so that a multi-day bar keeps its row from
+    // one day to the next instead of moving below whatever one-day events each day has.
     int32_t bar_index = 0;
-    for (int32_t i = 0; i < app->event_count && bar_index < bar_count; i++) {
-        const Event *event = &app->events[i];
-        if (event_overlaps_day(event, day_number)) {
-            Rectangle slot = { cell.x, top + (float)bar_index * slot_height, cell.width,
-                               EVENT_BAR_HEIGHT_PIXELS };
-            draw_grid_cell_event_bar(event, slot, day_number, column);
-            bar_index++;
+    for (int32_t pass = 0; pass < 2; pass++) {
+        bool multi_day_pass = pass == 0;
+        for (int32_t i = 0; i < app->event_count && bar_index < bar_count; i++) {
+            const Event *event = &app->events[i];
+            int32_t start_day = 0;
+            if ((event_duration_days(event) > 0) != multi_day_pass) {
+                continue;
+            }
+            if (event_occurrence_on_day(event, day_number, &start_day)) {
+                Rectangle slot = { cell.x, top + (float)bar_index * slot_height, cell.width,
+                                   EVENT_BAR_HEIGHT_PIXELS };
+                draw_grid_cell_event_bar(event, slot, day_number, start_day, column);
+                bar_index++;
+            }
         }
     }
     if (overlap_count > bar_count) {
@@ -574,10 +641,12 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
     }
 }
 
+// start_day is the start of the occurrence that covers day_number.
 static void draw_grid_cell_event_bar(const Event *event, Rectangle bar_slot, int32_t day_number,
-                                     int32_t column) {
-    bool starts_here = day_number == date_to_day_number(event->start_date);
-    bool ends_here = day_number == date_to_day_number(event->end_date);
+                                     int32_t start_day, int32_t column) {
+    assert(start_day <= day_number);
+    bool starts_here = day_number == start_day;
+    bool ends_here = day_number == start_day + event_duration_days(event);
     // Multi-day events run edge to edge between days, so that they read as one bar.
     float left = bar_slot.x + (starts_here ? 4.0f : 0.0f);
     float right = bar_slot.x + bar_slot.width - (ends_here ? 4.0f : 0.0f);
@@ -644,7 +713,8 @@ static void draw_panel_events(App *app, Rectangle body) {
     int32_t hidden_count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
         const Event *event = &app->events[i];
-        if (!event_overlaps_day(event, selected_day)) {
+        int32_t start_day = 0;
+        if (!event_occurrence_on_day(event, selected_day, &start_day)) {
             continue;
         }
         if (y + EVENT_CARD_HEIGHT_PIXELS > list_bottom) {
@@ -652,7 +722,9 @@ static void draw_panel_events(App *app, Rectangle body) {
             continue;
         }
         Rectangle card = { body.x, y, body.width, EVENT_CARD_HEIGHT_PIXELS };
-        if (draw_panel_event_card(app, event, card)) {
+        // The card shows this day's occurrence, so its dates and lead time are for this day.
+        Event occurrence = event_occurrence_at(event, start_day);
+        if (draw_panel_event_card(app, &occurrence, card)) {
             app->event_focused_id = event->id;
         }
         y += EVENT_CARD_HEIGHT_PIXELS + EVENT_CARD_GAP_PIXELS;
@@ -735,6 +807,15 @@ static void draw_panel_form(App *app, Rectangle body) {
                           (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
     draw_panel_form_field(form, FORM_FIELD_END_TIME, "Time",
                           (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
+    y += row_height;
+    draw_text("Repeat", body.x, y - TEXT_LINE_HEIGHT_PIXELS, TEXT_SIZE_PIXELS,
+              style_color(TEXT_COLOR_NORMAL));
+    GuiComboBox((Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS }, repeat_option_labels,
+                &form->repeat_option);
+    if (form->repeat_option == REPEAT_OPTION_DAYS) {
+        draw_panel_form_field(form, FORM_FIELD_REPEAT_DAYS, "Days",
+                              (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
+    }
 
     y += FIELD_HEIGHT_PIXELS + 12;
     Color dim = style_color(TEXT_COLOR_DISABLED);
@@ -791,15 +872,31 @@ static void draw_status(const App *app, Rectangle status) {
 
 static void form_open(Form *form, Date date) {
     assert(!form->open);
-    *form = (Form){ .field_active = FORM_FIELD_TITLE, .open = true };
+    *form = (Form){ .field_active = FORM_FIELD_TITLE, .repeat_option = REPEAT_OPTION_NONE,
+                    .open = true };
     date_format_iso(date, form->text[FORM_FIELD_START_DATE], DATE_ISO_SIZE);
     date_format_iso(date, form->text[FORM_FIELD_END_DATE], DATE_ISO_SIZE);
+    // A starting value, so that choosing "Every X days" shows what to type.
+    snprintf(form->text[FORM_FIELD_REPEAT_DAYS], REPEAT_DAYS_TEXT_SIZE, "2");
 }
 
 static void form_close(Form *form) {
     assert(form->open);
     form->open = false;
     form->field_active = FORM_FIELD_NONE;
+}
+
+// The field after the active one for Tab, skipping the days field while it is hidden.
+static int32_t form_field_next(const Form *form, bool backwards) {
+    assert(form->field_active >= 0);
+    assert(form->field_active < FORM_FIELD_COUNT);
+    int32_t step = backwards ? FORM_FIELD_COUNT - 1 : 1;
+    int32_t field = (form->field_active + step) % FORM_FIELD_COUNT;
+    if (field == FORM_FIELD_REPEAT_DAYS && form->repeat_option != REPEAT_OPTION_DAYS) {
+        field = (field + step) % FORM_FIELD_COUNT;
+    }
+    assert(field != FORM_FIELD_REPEAT_DAYS || form->repeat_option == REPEAT_OPTION_DAYS);
+    return field;
 }
 
 // Fills event from the form. Returns NULL on success, or a message saying what to fix.
@@ -825,6 +922,16 @@ static const char *form_parse(const Form *form, Event *event) {
     if (!form_parse_time(form->text[FORM_FIELD_END_TIME], &event->end_minute)) {
         return "End time must be HH:MM.";
     }
+    assert(form->repeat_option >= 0);
+    assert(form->repeat_option < REPEAT_OPTION_COUNT);
+    event->repeat_unit = repeat_option_units[form->repeat_option];
+    event->repeat_interval = 1;
+    if (form->repeat_option == REPEAT_OPTION_DAYS) {
+        if (!form_parse_repeat_days(form->text[FORM_FIELD_REPEAT_DAYS],
+                                    &event->repeat_interval)) {
+            return "Days must be 1 to 999.";
+        }
+    }
 
     int32_t start_day = date_to_day_number(event->start_date);
     int32_t end_day = date_to_day_number(event->end_date);
@@ -838,6 +945,10 @@ static const char *form_parse(const Form *form, Event *event) {
             }
         }
     }
+    // Overlapping occurrences would make a day show the same event twice.
+    if (event_duration_days(event) >= event_repeat_gap_days_min(event)) {
+        return "Event must end before it repeats.";
+    }
     return NULL;
 }
 
@@ -850,24 +961,31 @@ static bool form_parse_time(const char *text, int32_t *minute_of_day) {
     return time_parse(text, minute_of_day);
 }
 
-static bool event_overlaps_day(const Event *event, int32_t day_number) {
-    int32_t start_day = date_to_day_number(event->start_date);
-    int32_t end_day = date_to_day_number(event->end_date);
-    assert(start_day <= end_day);
-    return start_day <= day_number && day_number <= end_day;
+// Digits only, so that signs, spaces and zero are rejected.
+static bool form_parse_repeat_days(const char *text, int32_t *days) {
+    int32_t result = 0;
+    int32_t digit_count = 0;
+    for (int32_t i = 0; i < REPEAT_DAYS_TEXT_SIZE && text[i] != '\0'; i++) {
+        if (text[i] < '0' || text[i] > '9') {
+            return false;
+        }
+        result = result * 10 + (text[i] - '0');
+        digit_count++;
+    }
+    if (digit_count == 0 || result < 1 || result > REPEAT_INTERVAL_MAX) {
+        return false;
+    }
+    *days = result;
+    return true;
+}
+
+static bool event_occurs_on_day(const Event *event, int32_t day_number) {
+    int32_t start_day = 0;
+    return event_occurrence_on_day(event, day_number, &start_day);
 }
 
 static bool event_created_on_day(const Event *event, int32_t day_number) {
     return date_to_day_number(event->created_date) == day_number;
-}
-
-// The lead time runs from creation to start, or backwards for events added after they began.
-static bool event_lead_contains_day(const Event *event, int32_t day_number) {
-    int32_t created_day = date_to_day_number(event->created_date);
-    int32_t start_day = date_to_day_number(event->start_date);
-    int32_t first_day = created_day < start_day ? created_day : start_day;
-    int32_t last_day = created_day < start_day ? start_day : created_day;
-    return first_day <= day_number && day_number <= last_day;
 }
 
 static Color event_color(const Event *event) {
@@ -875,7 +993,22 @@ static Color event_color(const Event *event) {
     return event_colors[event->id % EVENT_COLOR_COUNT];
 }
 
+// The dates and times, followed by how the event repeats, if it does.
 static void event_format_range(const Event *event, char *buffer, size_t buffer_size) {
+    event_format_range_dates(event, buffer, buffer_size);
+    // The longest is "every 999 days".
+    char repeat[32];
+    event_format_repeat(event, repeat, sizeof(repeat));
+    if (repeat[0] != '\0') {
+        size_t length = strlen(buffer);
+        assert(length < buffer_size);
+        // Cutting the text short is acceptable: the card clips long lines anyway.
+        int written = snprintf(buffer + length, buffer_size - length, ", %s", repeat);
+        assert(written > 0);
+    }
+}
+
+static void event_format_range_dates(const Event *event, char *buffer, size_t buffer_size) {
     char start[TEXT_LINE_SIZE] = "";
     char end[TEXT_LINE_SIZE] = "";
     if (date_equal(event->start_date, event->end_date)) {
@@ -912,30 +1045,34 @@ static void event_format_created(const Event *event, char *buffer, size_t buffer
 }
 
 // Days between creation and start. On the start day itself, hours and minutes when the
-// start has a time, because "0 days" says nothing.
+// start has a time, because "0 days" says nothing. A repeating event is measured to the
+// occurrence shown, which "this date" says, because "start" would suggest the first one.
 static void event_format_lead(const Event *event, char *buffer, size_t buffer_size) {
+    const char *target = event->repeat_unit == REPEAT_NONE ? "start" : "this date";
     int32_t lead_days = date_to_day_number(event->start_date) -
                         date_to_day_number(event->created_date);
     if (lead_days > 0) {
-        snprintf(buffer, buffer_size, "%" PRId32 " day%s before start", lead_days,
-                 lead_days == 1 ? "" : "s");
+        snprintf(buffer, buffer_size, "%" PRId32 " day%s before %s", lead_days,
+                 lead_days == 1 ? "" : "s", target);
         return;
     }
     if (lead_days < 0) {
-        snprintf(buffer, buffer_size, "Added %" PRId32 " day%s after start", -lead_days,
-                 lead_days == -1 ? "" : "s");
+        snprintf(buffer, buffer_size, "Added %" PRId32 " day%s after %s", -lead_days,
+                 lead_days == -1 ? "" : "s", target);
         return;
     }
     if (event->start_minute == TIME_NONE) {
-        snprintf(buffer, buffer_size, "Created on the start day");
+        snprintf(buffer, buffer_size, "%s",
+                 event->repeat_unit == REPEAT_NONE ? "Created on the start day"
+                                                   : "Created on this date");
         return;
     }
 
     int32_t lead_minutes = event->start_minute - event->created_minute;
     int32_t magnitude = lead_minutes < 0 ? -lead_minutes : lead_minutes;
     const char *direction = lead_minutes < 0 ? "after" : "before";
-    snprintf(buffer, buffer_size, "%" PRId32 " h %02" PRId32 " min %s start", magnitude / 60,
-             magnitude % 60, direction);
+    snprintf(buffer, buffer_size, "%" PRId32 " h %02" PRId32 " min %s %s", magnitude / 60,
+             magnitude % 60, direction, target);
 }
 
 // "15 Oct" or "15 Oct 09:00".

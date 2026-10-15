@@ -81,6 +81,7 @@ endif()
 add_executable(calendar
     src/main.c
     src/calendar.c
+    src/event.c
     src/event_store.c
     src/raygui_impl.c
 )

@@ -31,11 +31,13 @@ cmake --build build
 
 Select a day to see its events in the panel on the right, and use **New event** to add one. Start and end dates are `YYYY-MM-DD`; times are `HH:MM` and optional (leave both empty for an all-day event).
 
+An event can repeat every week, every X days, every month or every year. Monthly and yearly events keep the same date, so an event on the 31st skips months without one, and an event on 29 February appears only in leap years. Each repetition must end before the next one starts.
+
 Each event records when it was created:
 
 - A colored dot in a day cell marks the day an event was created.
-- Selecting an event tints the days from its creation to its start, and its card shows how long that lead time was.
+- Selecting an event tints the days from its creation to its start (for a repeating event, to the occurrence on the selected day), and its card shows how long that lead time was.
 
 Keys: arrows move by a day or a week, Page Up/Page Down change month, Home jumps to today, Tab moves between form fields, and Escape cancels the form.
 
-Events are stored in `calendar.db`, an SQLite database next to the executable (for example `build/calendar.db`). Deleting the build directory deletes the events.
+Events are stored in `calendar.db`, an SQLite database next to the executable (for example `build/calendar.db`). Deleting the build directory deletes the events. Databases from earlier versions are upgraded automatically when opened.
