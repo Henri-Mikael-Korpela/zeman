@@ -142,6 +142,7 @@ typedef struct App {
     Event events[EVENT_COUNT_MAX];  // Events of the visible six weeks, ordered by start
     EventStore store;
     int64_t event_focused_id;       // Event whose lead time is highlighted, or 0
+    int64_t event_delete_id;        // Event waiting for the user to confirm deleting, or 0
     Date today;
     Date selected;
     Date events_month;              // First day of the month that events[] was loaded for
@@ -180,6 +181,7 @@ static void app_load_events(App *app, Date month);
 static const Event *app_event_find(const App *app, int64_t id);
 static int64_t app_event_first_on_day(const App *app, int32_t day_number);
 static void app_form_submit(App *app);
+static void app_event_delete(App *app, int64_t id);
 static Layout layout_compute(float width, float height);
 static Rectangle grid_cell_rectangle(const Layout *layout, int32_t cell_index);
 static Date grid_first_date(Date month);
@@ -198,7 +200,7 @@ static void draw_grid_cell_event_bar(const Event *event, Rectangle bar_slot, int
                                      int32_t start_day, int32_t column);
 static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
-static bool draw_panel_event_card(const App *app, const Event *event, Rectangle card);
+static bool draw_panel_event_card(App *app, const Event *event, Rectangle card);
 static void draw_panel_legend(Rectangle area);
 static void draw_panel_form(App *app, Rectangle body);
 static void draw_panel_form_field(Form *form, int32_t field, const char *label, Rectangle box);
@@ -291,6 +293,7 @@ static void app_handle_keys(App *app, const Layout *layout) {
         if (app->form.open) {
             form_close(&app->form);
         }
+        app->event_delete_id = 0;
         return;
     }
     if (app->form.field_active != FORM_FIELD_NONE) {
@@ -332,6 +335,8 @@ static void app_select(App *app, Date date) {
     }
     app->selected = date;
     app->event_focused_id = 0;
+    // A confirmation belongs to the card it was asked on.
+    app->event_delete_id = 0;
     app->status[0] = '\0';
 }
 
@@ -418,6 +423,27 @@ static void app_form_submit(App *app) {
     app->event_focused_id = id;
     app->events_stale = true;
     snprintf(app->status, sizeof(app->status), "Saved \"%s\".", event.title);
+}
+
+static void app_event_delete(App *app, int64_t id) {
+    assert(id > 0);
+    app->event_delete_id = 0;
+    char title[EVENT_TITLE_SIZE] = "";
+    const Event *event = app_event_find(app, id);
+    if (event != NULL) {
+        snprintf(title, sizeof(title), "%s", event->title);
+    }
+
+    if (!event_store_delete(&app->store, id)) {
+        snprintf(app->status, sizeof(app->status), "%s", app->store.error);
+        // The event may be gone, so show the real state.
+        app->events_stale = true;
+        return;
+    }
+    // events[] is reloaded by the next app_sync; this frame still draws the old list.
+    app->event_focused_id = 0;
+    app->events_stale = true;
+    snprintf(app->status, sizeof(app->status), "Deleted \"%s\".", title);
 }
 
 static Layout layout_compute(float width, float height) {
@@ -700,6 +726,7 @@ static void draw_panel_events(App *app, Rectangle body) {
         GuiDisable();
     }
     if (GuiButton(button, "New event")) {
+        app->event_delete_id = 0;
         form_open(&app->form, app->selected);
     }
     GuiEnable();
@@ -745,21 +772,47 @@ static void draw_panel_events(App *app, Rectangle body) {
                                    body.width, LEGEND_HEIGHT_PIXELS });
 }
 
-// Returns true when the card was clicked.
-static bool draw_panel_event_card(const App *app, const Event *event, Rectangle card) {
-    bool focused = event->id == app->event_focused_id;
-    bool hovered = CheckCollisionPointRec(GetMousePosition(), card);
-    DrawRectangleRec(card, style_color(hovered ? BASE_COLOR_FOCUSED : BASE_COLOR_NORMAL));
-    DrawRectangleRec((Rectangle){ card.x, card.y, 6, card.height }, event_color(event));
-    DrawRectangleLinesEx(card, focused ? 2.0f : 1.0f,
-                         style_color(focused ? BORDER_COLOR_PRESSED : BORDER_COLOR_NORMAL));
-
+// Returns true when the card itself was clicked, not one of its buttons. Deleting asks first, on
+// the card, because it is permanent and also removes every repeat of a repeating event.
+static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) {
     const float x = card.x + 16;
     const float line = (float)TEXT_LINE_HEIGHT_PIXELS;
+    const Rectangle delete_button = { card.x + card.width - 92, card.y + 8, 80, 28 };
+    const Rectangle confirm_button = { x, card.y + card.height - 44, 110, 32 };
+    const Rectangle cancel_button = { x + 122, confirm_button.y, 110, 32 };
+    const bool confirming = event->id == app->event_delete_id;
+    const bool focused = event->id == app->event_focused_id;
+    const Vector2 mouse = GetMousePosition();
+    bool hovered = CheckCollisionPointRec(mouse, card);
+
+    DrawRectangleRec(card, style_color(hovered ? BASE_COLOR_FOCUSED : BASE_COLOR_NORMAL));
+    DrawRectangleRec((Rectangle){ card.x, card.y, 6, card.height }, event_color(event));
+    DrawRectangleLinesEx(card, focused || confirming ? 2.0f : 1.0f,
+                         style_color(focused ? BORDER_COLOR_PRESSED : BORDER_COLOR_NORMAL));
+
     char text[TEXT_LINE_SIZE];
-    // Clip to the card, because titles can be wider than the panel.
-    BeginScissorMode((int)card.x, (int)card.y, (int)card.width - 4, (int)card.height);
+    // Clip to the card, because titles can be wider than the panel; the title also stops short
+    // of the delete button.
+    BeginScissorMode((int)card.x, (int)card.y, (int)(card.width - 100), (int)card.height);
     draw_text(event->title, x, card.y + 8, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    EndScissorMode();
+
+    if (confirming) {
+        const char *question = event->repeat_unit == REPEAT_NONE
+                                   ? "Delete this event?"
+                                   : "Delete it and all repeats?";
+        draw_text(question, x, card.y + 8 + line, TEXT_SIZE_PIXELS, error_color);
+        if (GuiButton(confirm_button, "Delete")) {
+            app_event_delete(app, event->id);
+        }
+        if (GuiButton(cancel_button, "Cancel")) {
+            app->event_delete_id = 0;
+        }
+        // Only the buttons act while confirming, so that a stray click cannot change focus.
+        return false;
+    }
+
+    BeginScissorMode((int)card.x, (int)card.y, (int)card.width - 4, (int)card.height);
     event_format_range(event, text, sizeof(text));
     draw_text(text, x, card.y + 8 + line, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
     event_format_created(event, text, sizeof(text));
@@ -768,7 +821,11 @@ static bool draw_panel_event_card(const App *app, const Event *event, Rectangle 
     draw_text(text, x, card.y + 8 + 3 * line, TEXT_SIZE_PIXELS, event_color(event));
     EndScissorMode();
 
-    return hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    if (GuiButton(delete_button, "Delete")) {
+        app->event_delete_id = event->id;
+    }
+    return hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+           !CheckCollisionPointRec(mouse, delete_button);
 }
 
 // Explains the two grid markings that are not self-evident.

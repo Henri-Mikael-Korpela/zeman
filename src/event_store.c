@@ -47,6 +47,8 @@ static const char insert_sql[] =
 
 // Ordered by time of day, all-day events first, because the caller lists the events of one
 // day at a time and a repeating event's first start date says nothing about that order.
+static const char delete_sql[] = "DELETE FROM events WHERE id = ?1;";
+
 static const char select_range_sql[] =
     "SELECT id, title, start_date, start_time, end_date, end_time, created_at,"
     "       repeat_unit, repeat_interval FROM events"
@@ -104,8 +106,14 @@ bool event_store_open(EventStore *store, const char *path) {
     if (result != SQLITE_OK) {
         return event_store_fail(store, "Cannot prepare select");
     }
+    result = sqlite3_prepare_v3(store->database, delete_sql, -1, SQLITE_PREPARE_PERSISTENT,
+                                &store->statement_delete, NULL);
+    if (result != SQLITE_OK) {
+        return event_store_fail(store, "Cannot prepare delete");
+    }
     assert(store->statement_insert != NULL);
     assert(store->statement_select_range != NULL);
+    assert(store->statement_delete != NULL);
     return true;
 }
 
@@ -114,6 +122,7 @@ void event_store_close(EventStore *store) {
     // sqlite3_finalize and sqlite3_close accept NULL, so a partly opened store closes too.
     sqlite3_finalize(store->statement_insert);
     sqlite3_finalize(store->statement_select_range);
+    sqlite3_finalize(store->statement_delete);
     int result = sqlite3_close(store->database);
     // Every statement is finalized above, so the only failure left would be a programmer error.
     assert(result == SQLITE_OK);
@@ -147,6 +156,29 @@ int64_t event_store_insert(EventStore *store, const Event *event) {
     int64_t id = sqlite3_last_insert_rowid(store->database);
     assert(id > 0);
     return id;
+}
+
+bool event_store_delete(EventStore *store, int64_t id) {
+    assert(store != NULL);
+    assert(store->statement_delete != NULL);
+    assert(id > 0);
+
+    sqlite3_stmt *statement = store->statement_delete;
+    int result = sqlite3_bind_int64(statement, 1, id);
+    if (result == SQLITE_OK) {
+        result = sqlite3_step(statement);
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    if (result != SQLITE_DONE) {
+        return event_store_fail(store, "Cannot delete event");
+    }
+    // Zero rows means the event was already gone, for example deleted from another tool.
+    if (sqlite3_changes(store->database) != 1) {
+        snprintf(store->error, sizeof(store->error), "Event no longer exists.");
+        return false;
+    }
+    return true;
 }
 
 int32_t event_store_load_range(EventStore *store, Date first, Date last,

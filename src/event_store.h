@@ -17,6 +17,7 @@ typedef struct EventStore {
     struct sqlite3 *database;
     struct sqlite3_stmt *statement_insert;
     struct sqlite3_stmt *statement_select_range;
+    struct sqlite3_stmt *statement_delete;
     char error[EVENT_STORE_ERROR_SIZE];  // Message for the last failed call
 } EventStore;
 
@@ -28,6 +29,9 @@ void event_store_close(EventStore *store);
 
 // Inserts the event and returns its new id, or 0 on failure. The database sets created_at.
 int64_t event_store_insert(EventStore *store, const Event *event);
+
+// Deletes the event with all its repeats. Returns false if it fails or the event is not there.
+bool event_store_delete(EventStore *store, int64_t id);
 
 // Loads events with an occurrence that may overlap [first, last], or created within it.
 // Repeating events that start before last are always included, because only the caller
