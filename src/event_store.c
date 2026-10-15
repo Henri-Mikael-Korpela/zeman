@@ -32,6 +32,9 @@ static const char *const migrations_sql[] = {
     "    CHECK (repeat_unit IN ('day', 'week', 'month', 'year'));"
     "ALTER TABLE events ADD COLUMN repeat_interval INTEGER NOT NULL DEFAULT 1"
     "    CHECK (repeat_interval >= 1);",
+    // Repetition end dates, inclusive. NULL repeats forever.
+    "ALTER TABLE events ADD COLUMN repeat_end_date TEXT"
+    "    CHECK (repeat_end_date IS NULL OR repeat_end_date >= start_date);",
 };
 enum { SCHEMA_VERSION = sizeof(migrations_sql) / sizeof(migrations_sql[0]) };
 
@@ -42,22 +45,28 @@ static const char *const repeat_unit_names[REPEAT_UNIT_COUNT] = {
 
 static const char insert_sql[] =
     "INSERT INTO events"
-    " (title, start_date, start_time, end_date, end_time, repeat_unit, repeat_interval)"
-    " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);";
+    " (title, start_date, start_time, end_date, end_time, repeat_unit, repeat_interval,"
+    "  repeat_end_date)"
+    " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);";
 
 // Ordered by time of day, all-day events first, because the caller lists the events of one
 // day at a time and a repeating event's first start date says nothing about that order.
-// Parameters 1 to 7 match insert_sql, so that both bind with event_store_bind_fields.
+// Parameters 1 to 8 match insert_sql, so that both bind with event_store_bind_fields.
 static const char update_sql[] =
     "UPDATE events SET title = ?1, start_date = ?2, start_time = ?3, end_date = ?4,"
-    " end_time = ?5, repeat_unit = ?6, repeat_interval = ?7 WHERE id = ?8;";
+    " end_time = ?5, repeat_unit = ?6, repeat_interval = ?7, repeat_end_date = ?8"
+    " WHERE id = ?9;";
 
 static const char delete_sql[] = "DELETE FROM events WHERE id = ?1;";
 
 static const char select_range_sql[] =
     "SELECT id, title, start_date, start_time, end_date, end_time, created_at,"
-    "       repeat_unit, repeat_interval FROM events"
-    " WHERE (start_date <= ?2 AND (end_date >= ?1 OR repeat_unit IS NOT NULL))"
+    "       repeat_unit, repeat_interval, repeat_end_date FROM events"
+    " WHERE (start_date <= ?2 AND (end_date >= ?1 OR (repeat_unit IS NOT NULL"
+    // A repeating event with an end is visible until its last occurrence ends: the end date
+    // plus one occurrence's length.
+    "        AND (repeat_end_date IS NULL OR julianday(repeat_end_date) + julianday(end_date)"
+    "             - julianday(start_date) >= julianday(?1)))))"
     "    OR (substr(created_at, 1, 10) BETWEEN ?1 AND ?2)"
     " ORDER BY start_time IS NOT NULL, start_time, start_date, id"
     " LIMIT ?3;";
@@ -72,6 +81,7 @@ enum {
     COLUMN_CREATED_AT,
     COLUMN_REPEAT_UNIT,
     COLUMN_REPEAT_INTERVAL,
+    COLUMN_REPEAT_END_DATE,
 };
 
 static bool event_store_fail(EventStore *store, const char *context);
@@ -180,7 +190,7 @@ bool event_store_update(EventStore *store, const Event *event) {
     sqlite3_stmt *statement = store->statement_update;
     int result = event_store_bind_fields(statement, event);
     if (result == SQLITE_OK) {
-        result = sqlite3_bind_int64(statement, 8, event->id);
+        result = sqlite3_bind_int64(statement, 9, event->id);
     }
     if (result == SQLITE_OK) {
         result = sqlite3_step(statement);
@@ -319,6 +329,16 @@ static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event) 
     if (result == SQLITE_OK) {
         result = sqlite3_bind_int(statement, 7, event->repeat_interval);
     }
+    if (result == SQLITE_OK) {
+        assert(!event->repeat_has_end || event->repeat_unit != REPEAT_NONE);
+        if (event->repeat_has_end) {
+            char repeat_end_iso[DATE_ISO_SIZE];
+            date_format_iso(event->repeat_end_date, repeat_end_iso, sizeof(repeat_end_iso));
+            result = sqlite3_bind_text(statement, 8, repeat_end_iso, -1, SQLITE_TRANSIENT);
+        } else {
+            result = sqlite3_bind_null(statement, 8);
+        }
+    }
     return result;
 }
 
@@ -417,6 +437,21 @@ static bool column_parse_repeat(sqlite3_stmt *statement, Event *event) {
         return false;
     }
     event->repeat_interval = (int32_t)interval;
+
+    // An end date on a one-time event means nothing, so it is ignored rather than rejected.
+    event->repeat_has_end = false;
+    if (event->repeat_unit != REPEAT_NONE) {
+        if (sqlite3_column_type(statement, COLUMN_REPEAT_END_DATE) != SQLITE_NULL) {
+            if (!column_parse_date(statement, COLUMN_REPEAT_END_DATE, &event->repeat_end_date)) {
+                return false;
+            }
+            if (date_to_day_number(event->repeat_end_date) <
+                date_to_day_number(event->start_date)) {
+                return false;
+            }
+            event->repeat_has_end = true;
+        }
+    }
     return event_duration_days(event) < event_repeat_gap_days_min(event);
 }
 

@@ -83,6 +83,13 @@ bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *st
     }
 
     assert(candidate <= day_number);
+    // The end date is inclusive: an occurrence starting on it still happens, in full. Earlier
+    // occurrences cannot cover the day instead, because they end before the candidate starts.
+    if (event->repeat_has_end) {
+        if (candidate > date_to_day_number(event->repeat_end_date)) {
+            return false;
+        }
+    }
     if (day_number - candidate > event_duration_days(event)) {
         return false;
     }

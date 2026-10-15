@@ -28,11 +28,13 @@ typedef struct Event {
     Date start_date;          // Start of the first occurrence
     Date end_date;            // End of the first occurrence
     Date created_date;        // Local date when the event was inserted
+    Date repeat_end_date;     // Last day an occurrence may start, if repeat_has_end
     int32_t start_minute;     // Minute of day, or TIME_NONE
     int32_t end_minute;       // Minute of day, or TIME_NONE
     int32_t created_minute;   // Local minute of day when the event was inserted
     int32_t repeat_unit;      // RepeatUnit
     int32_t repeat_interval;  // Units between occurrences; 1 ... REPEAT_INTERVAL_MAX
+    bool repeat_has_end;      // False repeats forever; always false for one-time events
     char title[EVENT_TITLE_SIZE];
 } Event;
 

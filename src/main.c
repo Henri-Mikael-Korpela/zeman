@@ -58,7 +58,8 @@ typedef enum FormField {
     FORM_FIELD_START_TIME,
     FORM_FIELD_END_DATE,
     FORM_FIELD_END_TIME,
-    FORM_FIELD_REPEAT_DAYS,  // Shown only for "Every X days"
+    FORM_FIELD_REPEAT_DAYS,      // Shown only for "Every X days"
+    FORM_FIELD_REPEAT_END_DATE,  // Shown only for repeating events; empty repeats forever
     FORM_FIELD_COUNT,
 } FormField;
 
@@ -72,7 +73,7 @@ enum {
 // Buffer size of each field, which raygui also uses to cap how much can be typed.
 static const int32_t form_field_sizes[FORM_FIELD_COUNT] = {
     EVENT_TITLE_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
-    REPEAT_DAYS_TEXT_SIZE,
+    REPEAT_DAYS_TEXT_SIZE, DATE_ISO_SIZE,
 };
 
 // Choices in the form's repeat selector, in the order shown, and the unit each one means.
@@ -210,6 +211,8 @@ static void form_open(Form *form, Date date);
 static void form_open_edit(Form *form, const Event *event);
 static void form_close(Form *form);
 static int32_t form_field_next(const Form *form, bool backwards);
+static bool form_field_visible(const Form *form, int32_t field);
+static float event_card_height(const Event *event);
 static const char *form_parse(const Form *form, Event *event);
 static bool form_parse_time(const char *text, int32_t *minute_of_day);
 static bool form_parse_repeat_days(const char *text, int32_t *days);
@@ -761,11 +764,12 @@ static void draw_panel_events(App *app, Rectangle body) {
         if (!event_occurrence_on_day(event, selected_day, &start_day)) {
             continue;
         }
-        if (y + EVENT_CARD_HEIGHT_PIXELS > list_bottom) {
+        float card_height = event_card_height(event);
+        if (y + card_height > list_bottom) {
             hidden_count++;
             continue;
         }
-        Rectangle card = { body.x, y, body.width, EVENT_CARD_HEIGHT_PIXELS };
+        Rectangle card = { body.x, y, body.width, card_height };
         // The card shows this day's occurrence, so its dates and lead time are for this day.
         Event occurrence = event_occurrence_at(event, start_day);
         if (draw_panel_event_card(app, &occurrence, card)) {
@@ -773,7 +777,7 @@ static void draw_panel_events(App *app, Rectangle body) {
             app->event_focused_id = event->id;
             form_open_edit(&app->form, event);
         }
-        y += EVENT_CARD_HEIGHT_PIXELS + EVENT_CARD_GAP_PIXELS;
+        y += card_height + EVENT_CARD_GAP_PIXELS;
         shown_count++;
     }
 
@@ -832,12 +836,22 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     }
 
     BeginScissorMode((int)card.x, (int)card.y, (int)card.width - 4, (int)card.height);
+    float y = card.y + 8 + line;
     event_format_range(event, text, sizeof(text));
-    draw_text(text, x, card.y + 8 + line, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    draw_text(text, x, y, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    if (event->repeat_has_end) {
+        y += line;
+        Date end = event->repeat_end_date;
+        snprintf(text, sizeof(text), "Repeats until %" PRId32 " %s %" PRId32, end.day,
+                 month_short_name(end.month), end.year);
+        draw_text(text, x, y, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    }
+    y += line;
     event_format_created(event, text, sizeof(text));
-    draw_text(text, x, card.y + 8 + 2 * line, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_DISABLED));
+    draw_text(text, x, y, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_DISABLED));
+    y += line;
     event_format_lead(event, text, sizeof(text));
-    draw_text(text, x, card.y + 8 + 3 * line, TEXT_SIZE_PIXELS, event_color(event));
+    draw_text(text, x, y, TEXT_SIZE_PIXELS, event_color(event));
     EndScissorMode();
 
     if (GuiButton(delete_button, "Delete")) {
@@ -889,17 +903,22 @@ static void draw_panel_form(App *app, Rectangle body) {
               style_color(TEXT_COLOR_NORMAL));
     GuiComboBox((Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS }, repeat_option_labels,
                 &form->repeat_option);
-    if (form->repeat_option == REPEAT_OPTION_DAYS) {
+    if (form_field_visible(form, FORM_FIELD_REPEAT_DAYS)) {
         draw_panel_form_field(form, FORM_FIELD_REPEAT_DAYS, "Days",
                               (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
     }
+    // The row is kept while hidden, so that the buttons do not move under the pointer.
+    y += row_height;
+    if (form_field_visible(form, FORM_FIELD_REPEAT_END_DATE)) {
+        draw_panel_form_field(form, FORM_FIELD_REPEAT_END_DATE, "Repeat until (optional)",
+                              (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+    }
 
+    // One hint line, so that the buttons still fit in the panel at the minimum window height.
     y += FIELD_HEIGHT_PIXELS + 12;
     Color dim = style_color(TEXT_COLOR_DISABLED);
-    draw_text("Dates: YYYY-MM-DD", body.x, y, TEXT_SIZE_PIXELS, dim);
-    draw_text("Times: HH:MM, optional", body.x, y + TEXT_LINE_HEIGHT_PIXELS, TEXT_SIZE_PIXELS,
-              dim);
-    y += 2 * TEXT_LINE_HEIGHT_PIXELS + 8;
+    draw_text("YYYY-MM-DD, HH:MM (optional)", body.x, y, TEXT_SIZE_PIXELS, dim);
+    y += TEXT_LINE_HEIGHT_PIXELS + 8;
     if (form->error[0] != '\0') {
         BeginScissorMode((int)body.x, (int)y, (int)body.width, TEXT_LINE_HEIGHT_PIXELS);
         draw_text(form->error, body.x, y, TEXT_SIZE_PIXELS, error_color);
@@ -981,6 +1000,10 @@ static void form_open_edit(Form *form, const Event *event) {
         snprintf(form->text[FORM_FIELD_REPEAT_DAYS], REPEAT_DAYS_TEXT_SIZE, "%" PRId32,
                  event->repeat_interval);
     }
+    if (event->repeat_has_end) {
+        date_format_iso(event->repeat_end_date, form->text[FORM_FIELD_REPEAT_END_DATE],
+                        DATE_ISO_SIZE);
+    }
     // Start with no field in edit mode, so that a click on Save or Cancel acts at once.
     form->field_active = FORM_FIELD_NONE;
 }
@@ -997,11 +1020,24 @@ static int32_t form_field_next(const Form *form, bool backwards) {
     assert(form->field_active < FORM_FIELD_COUNT);
     int32_t step = backwards ? FORM_FIELD_COUNT - 1 : 1;
     int32_t field = (form->field_active + step) % FORM_FIELD_COUNT;
-    if (field == FORM_FIELD_REPEAT_DAYS && form->repeat_option != REPEAT_OPTION_DAYS) {
+    // Bounded: the title field is always visible, so at most FORM_FIELD_COUNT steps are taken.
+    for (int32_t i = 0; i < FORM_FIELD_COUNT && !form_field_visible(form, field); i++) {
         field = (field + step) % FORM_FIELD_COUNT;
     }
-    assert(field != FORM_FIELD_REPEAT_DAYS || form->repeat_option == REPEAT_OPTION_DAYS);
+    assert(form_field_visible(form, field));
     return field;
+}
+
+static bool form_field_visible(const Form *form, int32_t field) {
+    assert(field >= 0);
+    assert(field < FORM_FIELD_COUNT);
+    if (field == FORM_FIELD_REPEAT_DAYS) {
+        return form->repeat_option == REPEAT_OPTION_DAYS;
+    }
+    if (field == FORM_FIELD_REPEAT_END_DATE) {
+        return form->repeat_option != REPEAT_OPTION_NONE;
+    }
+    return true;
 }
 
 // Fills event from the form. Returns NULL on success, or a message saying what to fix.
@@ -1037,6 +1073,14 @@ static const char *form_parse(const Form *form, Event *event) {
             return "Days must be 1 to 999.";
         }
     }
+    // Ignored for one-time events, where the field is hidden.
+    const char *repeat_end = form->text[FORM_FIELD_REPEAT_END_DATE];
+    event->repeat_has_end = event->repeat_unit != REPEAT_NONE && repeat_end[0] != '\0';
+    if (event->repeat_has_end) {
+        if (!date_parse_iso(repeat_end, &event->repeat_end_date)) {
+            return "Repeat until must be YYYY-MM-DD.";
+        }
+    }
 
     int32_t start_day = date_to_day_number(event->start_date);
     int32_t end_day = date_to_day_number(event->end_date);
@@ -1048,6 +1092,11 @@ static const char *form_parse(const Form *form, Event *event) {
             if (event->end_minute < event->start_minute) {
                 return "End time is before start.";
             }
+        }
+    }
+    if (event->repeat_has_end) {
+        if (date_to_day_number(event->repeat_end_date) < start_day) {
+            return "Repeat until is before start.";
         }
     }
     // Overlapping occurrences would make a day show the same event twice.
@@ -1091,6 +1140,12 @@ static bool event_occurs_on_day(const Event *event, int32_t day_number) {
 
 static bool event_created_on_day(const Event *event, int32_t day_number) {
     return date_to_day_number(event->created_date) == day_number;
+}
+
+// One more line for a repeating event that ends, to say when.
+static float event_card_height(const Event *event) {
+    float extra = event->repeat_has_end ? (float)TEXT_LINE_HEIGHT_PIXELS : 0.0f;
+    return (float)EVENT_CARD_HEIGHT_PIXELS + extra;
 }
 
 static Color event_color(const Event *event) {
