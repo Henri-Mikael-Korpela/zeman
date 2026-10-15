@@ -131,6 +131,7 @@ static const KeyStep key_steps[] = {
 enum { KEY_STEP_COUNT = sizeof(key_steps) / sizeof(key_steps[0]) };
 
 typedef struct Form {
+    int64_t editing_id;    // Event being edited, or 0 for a new event
     int32_t field_active;  // FormField being edited, or FORM_FIELD_NONE
     int repeat_option;     // RepeatOption; int because raygui's combo box writes it
     bool open;
@@ -206,6 +207,7 @@ static void draw_panel_form(App *app, Rectangle body);
 static void draw_panel_form_field(Form *form, int32_t field, const char *label, Rectangle box);
 static void draw_status(const App *app, Rectangle status);
 static void form_open(Form *form, Date date);
+static void form_open_edit(Form *form, const Event *event);
 static void form_close(Form *form);
 static int32_t form_field_next(const Form *form, bool backwards);
 static const char *form_parse(const Form *form, Event *event);
@@ -411,18 +413,33 @@ static void app_form_submit(App *app) {
         snprintf(app->form.error, sizeof(app->form.error), "No database: cannot save.");
         return;
     }
-    int64_t id = event_store_insert(&app->store, &event);
-    if (id == 0) {
-        snprintf(app->form.error, sizeof(app->form.error), "%s", app->store.error);
-        return;
+    bool editing = app->form.editing_id != 0;
+    int64_t id = app->form.editing_id;
+    if (editing) {
+        event.id = id;
+        if (!event_store_update(&app->store, &event)) {
+            snprintf(app->form.error, sizeof(app->form.error), "%s", app->store.error);
+            return;
+        }
+    } else {
+        id = event_store_insert(&app->store, &event);
+        if (id == 0) {
+            snprintf(app->form.error, sizeof(app->form.error), "%s", app->store.error);
+            return;
+        }
     }
 
     form_close(&app->form);
-    // Show the new event at once, focused, so that its lead time is visible.
-    app_select(app, event.start_date);
+    // Show the event at once, focused, so that its lead time is visible. An edited event that
+    // still occurs on the selected day stays there, rather than jumping to its first start.
+    int32_t start_day = 0;
+    if (!event_occurrence_on_day(&event, date_to_day_number(app->selected), &start_day)) {
+        app_select(app, event.start_date);
+    }
     app->event_focused_id = id;
     app->events_stale = true;
-    snprintf(app->status, sizeof(app->status), "Saved \"%s\".", event.title);
+    snprintf(app->status, sizeof(app->status), "%s \"%s\".", editing ? "Updated" : "Saved",
+             event.title);
 }
 
 static void app_event_delete(App *app, int64_t id) {
@@ -752,7 +769,9 @@ static void draw_panel_events(App *app, Rectangle body) {
         // The card shows this day's occurrence, so its dates and lead time are for this day.
         Event occurrence = event_occurrence_at(event, start_day);
         if (draw_panel_event_card(app, &occurrence, card)) {
+            // Edit the event itself, not this occurrence, so that the form shows its first dates.
             app->event_focused_id = event->id;
+            form_open_edit(&app->form, event);
         }
         y += EVENT_CARD_HEIGHT_PIXELS + EVENT_CARD_GAP_PIXELS;
         shown_count++;
@@ -849,7 +868,8 @@ static void draw_panel_form(App *app, Rectangle body) {
     const float date_width = body.width - time_width - gap;
     const float time_x = body.x + date_width + gap;
 
-    draw_text("New event", body.x, body.y, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    draw_text(form->editing_id != 0 ? "Edit event" : "New event", body.x, body.y, TEXT_SIZE_PIXELS,
+              style_color(TEXT_COLOR_NORMAL));
     // Each field's label sits one line above its box, so leave room for the heading and it.
     float y = body.y + 2 * TEXT_LINE_HEIGHT_PIXELS + 12;
     draw_panel_form_field(form, FORM_FIELD_TITLE, "Title",
@@ -922,7 +942,7 @@ static void draw_status(const App *app, Rectangle status) {
     } else {
         snprintf(text, sizeof(text),
                  "%" PRId32 " events in view    Arrows: day/week    PgUp/PgDn: month    "
-                 "Home: today", app->event_count);
+                 "Click an event to edit", app->event_count);
     }
     GuiStatusBar(status, text);
 }
@@ -935,6 +955,34 @@ static void form_open(Form *form, Date date) {
     date_format_iso(date, form->text[FORM_FIELD_END_DATE], DATE_ISO_SIZE);
     // A starting value, so that choosing "Every X days" shows what to type.
     snprintf(form->text[FORM_FIELD_REPEAT_DAYS], REPEAT_DAYS_TEXT_SIZE, "2");
+}
+
+// Fills the form from a stored event. Saving then updates that event instead of adding one.
+static void form_open_edit(Form *form, const Event *event) {
+    assert(event->id > 0);
+    form_open(form, event->start_date);
+    form->editing_id = event->id;
+    snprintf(form->text[FORM_FIELD_TITLE], EVENT_TITLE_SIZE, "%s", event->title);
+    date_format_iso(event->end_date, form->text[FORM_FIELD_END_DATE], DATE_ISO_SIZE);
+    if (event->start_minute != TIME_NONE) {
+        time_format(event->start_minute, form->text[FORM_FIELD_START_TIME], TIME_TEXT_SIZE);
+    }
+    if (event->end_minute != TIME_NONE) {
+        time_format(event->end_minute, form->text[FORM_FIELD_END_TIME], TIME_TEXT_SIZE);
+    }
+
+    for (int32_t option = 0; option < REPEAT_OPTION_COUNT; option++) {
+        if (repeat_option_units[option] == event->repeat_unit) {
+            form->repeat_option = option;
+        }
+    }
+    assert(repeat_option_units[form->repeat_option] == event->repeat_unit);
+    if (event->repeat_unit == REPEAT_DAY) {
+        snprintf(form->text[FORM_FIELD_REPEAT_DAYS], REPEAT_DAYS_TEXT_SIZE, "%" PRId32,
+                 event->repeat_interval);
+    }
+    // Start with no field in edit mode, so that a click on Save or Cancel acts at once.
+    form->field_active = FORM_FIELD_NONE;
 }
 
 static void form_close(Form *form) {

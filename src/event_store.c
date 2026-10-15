@@ -47,6 +47,11 @@ static const char insert_sql[] =
 
 // Ordered by time of day, all-day events first, because the caller lists the events of one
 // day at a time and a repeating event's first start date says nothing about that order.
+// Parameters 1 to 7 match insert_sql, so that both bind with event_store_bind_fields.
+static const char update_sql[] =
+    "UPDATE events SET title = ?1, start_date = ?2, start_time = ?3, end_date = ?4,"
+    " end_time = ?5, repeat_unit = ?6, repeat_interval = ?7 WHERE id = ?8;";
+
 static const char delete_sql[] = "DELETE FROM events WHERE id = ?1;";
 
 static const char select_range_sql[] =
@@ -72,7 +77,7 @@ enum {
 static bool event_store_fail(EventStore *store, const char *context);
 static bool event_store_migrate(EventStore *store);
 static bool event_store_migrate_step(EventStore *store, int32_t version);
-static int event_store_insert_bind(sqlite3_stmt *statement, const Event *event);
+static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event);
 static int bind_time(sqlite3_stmt *statement, int index, int32_t minute_of_day);
 static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event);
 static bool column_parse_date(sqlite3_stmt *statement, int column, Date *date);
@@ -113,7 +118,13 @@ bool event_store_open(EventStore *store, const char *path) {
     }
     assert(store->statement_insert != NULL);
     assert(store->statement_select_range != NULL);
+    result = sqlite3_prepare_v3(store->database, update_sql, -1, SQLITE_PREPARE_PERSISTENT,
+                                &store->statement_update, NULL);
+    if (result != SQLITE_OK) {
+        return event_store_fail(store, "Cannot prepare update");
+    }
     assert(store->statement_delete != NULL);
+    assert(store->statement_update != NULL);
     return true;
 }
 
@@ -123,6 +134,7 @@ void event_store_close(EventStore *store) {
     sqlite3_finalize(store->statement_insert);
     sqlite3_finalize(store->statement_select_range);
     sqlite3_finalize(store->statement_delete);
+    sqlite3_finalize(store->statement_update);
     int result = sqlite3_close(store->database);
     // Every statement is finalized above, so the only failure left would be a programmer error.
     assert(result == SQLITE_OK);
@@ -141,7 +153,7 @@ int64_t event_store_insert(EventStore *store, const Event *event) {
     assert(event_duration_days(event) < event_repeat_gap_days_min(event));
 
     sqlite3_stmt *statement = store->statement_insert;
-    int result = event_store_insert_bind(statement, event);
+    int result = event_store_bind_fields(statement, event);
     if (result == SQLITE_OK) {
         result = sqlite3_step(statement);
     }
@@ -156,6 +168,34 @@ int64_t event_store_insert(EventStore *store, const Event *event) {
     int64_t id = sqlite3_last_insert_rowid(store->database);
     assert(id > 0);
     return id;
+}
+
+bool event_store_update(EventStore *store, const Event *event) {
+    assert(store != NULL);
+    assert(store->statement_update != NULL);
+    assert(event->id > 0);
+    assert(event->title[0] != '\0');
+    assert(event_duration_days(event) < event_repeat_gap_days_min(event));
+
+    sqlite3_stmt *statement = store->statement_update;
+    int result = event_store_bind_fields(statement, event);
+    if (result == SQLITE_OK) {
+        result = sqlite3_bind_int64(statement, 8, event->id);
+    }
+    if (result == SQLITE_OK) {
+        result = sqlite3_step(statement);
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    if (result != SQLITE_DONE) {
+        return event_store_fail(store, "Cannot save event");
+    }
+    // Zero rows means the event was deleted meanwhile, for example from another tool.
+    if (sqlite3_changes(store->database) != 1) {
+        snprintf(store->error, sizeof(store->error), "Event no longer exists.");
+        return false;
+    }
+    return true;
 }
 
 bool event_store_delete(EventStore *store, int64_t id) {
@@ -250,7 +290,7 @@ static bool event_store_fail(EventStore *store, const char *context) {
     return false;
 }
 
-static int event_store_insert_bind(sqlite3_stmt *statement, const Event *event) {
+static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event) {
     char start_iso[DATE_ISO_SIZE];
     char end_iso[DATE_ISO_SIZE];
     date_format_iso(event->start_date, start_iso, sizeof(start_iso));
