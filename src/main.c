@@ -18,10 +18,14 @@ enum {
     // its text.
     WINDOW_WIDTH_PIXELS_MIN = 1000,
     WINDOW_HEIGHT_PIXELS_MIN = 640,
-    // Multiples of the default font's 10 pixel glyphs render crisply.
-    TEXT_SIZE_PIXELS = 20,
-    TEXT_SIZE_PIXELS_LARGE = 30,
+    // Each size is rasterized once at startup (see fonts_load), so that text is drawn at the
+    // size its glyphs were made for. Calendar entries and cards use the small size, so that
+    // more of each title fits.
+    TEXT_SIZE_PIXELS = 18,
+    TEXT_SIZE_PIXELS_SMALL = 15,
+    TEXT_SIZE_PIXELS_HEADING = 28,
     TEXT_LINE_HEIGHT_PIXELS = 24,
+    TEXT_LINE_HEIGHT_PIXELS_SMALL = 20,
     PADDING_PIXELS = 16,
     HEADER_HEIGHT_PIXELS = 40,
     WEEKDAY_HEIGHT_PIXELS = 32,
@@ -34,10 +38,11 @@ enum {
     GRID_ROW_COUNT = 6,
     GRID_CELL_COUNT = GRID_COLUMN_COUNT * GRID_ROW_COUNT,
     // Day number and creation markers share the top line of a cell; bars start below it.
-    CELL_TOP_LINE_PIXELS = 36,
-    EVENT_BAR_HEIGHT_PIXELS = 22,
+    CELL_TOP_LINE_PIXELS = 32,
+    EVENT_BAR_HEIGHT_PIXELS = 19,
     EVENT_BAR_GAP_PIXELS = 2,
-    EVENT_CARD_HEIGHT_PIXELS = 104,
+    // Four small lines, with 8 pixels above and below.
+    EVENT_CARD_HEIGHT_PIXELS = 8 + 4 * TEXT_LINE_HEIGHT_PIXELS_SMALL + 8,
     EVENT_CARD_GAP_PIXELS = 8,
     CREATION_MARKER_RADIUS_PIXELS = 5,
     // Per cell. Past this a "+" is drawn, because more dots would run into the day number.
@@ -51,7 +56,14 @@ enum {
     STATUS_SIZE = 192,
     TEXT_LINE_SIZE = 128,
     DATABASE_PATH_SIZE = 1024,
+    // Printable ASCII and Latin-1, so that titles with letters such as a-umlaut display.
+    FONT_CODEPOINT_COUNT = (126 - 32 + 1) + (255 - 160 + 1),
 };
+
+// Downloaded from Google Fonts by CMake and copied next to the executable, so that the app
+// needs no network at run time.
+static const char FONT_FILE_REGULAR[] = "fonts/Rubik-Regular.ttf";
+static const char FONT_FILE_MEDIUM[] = "fonts/Rubik-Medium.ttf";
 
 static const float LEAD_TINT_ALPHA = 0.22f;
 // Tasks are drawn as tinted, outlined bars rather than solid ones, so that they stand apart from
@@ -150,10 +162,26 @@ typedef struct Form {
     char error[EVENT_STORE_ERROR_SIZE];  // Why the last save failed, or empty
 } Form;
 
+// A font together with the one size it is drawn at. raylib rasterizes a font once, so drawing
+// it at another size would blur or pixelate it.
+typedef struct TextStyle {
+    Font font;
+    float size_pixels;
+} TextStyle;
+
+typedef struct Fonts {
+    TextStyle ui;            // Controls, labels and day numbers; also raygui's font
+    TextStyle small;         // Calendar entries and the details on panel cards
+    TextStyle small_strong;  // Titles on panel cards
+    TextStyle heading;       // Month title and the selected date
+    bool loaded;             // False when Rubik was missing and raylib's default font is used
+} Fonts;
+
 typedef struct App {
     Event events[EVENT_COUNT_MAX];  // Events of the visible six weeks, ordered by start
     TaskCompletion completions[COMPLETION_COUNT_MAX];  // Done task occurrences near the view
     EventStore store;
+    Fonts fonts;
     int64_t event_focused_id;       // Event whose lead time is highlighted, or 0
     int64_t event_delete_id;        // Event waiting for the user to confirm deleting, or 0
     Date today;
@@ -187,6 +215,10 @@ typedef struct Layout {
 } Layout;
 
 static void app_init(App *app);
+static void fonts_load(Fonts *fonts);
+static TextStyle fonts_load_style(const char *file_name, int32_t size_pixels,
+                                  const int *codepoints, bool *loaded);
+static void fonts_unload(Fonts *fonts);
 static void app_deinit(App *app);
 static void app_handle_keys(App *app, const Layout *layout);
 static void app_select(App *app, Date date);
@@ -202,7 +234,7 @@ static Layout layout_compute(float width, float height);
 static Rectangle grid_cell_rectangle(const Layout *layout, int32_t cell_index);
 static Date grid_first_date(Date month);
 static void draw_header(App *app, Rectangle header);
-static void draw_weekdays(const Layout *layout);
+static void draw_weekdays(const Fonts *fonts, const Layout *layout);
 static void draw_grid(App *app, const Layout *layout);
 static Highlight highlight_compute(const App *app);
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
@@ -212,17 +244,19 @@ static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int3
                                             const Event *focused);
 static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_number,
                                   int32_t column);
-static void draw_grid_cell_event_bar(const Event *event, Rectangle bar_slot, int32_t day_number,
-                                     int32_t start_day, int32_t column, bool done);
+static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectangle bar_slot,
+                                     int32_t day_number, int32_t start_day, int32_t column);
 static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Color color);
 static void draw_check_mark(Rectangle box, bool done, Color color);
 static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
 static bool draw_panel_event_card(App *app, const Event *event, Rectangle card);
-static void draw_panel_event_card_details(const Event *event, Rectangle card);
-static void draw_panel_legend(Rectangle area);
+static void draw_panel_event_card_details(const Fonts *fonts, const Event *event,
+                                          Rectangle card);
+static void draw_panel_legend(const Fonts *fonts, Rectangle area);
 static void draw_panel_form(App *app, Rectangle body);
-static void draw_panel_form_field(Form *form, int32_t field, const char *label, Rectangle box);
+static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
+                                  const char *label, Rectangle box);
 static void draw_status(const App *app, Rectangle status);
 static void form_open(Form *form, Date date, int32_t kind);
 static void form_open_edit(Form *form, const Event *event);
@@ -243,9 +277,10 @@ static void event_format_lead(const Event *event, char *buffer, size_t buffer_si
 static void format_date_time_short(Date date, int32_t minute_of_day, char *buffer,
                                    size_t buffer_size);
 static Color style_color(int32_t property);
-static void draw_text(const char *text, float x, float y, int32_t size, Color color);
-static Vector2 measure_text(const char *text, int32_t size);
-static void draw_text_centered(const char *text, Rectangle area, int32_t size, Color color);
+static void draw_text(const TextStyle *style, const char *text, float x, float y, Color color);
+static Vector2 measure_text(const TextStyle *style, const char *text);
+static void draw_text_centered(const TextStyle *style, const char *text, Rectangle area,
+                               Color color);
 
 int main(void) {
     // Static rather than on the stack, because App holds every loaded event.
@@ -261,7 +296,7 @@ int main(void) {
         BeginDrawing();
         ClearBackground(style_color(BACKGROUND_COLOR));
         draw_header(&app, layout.header);
-        draw_weekdays(&layout);
+        draw_weekdays(&app.fonts, &layout);
         draw_grid(&app, &layout);
         draw_panel(&app, layout.panel);
         draw_status(&app, layout.status);
@@ -279,7 +314,14 @@ static void app_init(App *app) {
     SetTargetFPS(60);
     // Escape cancels the event form; closing the window stays with the window controls.
     SetExitKey(KEY_NULL);
+    fonts_load(&app->fonts);
+    GuiSetFont(app->fonts.ui.font);
     GuiSetStyle(DEFAULT, TEXT_SIZE, TEXT_SIZE_PIXELS);
+    // Rubik's advances already space its glyphs; raylib's default font needs extra room.
+    GuiSetStyle(DEFAULT, TEXT_SPACING, app->fonts.loaded ? 0 : 2);
+    if (!app->fonts.loaded) {
+        snprintf(app->status, sizeof(app->status), "Rubik font not found: using the default.");
+    }
 
     app->today = date_today();
     app->selected = app->today;
@@ -307,7 +349,61 @@ static void app_deinit(App *app) {
         event_store_close(&app->store);
         app->store_open = false;
     }
+    fonts_unload(&app->fonts);
     CloseWindow();
+}
+
+// Loads Rubik at each size it is drawn at. Needs the window, because glyphs go to a texture.
+static void fonts_load(Fonts *fonts) {
+    int codepoints[FONT_CODEPOINT_COUNT];
+    int32_t count = 0;
+    for (int32_t codepoint = 32; codepoint <= 126; codepoint++) {
+        codepoints[count++] = codepoint;
+    }
+    for (int32_t codepoint = 160; codepoint <= 255; codepoint++) {
+        codepoints[count++] = codepoint;
+    }
+    assert(count == FONT_CODEPOINT_COUNT);
+
+    fonts->loaded = true;
+    fonts->ui = fonts_load_style(FONT_FILE_REGULAR, TEXT_SIZE_PIXELS, codepoints, &fonts->loaded);
+    fonts->small = fonts_load_style(FONT_FILE_REGULAR, TEXT_SIZE_PIXELS_SMALL, codepoints,
+                                    &fonts->loaded);
+    fonts->small_strong = fonts_load_style(FONT_FILE_MEDIUM, TEXT_SIZE_PIXELS_SMALL, codepoints,
+                                           &fonts->loaded);
+    fonts->heading = fonts_load_style(FONT_FILE_MEDIUM, TEXT_SIZE_PIXELS_HEADING, codepoints,
+                                      &fonts->loaded);
+}
+
+// Falls back to raylib's default font, scaled, when the file is missing or unreadable, so that
+// the calendar still works; *loaded then becomes false.
+static TextStyle fonts_load_style(const char *file_name, int32_t size_pixels,
+                                  const int *codepoints, bool *loaded) {
+    assert(size_pixels > 0);
+    TextStyle style = { GetFontDefault(), (float)size_pixels };
+    char path[DATABASE_PATH_SIZE];
+    int written = snprintf(path, sizeof(path), "%s%s", GetApplicationDirectory(), file_name);
+    if (written < 0 || written >= (int)sizeof(path)) {
+        *loaded = false;
+        return style;
+    }
+    // raylib takes a non-const pointer but only reads the codepoints.
+    Font font = LoadFontEx(path, size_pixels, (int *)codepoints, FONT_CODEPOINT_COUNT);
+    if (!IsFontValid(font)) {
+        *loaded = false;
+        return style;
+    }
+    style.font = font;
+    return style;
+}
+
+static void fonts_unload(Fonts *fonts) {
+    // UnloadFont leaves raylib's default font alone, so a fallback style is safe to pass.
+    UnloadFont(fonts->ui.font);
+    UnloadFont(fonts->small.font);
+    UnloadFont(fonts->small_strong.font);
+    UnloadFont(fonts->heading.font);
+    *fonts = (Fonts){ 0 };
 }
 
 static void app_handle_keys(App *app, const Layout *layout) {
@@ -575,17 +671,17 @@ static void draw_header(App *app, Rectangle header) {
     char title[TEXT_LINE_SIZE];
     snprintf(title, sizeof(title), "%s %" PRId32, month_name(app->events_month.month),
              app->events_month.year);
-    draw_text_centered(title, header, TEXT_SIZE_PIXELS_LARGE, style_color(TEXT_COLOR_NORMAL));
+    draw_text_centered(&app->fonts.heading, title, header, style_color(TEXT_COLOR_NORMAL));
 }
 
-static void draw_weekdays(const Layout *layout) {
+static void draw_weekdays(const Fonts *fonts, const Layout *layout) {
     for (int32_t column = 0; column < GRID_COLUMN_COUNT; column++) {
         Rectangle area = { layout->weekdays.x + (float)column * layout->cell_width,
                            layout->weekdays.y, layout->cell_width, layout->weekdays.height };
         // Weekend names are dimmed, as on a paper calendar.
         bool weekend = column >= 5;
         Color color = style_color(weekend ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
-        draw_text_centered(weekday_short_name(column), area, TEXT_SIZE_PIXELS, color);
+        draw_text_centered(&fonts->ui, weekday_short_name(column), area, color);
     }
 }
 
@@ -656,16 +752,16 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
 static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date, bool in_month) {
     char number[4];
     snprintf(number, sizeof(number), "%" PRId32, date.day);
-    Vector2 position = { cell.x + 10, cell.y + 8 };
+    Vector2 position = { cell.x + 10, cell.y + 7 };
     Color color = style_color(in_month ? TEXT_COLOR_NORMAL : TEXT_COLOR_DISABLED);
 
     if (date_equal(date, app->today)) {
-        Vector2 size = measure_text(number, TEXT_SIZE_PIXELS);
+        Vector2 size = measure_text(&app->fonts.ui, number);
         Vector2 center = { position.x + size.x / 2, position.y + size.y / 2 };
         DrawCircleV(center, size.y * 0.85f, style_color(BASE_COLOR_PRESSED));
         color = style_color(TEXT_COLOR_PRESSED);
     }
-    draw_text(number, position.x, position.y, TEXT_SIZE_PIXELS, color);
+    draw_text(&app->fonts.ui, number, position.x, position.y, color);
 }
 
 // One dot per event created on this day, right to left from the top-right corner. The focused
@@ -674,7 +770,7 @@ static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int3
                                             const Event *focused) {
     const float radius = (float)CREATION_MARKER_RADIUS_PIXELS;
     const float spacing = 2 * radius + 6;
-    Vector2 center = { cell.x + cell.width - 14, cell.y + 8 + TEXT_SIZE_PIXELS / 2.0f };
+    Vector2 center = { cell.x + cell.width - 14, cell.y + 7 + TEXT_SIZE_PIXELS / 2.0f };
     int32_t marker_count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
         const Event *event = &app->events[i];
@@ -682,8 +778,8 @@ static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int3
             continue;
         }
         if (marker_count == CREATION_MARKER_COUNT_MAX) {
-            draw_text("+", center.x - radius, center.y - TEXT_SIZE_PIXELS / 2.0f,
-                      TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+            draw_text(&app->fonts.small, "+", center.x - radius,
+                      center.y - TEXT_SIZE_PIXELS_SMALL / 2.0f, style_color(TEXT_COLOR_NORMAL));
             break;
         }
         if (event == focused) {
@@ -727,9 +823,7 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
             if (event_occurrence_on_day(event, day_number, &start_day)) {
                 Rectangle slot = { cell.x, top + (float)bar_index * slot_height, cell.width,
                                    EVENT_BAR_HEIGHT_PIXELS };
-                bool done = event->kind == EVENT_KIND_TASK &&
-                            app_task_done(app, event->id, start_day);
-                draw_grid_cell_event_bar(event, slot, day_number, start_day, column, done);
+                draw_grid_cell_event_bar(app, event, slot, day_number, start_day, column);
                 bar_index++;
             }
         }
@@ -737,17 +831,18 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
     if (overlap_count > bar_count) {
         char more[TEXT_LINE_SIZE];
         snprintf(more, sizeof(more), "+%" PRId32 " more", overlap_count - bar_count);
-        draw_text(more, cell.x + 6, top + (float)bar_count * slot_height + 1, TEXT_SIZE_PIXELS,
+        draw_text(&app->fonts.small, more, cell.x + 6, top + (float)bar_count * slot_height + 2,
                   style_color(TEXT_COLOR_NORMAL));
     }
 }
 
-// start_day is the start of the occurrence that covers day_number. done is only for tasks.
-static void draw_grid_cell_event_bar(const Event *event, Rectangle bar_slot, int32_t day_number,
-                                     int32_t start_day, int32_t column, bool done) {
+// start_day is the start of the occurrence that covers day_number.
+static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectangle bar_slot,
+                                     int32_t day_number, int32_t start_day, int32_t column) {
     assert(start_day <= day_number);
-    assert(!done || event->kind == EVENT_KIND_TASK);
     const bool task = event->kind == EVENT_KIND_TASK;
+    const bool done = task && app_task_done(app, event->id, start_day);
+    const TextStyle *style = &app->fonts.small;
     const Color color = event_color(event);
     bool starts_here = day_number == start_day;
     bool ends_here = day_number == start_day + event_duration_days(event);
@@ -780,16 +875,17 @@ static void draw_grid_cell_event_bar(const Event *event, Rectangle bar_slot, int
     Color text_color = WHITE;
     BeginScissorMode((int)bar.x, (int)bar.y, (int)bar.width, (int)bar.height);
     if (task) {
-        Rectangle box = { bar.x + 4, bar.y + 5, 12, 12 };
+        Rectangle box = { bar.x + 4, bar.y + 4, 11, 11 };
         draw_check_mark(box, done, color);
         text_x = box.x + box.width + 4;
         // The task's own color, faded when done: grey would vanish on the grey cells.
         text_color = done ? Fade(color, TASK_DONE_TEXT_ALPHA) : color;
     }
-    draw_text(label, text_x, bar.y + 1, TEXT_SIZE_PIXELS, text_color);
+    // Centered vertically in the bar.
+    draw_text(style, label, text_x, bar.y + (bar.height - style->size_pixels) / 2, text_color);
     if (done) {
         float middle_y = bar.y + bar.height / 2;
-        float width = measure_text(label, TEXT_SIZE_PIXELS).x;
+        float width = measure_text(style, label).x;
         DrawLineEx((Vector2){ text_x, middle_y }, (Vector2){ text_x + width, middle_y }, 1.5f,
                    text_color);
     }
@@ -823,12 +919,12 @@ static void draw_panel(App *app, Rectangle panel) {
     Rectangle area = { panel.x + padding, panel.y + padding, panel.width - 2 * padding,
                        panel.height - 2 * padding };
 
-    draw_text(weekday_name(date_weekday(app->selected)), area.x, area.y, TEXT_SIZE_PIXELS,
+    draw_text(&app->fonts.ui, weekday_name(date_weekday(app->selected)), area.x, area.y,
               style_color(TEXT_COLOR_DISABLED));
     char heading[TEXT_LINE_SIZE];
     snprintf(heading, sizeof(heading), "%" PRId32 " %s %" PRId32, app->selected.day,
              month_name(app->selected.month), app->selected.year);
-    draw_text(heading, area.x, area.y + TEXT_LINE_HEIGHT_PIXELS, TEXT_SIZE_PIXELS_LARGE,
+    draw_text(&app->fonts.heading, heading, area.x, area.y + TEXT_LINE_HEIGHT_PIXELS,
               style_color(TEXT_COLOR_NORMAL));
 
     const float heading_height = 72;
@@ -891,15 +987,16 @@ static void draw_panel_events(App *app, Rectangle body) {
 
     Color dim = style_color(TEXT_COLOR_DISABLED);
     if (shown_count + hidden_count == 0) {
-        draw_text("Nothing on this day.", body.x, list_top, TEXT_SIZE_PIXELS, dim);
+        draw_text(&app->fonts.ui, "Nothing on this day.", body.x, list_top, dim);
     }
     if (hidden_count > 0) {
         char more[TEXT_LINE_SIZE];
         snprintf(more, sizeof(more), "+%" PRId32 " more", hidden_count);
-        draw_text(more, body.x, y, TEXT_SIZE_PIXELS, dim);
+        draw_text(&app->fonts.small, more, body.x, y, dim);
     }
-    draw_panel_legend((Rectangle){ body.x, body.y + body.height - LEGEND_HEIGHT_PIXELS,
-                                   body.width, LEGEND_HEIGHT_PIXELS });
+    draw_panel_legend(&app->fonts, (Rectangle){ body.x, body.y + body.height -
+                                                LEGEND_HEIGHT_PIXELS, body.width,
+                                                LEGEND_HEIGHT_PIXELS });
 }
 
 // Returns true when the card itself was clicked, not one of its buttons. Deleting asks first, on
@@ -907,8 +1004,9 @@ static void draw_panel_events(App *app, Rectangle body) {
 // A task's checkbox marks the occurrence on this card, which starts on event->start_date.
 static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) {
     const float x = card.x + 16;
-    const Rectangle delete_button = { card.x + card.width - 92, card.y + 8, 80, 28 };
-    const Rectangle checkbox = { x, card.y + 9, 20, 20 };
+    const Rectangle delete_button = { card.x + card.width - 82, card.y + 6, 72, 24 };
+    const Rectangle checkbox = { x, card.y + 8, 16, 16 };
+    const TextStyle *title_style = &app->fonts.small_strong;
     const Rectangle confirm_button = { x, card.y + card.height - 44, 110, 32 };
     const Rectangle cancel_button = { x + 122, confirm_button.y, 110, 32 };
     const bool task = event->kind == EVENT_KIND_TASK;
@@ -925,13 +1023,13 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
                          style_color(focused ? BORDER_COLOR_PRESSED : BORDER_COLOR_NORMAL));
 
     // Clip the title short of the delete button. A done task's title is dimmed and struck out.
-    const float title_x = task ? x + 28 : x;
+    const float title_x = task ? x + 24 : x;
     const Color title_color = style_color(done ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
-    BeginScissorMode((int)card.x, (int)card.y, (int)(card.width - 100), (int)card.height);
-    draw_text(event->title, title_x, card.y + 8, TEXT_SIZE_PIXELS, title_color);
+    BeginScissorMode((int)card.x, (int)card.y, (int)(card.width - 90), (int)card.height);
+    draw_text(title_style, event->title, title_x, card.y + 8, title_color);
     if (done) {
-        float width = measure_text(event->title, TEXT_SIZE_PIXELS).x;
-        float middle_y = card.y + 8 + TEXT_SIZE_PIXELS / 2.0f;
+        float width = measure_text(title_style, event->title).x;
+        float middle_y = card.y + 8 + title_style->size_pixels / 2 + 1;
         DrawLineEx((Vector2){ title_x, middle_y }, (Vector2){ title_x + width, middle_y }, 1.5f,
                    title_color);
     }
@@ -941,7 +1039,7 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
         const char *question = event->repeat_unit != REPEAT_NONE ? "Delete it and all repeats?"
                                : task                            ? "Delete this task?"
                                                                  : "Delete this event?";
-        draw_text(question, x, card.y + 8 + TEXT_LINE_HEIGHT_PIXELS, TEXT_SIZE_PIXELS,
+        draw_text(&app->fonts.small, question, x, card.y + 8 + TEXT_LINE_HEIGHT_PIXELS_SMALL,
                   error_color);
         if (GuiButton(confirm_button, "Delete")) {
             app_event_delete(app, event->id);
@@ -953,7 +1051,7 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
         return false;
     }
 
-    draw_panel_event_card_details(event, card);
+    draw_panel_event_card_details(&app->fonts, event, card);
     if (task) {
         bool checked = done;
         GuiCheckBox(checkbox, NULL, &checked);
@@ -970,41 +1068,43 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
 }
 
 // The lines below the title: dates and repeat, repeat end, creation, and lead time.
-static void draw_panel_event_card_details(const Event *event, Rectangle card) {
+static void draw_panel_event_card_details(const Fonts *fonts, const Event *event,
+                                          Rectangle card) {
     const float x = card.x + 16;
-    const float line = (float)TEXT_LINE_HEIGHT_PIXELS;
+    const float line = (float)TEXT_LINE_HEIGHT_PIXELS_SMALL;
+    const TextStyle *style = &fonts->small;
     char text[TEXT_LINE_SIZE];
     BeginScissorMode((int)card.x, (int)card.y, (int)card.width - 4, (int)card.height);
     float y = card.y + 8 + line;
     event_format_range(event, text, sizeof(text));
-    draw_text(text, x, y, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    draw_text(style, text, x, y, style_color(TEXT_COLOR_NORMAL));
     if (event->repeat_has_end) {
         y += line;
         Date end = event->repeat_end_date;
         snprintf(text, sizeof(text), "Repeats until %" PRId32 " %s %" PRId32, end.day,
                  month_short_name(end.month), end.year);
-        draw_text(text, x, y, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+        draw_text(style, text, x, y, style_color(TEXT_COLOR_NORMAL));
     }
     y += line;
     event_format_created(event, text, sizeof(text));
-    draw_text(text, x, y, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_DISABLED));
+    draw_text(style, text, x, y, style_color(TEXT_COLOR_DISABLED));
     y += line;
     event_format_lead(event, text, sizeof(text));
-    draw_text(text, x, y, TEXT_SIZE_PIXELS, event_color(event));
+    draw_text(style, text, x, y, event_color(event));
     EndScissorMode();
 }
 
 // Explains the two grid markings that are not self-evident.
-static void draw_panel_legend(Rectangle area) {
+static void draw_panel_legend(const Fonts *fonts, Rectangle area) {
     const Color sample = event_colors[0];
     const Color dim = style_color(TEXT_COLOR_DISABLED);
     const float text_x = area.x + 26;
-    DrawCircleV((Vector2){ area.x + 8, area.y + 10 }, CREATION_MARKER_RADIUS_PIXELS, sample);
-    draw_text("Day the event was created", text_x, area.y, TEXT_SIZE_PIXELS, dim);
+    DrawCircleV((Vector2){ area.x + 8, area.y + 8 }, CREATION_MARKER_RADIUS_PIXELS, sample);
+    draw_text(&fonts->small, "Day it was created", text_x, area.y, dim);
 
-    float second_y = area.y + TEXT_LINE_HEIGHT_PIXELS + 4;
-    DrawRectangleRec((Rectangle){ area.x, second_y, 16, 20 }, Fade(sample, LEAD_TINT_ALPHA));
-    draw_text("Created to start, selected", text_x, second_y, TEXT_SIZE_PIXELS, dim);
+    float second_y = area.y + TEXT_LINE_HEIGHT_PIXELS_SMALL + 4;
+    DrawRectangleRec((Rectangle){ area.x, second_y, 16, 16 }, Fade(sample, LEAD_TINT_ALPHA));
+    draw_text(&fonts->small, "From creation to start, selected", text_x, second_y, dim);
 }
 
 static void draw_panel_form(App *app, Rectangle body) {
@@ -1018,7 +1118,7 @@ static void draw_panel_form(App *app, Rectangle body) {
     const char *heading = form->kind == EVENT_KIND_TASK
                               ? (form->editing_id != 0 ? "Edit task" : "New task")
                               : (form->editing_id != 0 ? "Edit event" : "New event");
-    draw_text(heading, body.x, body.y, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    draw_text(&app->fonts.ui, heading, body.x, body.y, style_color(TEXT_COLOR_NORMAL));
     // raygui lays the toggles out side by side, each the size of these bounds, 2 pixels apart.
     const float toggle_width = 72;
     GuiToggleGroup((Rectangle){ body.x + body.width - 2 * toggle_width - 2, body.y - 4,
@@ -1026,42 +1126,44 @@ static void draw_panel_form(App *app, Rectangle body) {
                    "Event;Task", &form->kind);
     // Each field's label sits one line above its box, so leave room for the heading and it.
     float y = body.y + 2 * TEXT_LINE_HEIGHT_PIXELS + 12;
-    draw_panel_form_field(form, FORM_FIELD_TITLE, "Title",
+    draw_panel_form_field(&app->fonts, form, FORM_FIELD_TITLE, "Title",
                           (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
     y += row_height;
-    draw_panel_form_field(form, FORM_FIELD_START_DATE, "Start date",
+    draw_panel_form_field(&app->fonts, form, FORM_FIELD_START_DATE, "Start date",
                           (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
-    draw_panel_form_field(form, FORM_FIELD_START_TIME, "Time",
+    draw_panel_form_field(&app->fonts, form, FORM_FIELD_START_TIME, "Time",
                           (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
     y += row_height;
-    draw_panel_form_field(form, FORM_FIELD_END_DATE, "End date",
+    draw_panel_form_field(&app->fonts, form, FORM_FIELD_END_DATE, "End date",
                           (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
-    draw_panel_form_field(form, FORM_FIELD_END_TIME, "Time",
+    draw_panel_form_field(&app->fonts, form, FORM_FIELD_END_TIME, "Time",
                           (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
     y += row_height;
-    draw_text("Repeat", body.x, y - TEXT_LINE_HEIGHT_PIXELS, TEXT_SIZE_PIXELS,
+    draw_text(&app->fonts.ui, "Repeat", body.x, y - TEXT_LINE_HEIGHT_PIXELS,
               style_color(TEXT_COLOR_NORMAL));
     GuiComboBox((Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS }, repeat_option_labels,
                 &form->repeat_option);
     if (form_field_visible(form, FORM_FIELD_REPEAT_DAYS)) {
-        draw_panel_form_field(form, FORM_FIELD_REPEAT_DAYS, "Days",
+        draw_panel_form_field(&app->fonts, form, FORM_FIELD_REPEAT_DAYS, "Days",
                               (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
     }
     // The row is kept while hidden, so that the buttons do not move under the pointer.
     y += row_height;
     if (form_field_visible(form, FORM_FIELD_REPEAT_END_DATE)) {
-        draw_panel_form_field(form, FORM_FIELD_REPEAT_END_DATE, "Repeat until (optional)",
+        draw_panel_form_field(&app->fonts, form, FORM_FIELD_REPEAT_END_DATE,
+                              "Repeat until (optional)",
                               (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
     }
 
     // One hint line, so that the buttons still fit in the panel at the minimum window height.
     y += FIELD_HEIGHT_PIXELS + 12;
     Color dim = style_color(TEXT_COLOR_DISABLED);
-    draw_text("YYYY-MM-DD, HH:MM (optional)", body.x, y, TEXT_SIZE_PIXELS, dim);
+    draw_text(&app->fonts.small, "Dates YYYY-MM-DD, times HH:MM (optional)", body.x, y,
+              dim);
     y += TEXT_LINE_HEIGHT_PIXELS + 8;
     if (form->error[0] != '\0') {
         BeginScissorMode((int)body.x, (int)y, (int)body.width, TEXT_LINE_HEIGHT_PIXELS);
-        draw_text(form->error, body.x, y, TEXT_SIZE_PIXELS, error_color);
+        draw_text(&app->fonts.ui, form->error, body.x, y, error_color);
         EndScissorMode();
     }
 
@@ -1076,10 +1178,11 @@ static void draw_panel_form(App *app, Rectangle body) {
     }
 }
 
-static void draw_panel_form_field(Form *form, int32_t field, const char *label, Rectangle box) {
+static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
+                                  const char *label, Rectangle box) {
     assert(field >= 0);
     assert(field < FORM_FIELD_COUNT);
-    draw_text(label, box.x, box.y - TEXT_LINE_HEIGHT_PIXELS, TEXT_SIZE_PIXELS,
+    draw_text(&fonts->ui, label, box.x, box.y - TEXT_LINE_HEIGHT_PIXELS,
               style_color(TEXT_COLOR_NORMAL));
     bool editing = form->field_active == field;
     // raygui returns true when edit mode should toggle: a click on the box, or Enter or a
@@ -1289,7 +1392,7 @@ static bool event_created_on_day(const Event *event, int32_t day_number) {
 
 // One more line for a repeating event that ends, to say when.
 static float event_card_height(const Event *event) {
-    float extra = event->repeat_has_end ? (float)TEXT_LINE_HEIGHT_PIXELS : 0.0f;
+    float extra = event->repeat_has_end ? (float)TEXT_LINE_HEIGHT_PIXELS_SMALL : 0.0f;
     return (float)EVENT_CARD_HEIGHT_PIXELS + extra;
 }
 
@@ -1397,18 +1500,24 @@ static Color style_color(int32_t property) {
     return GetColor((unsigned int)GuiGetStyle(DEFAULT, property));
 }
 
-static void draw_text(const char *text, float x, float y, int32_t size, Color color) {
-    DrawTextEx(GuiGetFont(), text, (Vector2){ x, y }, (float)size,
+// Positions are rounded to whole pixels, so that glyphs map one to one onto screen pixels and
+// stay sharp.
+static void draw_text(const TextStyle *style, const char *text, float x, float y, Color color) {
+    assert(x >= 0.0f);
+    assert(y >= 0.0f);
+    Vector2 position = { (float)(int32_t)(x + 0.5f), (float)(int32_t)(y + 0.5f) };
+    DrawTextEx(style->font, text, position, style->size_pixels,
                (float)GuiGetStyle(DEFAULT, TEXT_SPACING), color);
 }
 
-static Vector2 measure_text(const char *text, int32_t size) {
-    return MeasureTextEx(GuiGetFont(), text, (float)size,
+static Vector2 measure_text(const TextStyle *style, const char *text) {
+    return MeasureTextEx(style->font, text, style->size_pixels,
                          (float)GuiGetStyle(DEFAULT, TEXT_SPACING));
 }
 
-static void draw_text_centered(const char *text, Rectangle area, int32_t size, Color color) {
-    Vector2 text_size = measure_text(text, size);
-    draw_text(text, area.x + (area.width - text_size.x) / 2,
-              area.y + (area.height - text_size.y) / 2, size, color);
+static void draw_text_centered(const TextStyle *style, const char *text, Rectangle area,
+                               Color color) {
+    Vector2 text_size = measure_text(style, text);
+    draw_text(style, text, area.x + (area.width - text_size.x) / 2,
+              area.y + (area.height - text_size.y) / 2, color);
 }

@@ -7,7 +7,7 @@
 - C compiler (tested with MinGW-w64 GCC 16)
 - CMake 3.21 or newer (tested on version 4.4)
 
-raylib 5.5, raygui 4.0 and SQLite 3.51.0 are downloaded into `external/` on the first configure; after that the project builds offline.
+raylib 5.5, raygui 4.0, SQLite 3.51.0 and the [Rubik](https://fonts.google.com/specimen/Rubik) font (regular and medium, from Google Fonts, with its SIL Open Font License) are downloaded into `external/` on the first configure; after that the project builds offline. The build copies the fonts into a `fonts` folder next to the executable, which the app needs at run time; without it, the app falls back to raylib's default font.
 
 ### Building
 
