@@ -23,6 +23,15 @@ typedef enum RepeatUnit {
     REPEAT_UNIT_COUNT,
 } RepeatUnit;
 
+// What kind of calendar entry an Event is. Both kinds share every field and rule; a task can
+// also be checked off as done, once per occurrence.
+typedef enum EventKind {
+    EVENT_KIND_EVENT,
+    EVENT_KIND_TASK,
+    EVENT_KIND_COUNT,
+} EventKind;
+
+// Any calendar entry: an event or a task, as its kind says.
 typedef struct Event {
     int64_t id;               // 0 until the event is stored
     Date start_date;          // Start of the first occurrence
@@ -34,7 +43,8 @@ typedef struct Event {
     int32_t created_minute;   // Local minute of day when the event was inserted
     int32_t repeat_unit;      // RepeatUnit
     int32_t repeat_interval;  // Units between occurrences; 1 ... REPEAT_INTERVAL_MAX
-    bool repeat_has_end;      // False repeats forever; always false for one-time events
+    int32_t kind;             // EventKind
+    bool repeat_has_end;     // False repeats forever; always false for one-time events
     char title[EVENT_TITLE_SIZE];
 } Event;
 

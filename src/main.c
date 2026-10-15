@@ -45,12 +45,21 @@ enum {
     LEGEND_HEIGHT_PIXELS = 56,
     // Events loaded for one six-week view. If more match, the status bar says so.
     EVENT_COUNT_MAX = 512,
+    // Task completions loaded for one view, including a year before it (see
+    // event_store_load_completions). More than this is reported like too many events.
+    COMPLETION_COUNT_MAX = 1024,
     STATUS_SIZE = 192,
     TEXT_LINE_SIZE = 128,
     DATABASE_PATH_SIZE = 1024,
 };
 
 static const float LEAD_TINT_ALPHA = 0.22f;
+// Tasks are drawn as tinted, outlined bars rather than solid ones, so that they stand apart from
+// events at a glance; done tasks fade further.
+static const float TASK_FILL_ALPHA = 0.20f;
+static const float TASK_DONE_FILL_ALPHA = 0.08f;
+static const float TASK_DONE_OUTLINE_ALPHA = 0.35f;
+static const float TASK_DONE_TEXT_ALPHA = 0.6f;
 
 typedef enum FormField {
     FORM_FIELD_TITLE,
@@ -135,6 +144,7 @@ typedef struct Form {
     int64_t editing_id;    // Event being edited, or 0 for a new event
     int32_t field_active;  // FormField being edited, or FORM_FIELD_NONE
     int repeat_option;     // RepeatOption; int because raygui's combo box writes it
+    int kind;              // EventKind; int because raygui's toggle group writes it
     bool open;
     char text[FORM_FIELD_COUNT][EVENT_TITLE_SIZE];
     char error[EVENT_STORE_ERROR_SIZE];  // Why the last save failed, or empty
@@ -142,6 +152,7 @@ typedef struct Form {
 
 typedef struct App {
     Event events[EVENT_COUNT_MAX];  // Events of the visible six weeks, ordered by start
+    TaskCompletion completions[COMPLETION_COUNT_MAX];  // Done task occurrences near the view
     EventStore store;
     int64_t event_focused_id;       // Event whose lead time is highlighted, or 0
     int64_t event_delete_id;        // Event waiting for the user to confirm deleting, or 0
@@ -149,6 +160,7 @@ typedef struct App {
     Date selected;
     Date events_month;              // First day of the month that events[] was loaded for
     int32_t event_count;
+    int32_t completion_count;
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
     bool events_truncated;
@@ -184,6 +196,8 @@ static const Event *app_event_find(const App *app, int64_t id);
 static int64_t app_event_first_on_day(const App *app, int32_t day_number);
 static void app_form_submit(App *app);
 static void app_event_delete(App *app, int64_t id);
+static bool app_task_done(const App *app, int64_t id, int32_t start_day);
+static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done);
 static Layout layout_compute(float width, float height);
 static Rectangle grid_cell_rectangle(const Layout *layout, int32_t cell_index);
 static Date grid_first_date(Date month);
@@ -199,15 +213,18 @@ static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int3
 static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_number,
                                   int32_t column);
 static void draw_grid_cell_event_bar(const Event *event, Rectangle bar_slot, int32_t day_number,
-                                     int32_t start_day, int32_t column);
+                                     int32_t start_day, int32_t column, bool done);
+static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Color color);
+static void draw_check_mark(Rectangle box, bool done, Color color);
 static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
 static bool draw_panel_event_card(App *app, const Event *event, Rectangle card);
+static void draw_panel_event_card_details(const Event *event, Rectangle card);
 static void draw_panel_legend(Rectangle area);
 static void draw_panel_form(App *app, Rectangle body);
 static void draw_panel_form_field(Form *form, int32_t field, const char *label, Rectangle box);
 static void draw_status(const App *app, Rectangle status);
-static void form_open(Form *form, Date date);
+static void form_open(Form *form, Date date, int32_t kind);
 static void form_open_edit(Form *form, const Event *event);
 static void form_close(Form *form);
 static int32_t form_field_next(const Form *form, bool backwards);
@@ -367,6 +384,7 @@ static void app_load_events(App *app, Date month) {
     app->events_stale = false;
     app->events_truncated = false;
     app->event_count = 0;
+    app->completion_count = 0;
     if (!app->store_open) {
         return;
     }
@@ -381,6 +399,41 @@ static void app_load_events(App *app, Date month) {
     }
     assert(count <= EVENT_COUNT_MAX);
     app->event_count = count;
+
+    bool completions_truncated = false;
+    count = event_store_load_completions(&app->store, first, last, app->completions,
+                                         COMPLETION_COUNT_MAX, &completions_truncated);
+    if (count < 0) {
+        snprintf(app->status, sizeof(app->status), "%s", app->store.error);
+        return;
+    }
+    assert(count <= COMPLETION_COUNT_MAX);
+    app->completion_count = count;
+    app->events_truncated = app->events_truncated || completions_truncated;
+}
+
+static bool app_task_done(const App *app, int64_t id, int32_t start_day) {
+    for (int32_t i = 0; i < app->completion_count; i++) {
+        const TaskCompletion *completion = &app->completions[i];
+        if (completion->event_id == id && completion->occurrence_start_day == start_day) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done) {
+    assert(event->kind == EVENT_KIND_TASK);
+    assert(app_task_done(app, event->id, start_day) != done);
+    Date occurrence_start = date_from_day_number(start_day);
+    if (!event_store_set_task_done(&app->store, event->id, occurrence_start, done)) {
+        snprintf(app->status, sizeof(app->status), "%s", app->store.error);
+        return;
+    }
+    // completions[] is reloaded by the next app_sync, together with the events.
+    app->events_stale = true;
+    snprintf(app->status, sizeof(app->status), "%s \"%s\".", done ? "Done:" : "Not done:",
+             event->title);
 }
 
 static const Event *app_event_find(const App *app, int64_t id) {
@@ -674,7 +727,9 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
             if (event_occurrence_on_day(event, day_number, &start_day)) {
                 Rectangle slot = { cell.x, top + (float)bar_index * slot_height, cell.width,
                                    EVENT_BAR_HEIGHT_PIXELS };
-                draw_grid_cell_event_bar(event, slot, day_number, start_day, column);
+                bool done = event->kind == EVENT_KIND_TASK &&
+                            app_task_done(app, event->id, start_day);
+                draw_grid_cell_event_bar(event, slot, day_number, start_day, column, done);
                 bar_index++;
             }
         }
@@ -687,17 +742,26 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
     }
 }
 
-// start_day is the start of the occurrence that covers day_number.
+// start_day is the start of the occurrence that covers day_number. done is only for tasks.
 static void draw_grid_cell_event_bar(const Event *event, Rectangle bar_slot, int32_t day_number,
-                                     int32_t start_day, int32_t column) {
+                                     int32_t start_day, int32_t column, bool done) {
     assert(start_day <= day_number);
+    assert(!done || event->kind == EVENT_KIND_TASK);
+    const bool task = event->kind == EVENT_KIND_TASK;
+    const Color color = event_color(event);
     bool starts_here = day_number == start_day;
     bool ends_here = day_number == start_day + event_duration_days(event);
     // Multi-day events run edge to edge between days, so that they read as one bar.
     float left = bar_slot.x + (starts_here ? 4.0f : 0.0f);
     float right = bar_slot.x + bar_slot.width - (ends_here ? 4.0f : 0.0f);
     Rectangle bar = { left, bar_slot.y, right - left, bar_slot.height };
-    DrawRectangleRec(bar, event_color(event));
+    if (task) {
+        DrawRectangleRec(bar, Fade(color, done ? TASK_DONE_FILL_ALPHA : TASK_FILL_ALPHA));
+        draw_bar_outline(bar, starts_here, ends_here,
+                         Fade(color, done ? TASK_DONE_OUTLINE_ALPHA : 1.0f));
+    } else {
+        DrawRectangleRec(bar, color);
+    }
 
     // Label the first day and the start of each week, where the eye starts reading a row.
     if (!starts_here && column != 0) {
@@ -711,9 +775,46 @@ static void draw_grid_cell_event_bar(const Event *event, Rectangle bar_slot, int
     } else {
         snprintf(label, sizeof(label), "%s", event->title);
     }
+
+    float text_x = bar.x + 4;
+    Color text_color = WHITE;
     BeginScissorMode((int)bar.x, (int)bar.y, (int)bar.width, (int)bar.height);
-    draw_text(label, bar.x + 4, bar.y + 1, TEXT_SIZE_PIXELS, WHITE);
+    if (task) {
+        Rectangle box = { bar.x + 4, bar.y + 5, 12, 12 };
+        draw_check_mark(box, done, color);
+        text_x = box.x + box.width + 4;
+        // The task's own color, faded when done: grey would vanish on the grey cells.
+        text_color = done ? Fade(color, TASK_DONE_TEXT_ALPHA) : color;
+    }
+    draw_text(label, text_x, bar.y + 1, TEXT_SIZE_PIXELS, text_color);
+    if (done) {
+        float middle_y = bar.y + bar.height / 2;
+        float width = measure_text(label, TEXT_SIZE_PIXELS).x;
+        DrawLineEx((Vector2){ text_x, middle_y }, (Vector2){ text_x + width, middle_y }, 1.5f,
+                   text_color);
+    }
     EndScissorMode();
+}
+
+// Outlines a bar without lines between the days of a multi-day occurrence.
+static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Color color) {
+    DrawRectangleRec((Rectangle){ bar.x, bar.y, bar.width, 1 }, color);
+    DrawRectangleRec((Rectangle){ bar.x, bar.y + bar.height - 1, bar.width, 1 }, color);
+    if (starts_here) {
+        DrawRectangleRec((Rectangle){ bar.x, bar.y, 1, bar.height }, color);
+    }
+    if (ends_here) {
+        DrawRectangleRec((Rectangle){ bar.x + bar.width - 1, bar.y, 1, bar.height }, color);
+    }
+}
+
+// An empty box for a task that is not done, a filled one for a task that is.
+static void draw_check_mark(Rectangle box, bool done, Color color) {
+    DrawRectangleLinesEx(box, 1.5f, color);
+    if (done) {
+        DrawRectangleRec((Rectangle){ box.x + 3, box.y + 3, box.width - 6, box.height - 6 },
+                         color);
+    }
 }
 
 static void draw_panel(App *app, Rectangle panel) {
@@ -741,13 +842,20 @@ static void draw_panel(App *app, Rectangle panel) {
 }
 
 static void draw_panel_events(App *app, Rectangle body) {
-    Rectangle button = { body.x, body.y, body.width, BUTTON_HEIGHT_PIXELS };
+    const float button_width = (body.width - PADDING_PIXELS) / 2;
+    Rectangle event_button = { body.x, body.y, button_width, BUTTON_HEIGHT_PIXELS };
+    Rectangle task_button = { body.x + button_width + PADDING_PIXELS, body.y, button_width,
+                              BUTTON_HEIGHT_PIXELS };
     if (!app->store_open) {
         GuiDisable();
     }
-    if (GuiButton(button, "New event")) {
+    if (GuiButton(event_button, "New event")) {
         app->event_delete_id = 0;
-        form_open(&app->form, app->selected);
+        form_open(&app->form, app->selected, EVENT_KIND_EVENT);
+    }
+    if (GuiButton(task_button, "New task")) {
+        app->event_delete_id = 0;
+        form_open(&app->form, app->selected, EVENT_KIND_TASK);
     }
     GuiEnable();
 
@@ -783,12 +891,11 @@ static void draw_panel_events(App *app, Rectangle body) {
 
     Color dim = style_color(TEXT_COLOR_DISABLED);
     if (shown_count + hidden_count == 0) {
-        draw_text("No events on this day.", body.x, list_top, TEXT_SIZE_PIXELS, dim);
+        draw_text("Nothing on this day.", body.x, list_top, TEXT_SIZE_PIXELS, dim);
     }
     if (hidden_count > 0) {
         char more[TEXT_LINE_SIZE];
-        snprintf(more, sizeof(more), "+%" PRId32 " more event%s", hidden_count,
-                 hidden_count == 1 ? "" : "s");
+        snprintf(more, sizeof(more), "+%" PRId32 " more", hidden_count);
         draw_text(more, body.x, y, TEXT_SIZE_PIXELS, dim);
     }
     draw_panel_legend((Rectangle){ body.x, body.y + body.height - LEGEND_HEIGHT_PIXELS,
@@ -797,12 +904,16 @@ static void draw_panel_events(App *app, Rectangle body) {
 
 // Returns true when the card itself was clicked, not one of its buttons. Deleting asks first, on
 // the card, because it is permanent and also removes every repeat of a repeating event.
+// A task's checkbox marks the occurrence on this card, which starts on event->start_date.
 static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) {
     const float x = card.x + 16;
-    const float line = (float)TEXT_LINE_HEIGHT_PIXELS;
     const Rectangle delete_button = { card.x + card.width - 92, card.y + 8, 80, 28 };
+    const Rectangle checkbox = { x, card.y + 9, 20, 20 };
     const Rectangle confirm_button = { x, card.y + card.height - 44, 110, 32 };
     const Rectangle cancel_button = { x + 122, confirm_button.y, 110, 32 };
+    const bool task = event->kind == EVENT_KIND_TASK;
+    const int32_t start_day = date_to_day_number(event->start_date);
+    const bool done = task && app_task_done(app, event->id, start_day);
     const bool confirming = event->id == app->event_delete_id;
     const bool focused = event->id == app->event_focused_id;
     const Vector2 mouse = GetMousePosition();
@@ -813,18 +924,25 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     DrawRectangleLinesEx(card, focused || confirming ? 2.0f : 1.0f,
                          style_color(focused ? BORDER_COLOR_PRESSED : BORDER_COLOR_NORMAL));
 
-    char text[TEXT_LINE_SIZE];
-    // Clip to the card, because titles can be wider than the panel; the title also stops short
-    // of the delete button.
+    // Clip the title short of the delete button. A done task's title is dimmed and struck out.
+    const float title_x = task ? x + 28 : x;
+    const Color title_color = style_color(done ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
     BeginScissorMode((int)card.x, (int)card.y, (int)(card.width - 100), (int)card.height);
-    draw_text(event->title, x, card.y + 8, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    draw_text(event->title, title_x, card.y + 8, TEXT_SIZE_PIXELS, title_color);
+    if (done) {
+        float width = measure_text(event->title, TEXT_SIZE_PIXELS).x;
+        float middle_y = card.y + 8 + TEXT_SIZE_PIXELS / 2.0f;
+        DrawLineEx((Vector2){ title_x, middle_y }, (Vector2){ title_x + width, middle_y }, 1.5f,
+                   title_color);
+    }
     EndScissorMode();
 
     if (confirming) {
-        const char *question = event->repeat_unit == REPEAT_NONE
-                                   ? "Delete this event?"
-                                   : "Delete it and all repeats?";
-        draw_text(question, x, card.y + 8 + line, TEXT_SIZE_PIXELS, error_color);
+        const char *question = event->repeat_unit != REPEAT_NONE ? "Delete it and all repeats?"
+                               : task                            ? "Delete this task?"
+                                                                 : "Delete this event?";
+        draw_text(question, x, card.y + 8 + TEXT_LINE_HEIGHT_PIXELS, TEXT_SIZE_PIXELS,
+                  error_color);
         if (GuiButton(confirm_button, "Delete")) {
             app_event_delete(app, event->id);
         }
@@ -835,6 +953,27 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
         return false;
     }
 
+    draw_panel_event_card_details(event, card);
+    if (task) {
+        bool checked = done;
+        GuiCheckBox(checkbox, NULL, &checked);
+        if (checked != done) {
+            app_task_set_done(app, event, start_day, checked);
+        }
+    }
+    if (GuiButton(delete_button, "Delete")) {
+        app->event_delete_id = event->id;
+    }
+    bool on_button = CheckCollisionPointRec(mouse, delete_button) ||
+                     (task && CheckCollisionPointRec(mouse, checkbox));
+    return hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !on_button;
+}
+
+// The lines below the title: dates and repeat, repeat end, creation, and lead time.
+static void draw_panel_event_card_details(const Event *event, Rectangle card) {
+    const float x = card.x + 16;
+    const float line = (float)TEXT_LINE_HEIGHT_PIXELS;
+    char text[TEXT_LINE_SIZE];
     BeginScissorMode((int)card.x, (int)card.y, (int)card.width - 4, (int)card.height);
     float y = card.y + 8 + line;
     event_format_range(event, text, sizeof(text));
@@ -853,12 +992,6 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     event_format_lead(event, text, sizeof(text));
     draw_text(text, x, y, TEXT_SIZE_PIXELS, event_color(event));
     EndScissorMode();
-
-    if (GuiButton(delete_button, "Delete")) {
-        app->event_delete_id = event->id;
-    }
-    return hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
-           !CheckCollisionPointRec(mouse, delete_button);
 }
 
 // Explains the two grid markings that are not self-evident.
@@ -882,8 +1015,15 @@ static void draw_panel_form(App *app, Rectangle body) {
     const float date_width = body.width - time_width - gap;
     const float time_x = body.x + date_width + gap;
 
-    draw_text(form->editing_id != 0 ? "Edit event" : "New event", body.x, body.y, TEXT_SIZE_PIXELS,
-              style_color(TEXT_COLOR_NORMAL));
+    const char *heading = form->kind == EVENT_KIND_TASK
+                              ? (form->editing_id != 0 ? "Edit task" : "New task")
+                              : (form->editing_id != 0 ? "Edit event" : "New event");
+    draw_text(heading, body.x, body.y, TEXT_SIZE_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    // raygui lays the toggles out side by side, each the size of these bounds, 2 pixels apart.
+    const float toggle_width = 72;
+    GuiToggleGroup((Rectangle){ body.x + body.width - 2 * toggle_width - 2, body.y - 4,
+                                toggle_width, 28 },
+                   "Event;Task", &form->kind);
     // Each field's label sits one line above its box, so leave room for the heading and it.
     float y = body.y + 2 * TEXT_LINE_HEIGHT_PIXELS + 12;
     draw_panel_form_field(form, FORM_FIELD_TITLE, "Title",
@@ -960,16 +1100,18 @@ static void draw_status(const App *app, Rectangle status) {
                  EVENT_COUNT_MAX);
     } else {
         snprintf(text, sizeof(text),
-                 "%" PRId32 " events in view    Arrows: day/week    PgUp/PgDn: month    "
-                 "Click an event to edit", app->event_count);
+                 "%" PRId32 " items in view    Arrows: day/week    PgUp/PgDn: month    "
+                 "Click an item to edit", app->event_count);
     }
     GuiStatusBar(status, text);
 }
 
-static void form_open(Form *form, Date date) {
+static void form_open(Form *form, Date date, int32_t kind) {
     assert(!form->open);
+    assert(kind >= 0);
+    assert(kind < EVENT_KIND_COUNT);
     *form = (Form){ .field_active = FORM_FIELD_TITLE, .repeat_option = REPEAT_OPTION_NONE,
-                    .open = true };
+                    .kind = kind, .open = true };
     date_format_iso(date, form->text[FORM_FIELD_START_DATE], DATE_ISO_SIZE);
     date_format_iso(date, form->text[FORM_FIELD_END_DATE], DATE_ISO_SIZE);
     // A starting value, so that choosing "Every X days" shows what to type.
@@ -979,7 +1121,7 @@ static void form_open(Form *form, Date date) {
 // Fills the form from a stored event. Saving then updates that event instead of adding one.
 static void form_open_edit(Form *form, const Event *event) {
     assert(event->id > 0);
-    form_open(form, event->start_date);
+    form_open(form, event->start_date, event->kind);
     form->editing_id = event->id;
     snprintf(form->text[FORM_FIELD_TITLE], EVENT_TITLE_SIZE, "%s", event->title);
     date_format_iso(event->end_date, form->text[FORM_FIELD_END_DATE], DATE_ISO_SIZE);
@@ -1065,6 +1207,9 @@ static const char *form_parse(const Form *form, Event *event) {
     }
     assert(form->repeat_option >= 0);
     assert(form->repeat_option < REPEAT_OPTION_COUNT);
+    assert(form->kind >= 0);
+    assert(form->kind < EVENT_KIND_COUNT);
+    event->kind = form->kind;
     event->repeat_unit = repeat_option_units[form->repeat_option];
     event->repeat_interval = 1;
     if (form->repeat_option == REPEAT_OPTION_DAYS) {

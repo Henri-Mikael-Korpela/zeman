@@ -11,14 +11,19 @@
 enum {
     // Bytes including the terminator for messages returned to the user interface.
     EVENT_STORE_ERROR_SIZE = 160,
+    // Statements prepared at open; event_store.c names them and checks this count.
+    EVENT_STORE_STATEMENT_COUNT = 7,
 };
+
+// One checked-off occurrence of a task.
+typedef struct TaskCompletion {
+    int64_t event_id;
+    int32_t occurrence_start_day;  // Day number of the occurrence's start date
+} TaskCompletion;
 
 typedef struct EventStore {
     struct sqlite3 *database;
-    struct sqlite3_stmt *statement_insert;
-    struct sqlite3_stmt *statement_select_range;
-    struct sqlite3_stmt *statement_delete;
-    struct sqlite3_stmt *statement_update;
+    struct sqlite3_stmt *statements[EVENT_STORE_STATEMENT_COUNT];
     char error[EVENT_STORE_ERROR_SIZE];  // Message for the last failed call
 } EventStore;
 
@@ -28,14 +33,16 @@ typedef struct EventStore {
 bool event_store_open(EventStore *store, const char *path);
 void event_store_close(EventStore *store);
 
-// Inserts the event and returns its new id, or 0 on failure. The database sets created_at.
+// Inserts the event or task and returns its new id, or 0 on failure. The database sets
+// created_at.
 int64_t event_store_insert(EventStore *store, const Event *event);
 
 // Replaces the stored fields of the event with event->id. created_at is kept, because it records
 // when the event was first made. Returns false if it fails or the event is not there.
 bool event_store_update(EventStore *store, const Event *event);
 
-// Deletes the event with all its repeats. Returns false if it fails or the event is not there.
+// Deletes the event with all its repeats, and a task's completions with it.
+// Returns false if it fails or the event is not there.
 bool event_store_delete(EventStore *store, int64_t id);
 
 // Loads events with an occurrence that may overlap [first, last], or created within it.
@@ -45,5 +52,16 @@ bool event_store_delete(EventStore *store, int64_t id);
 // event_count_max events matched, so that the caller can say that some are hidden.
 int32_t event_store_load_range(EventStore *store, Date first, Date last,
                                Event *events, int32_t event_count_max, bool *truncated);
+
+// Marks one occurrence of a task, identified by its start date, as done or not done.
+// Marking it twice the same way is not an error.
+bool event_store_set_task_done(EventStore *store, int64_t id, Date occurrence_start, bool done);
+
+// Loads the completions of occurrences that may cover a day in [first, last]: those starting
+// within it or up to a year before it. Returns the number loaded, or -1 on failure, and sets
+// *truncated as event_store_load_range does.
+int32_t event_store_load_completions(EventStore *store, Date first, Date last,
+                                     TaskCompletion *completions, int32_t completion_count_max,
+                                     bool *truncated);
 
 #endif
