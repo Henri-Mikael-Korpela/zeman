@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#include "raylib.h"
+
 #include "backend.h"
 
 // The calendar's user interface, shared by the desktop and Android apps. Each app opens its own
@@ -23,11 +25,26 @@ typedef struct AppConfig {
 
 typedef struct App App;
 
+// Text styles for screens drawn outside the calendar, such as the desktop's navigation, so that
+// they look the same as the calendar.
+typedef enum AppText {
+    APP_TEXT_HEADING,  // Large, medium weight
+    APP_TEXT_NORMAL,
+    APP_TEXT_DIM,      // Normal size, dimmed, for explanations
+    APP_TEXT_SMALL,
+} AppText;
+
 // Creates the one App. Needs the window, because fonts are loaded into textures.
 App *app_create(Backend *backend, const AppConfig *config);
 void app_destroy(App *app);
-// Handles input and draws one frame, including BeginDrawing and EndDrawing.
-void app_frame(App *app);
+// Handles input and draws the calendar into area, in screen pixels, between the caller's
+// BeginDrawing and EndDrawing. Mouse positions are moved into the area while it runs and left
+// unscaled and unmoved after, for whatever the caller draws next.
+void app_frame(App *app, Rectangle area);
+// Draws text in one of the calendar's styles, at a position in screen pixels divided by the
+// scale (layout pixels), outside app_frame.
+void app_draw_text(const App *app, AppText style, const char *text, float x, float y);
+float app_measure_text(const App *app, AppText style, const char *text);
 // Shown first in the status bar for as long as the app runs, for example where phones connect.
 void app_set_info(App *app, const char *info);
 // Shown in the status bar until the user moves to another day.

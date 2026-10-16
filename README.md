@@ -5,7 +5,7 @@
 - `desktop/` - the desktop app (Windows). It keeps the calendar in an SQLite database and serves it to phones on the same local network.
 - `android/` - the Android app. It shows and edits the desktop app's calendar over the network; it keeps no data of its own.
 - `shared/` - code both apps compile: the user interface, dates, events, and the network protocol and client.
-- `cmake/dependencies.cmake` - downloads raylib 5.5, raygui 4.0, SQLite 3.51.0 and the [Rubik](https://fonts.google.com/specimen/Rubik) font (with its SIL Open Font License) into `external/`, once; after that both builds are offline.
+- `cmake/dependencies.cmake` - downloads raylib 5.5, raygui 4.0, SQLite 3.51.0, the [Rubik](https://fonts.google.com/specimen/Rubik) font (with its SIL Open Font License), Nayuki's [QR code generator](https://github.com/nayuki/QR-Code-generator) 1.8.0 and the [quirc](https://github.com/dlbeer/quirc) 1.2 QR decoder into `external/`, once; after that both builds are offline.
 
 ## Desktop app
 
@@ -29,7 +29,9 @@ cmake -S desktop -B desktop/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Releas
 cmake --build desktop/build
 ```
 
-`calendar.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
+`calendar.exe --port PORT` serves phones on another port than 47800, for example when something else uses it; the QR code and the address shown carry the port. `calendar.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
+
+The navigation on the left switches between **Calendar** and **Connected Devices**. Connected Devices shows the QR code that phones scan to connect, the address to type instead, and the phones connected now.
 
 ## Android app
 
@@ -49,8 +51,10 @@ The result is `android/build/calendar.apk`, for 64-bit ARM phones running Androi
 
 The phone and the desktop talk directly, within the same local network; nothing goes through the internet.
 
-1. Start the desktop app. Its status bar shows "Phone access:" and its address on the network. The first time, Windows asks whether to allow it through the firewall: allow it on private networks.
-2. Open the app on the phone, on the same Wi-Fi network. It looks for the desktop app and connects by itself; if it cannot find it, type the address from the desktop's status bar.
+1. Start the desktop app and open **Connected Devices** in its navigation. The first time, Windows asks whether to allow it through the firewall: allow it on private networks.
+2. Open the app on the phone, on the same Wi-Fi network, and press **Scan QR code** (recommended). Allow the camera when Android asks, and point it at the code on the desktop's screen.
+
+Instead of scanning, type the address shown under the code (also in the desktop's status bar) into the phone. When the phone finds a desktop app on the network by itself, it also offers it with a **Use it** button.
 
 The phone remembers the desktop and connects to it at the next start; the **Server** button in its status bar goes back to the connection screen. Changes made on either side appear on the other within about a second.
 

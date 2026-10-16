@@ -22,8 +22,10 @@ typedef struct ServerClient {
     int32_t request_length;   // Bytes of the current request received so far
     int32_t response_length;  // Bytes of the response to send, 0 when none
     int32_t response_sent;
+    int64_t connected_at;  // Seconds since 1970, when the phone connected
     NetSocket socket;
     bool active;
+    char address[NET_ADDRESS_SIZE];  // The phone's address on the local network
 } ServerClient;
 
 // Serves the calendar to phones on the local network, from the desktop app's own backend, and

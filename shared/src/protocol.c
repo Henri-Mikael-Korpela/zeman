@@ -1,6 +1,8 @@
 #include "protocol.h"
 
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void writer_bytes(Writer *writer, const void *bytes, size_t count);
@@ -219,5 +221,41 @@ static bool reader_bytes(Reader *reader, void *bytes, size_t count) {
     }
     memcpy(bytes, reader->buffer + reader->position, count);
     reader->position += count;
+    return true;
+}
+
+void protocol_link_format(char *link, size_t link_size, const char *address, uint16_t port) {
+    int written = snprintf(link, link_size, "%s%s:%u", PROTOCOL_LINK_PREFIX, address,
+                           (unsigned)port);
+    assert(written > 0 && (size_t)written < link_size);
+}
+
+bool protocol_link_parse(const char *link, char *address, size_t address_size, uint16_t *port) {
+    assert(address_size > 0);
+    const size_t prefix_length = strlen(PROTOCOL_LINK_PREFIX);
+    if (strncmp(link, PROTOCOL_LINK_PREFIX, prefix_length) == 0) {
+        link += prefix_length;
+    }
+    // Only the characters of a numeric address and port, so that anything else in a scanned
+    // code, such as a web address, is refused rather than half read.
+    if (link[0] == '\0' || strspn(link, "0123456789.:") != strlen(link)) {
+        return false;
+    }
+    const char *colon = strchr(link, ':');
+    size_t address_length = colon != NULL ? (size_t)(colon - link) : strlen(link);
+    if (address_length == 0 || address_length >= address_size) {
+        return false;
+    }
+    *port = PROTOCOL_PORT_DEFAULT;
+    if (colon != NULL) {
+        char *end = NULL;
+        long value = strtol(colon + 1, &end, 10);
+        if (end == colon + 1 || *end != '\0' || value < 1 || value > UINT16_MAX) {
+            return false;
+        }
+        *port = (uint16_t)value;
+    }
+    memcpy(address, link, address_length);
+    address[address_length] = '\0';
     return true;
 }

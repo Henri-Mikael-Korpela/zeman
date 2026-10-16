@@ -128,16 +128,21 @@ bool net_listen(uint16_t port, NetSocket *socket_out, char *error, size_t error_
     return true;
 }
 
-NetSocket net_accept(NetSocket listener, bool *peer_is_local) {
+NetSocket net_accept(NetSocket listener, bool *peer_is_local, char *peer_address,
+                     size_t peer_address_size) {
     struct sockaddr_in peer = { 0 };
     socklen_t peer_length = sizeof(peer);
     *peer_is_local = false;
+    snprintf(peer_address, peer_address_size, "?");
     PlatformSocket platform = accept((PlatformSocket)listener, (struct sockaddr *)&peer,
                                      &peer_length);
     if (platform == (PlatformSocket)-1) {
         return NET_SOCKET_INVALID;
     }
     *peer_is_local = peer.sin_family == AF_INET && net_ipv4_is_local(ntohl(peer.sin_addr.s_addr));
+    if (peer.sin_family == AF_INET) {
+        inet_ntop(AF_INET, &peer.sin_addr, peer_address, (socklen_t)peer_address_size);
+    }
     if (!net_set_nonblocking(platform)) {
         net_close((NetSocket)platform);
         return NET_SOCKET_INVALID;

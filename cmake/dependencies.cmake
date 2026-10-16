@@ -8,6 +8,9 @@ cmake_minimum_required(VERSION 3.18)
 set(RAYLIB_VERSION 5.5)
 set(RAYGUI_VERSION 4.0)
 set(SQLITE_VERSION 3510000) # 3.51.0, in the amalgamation's numeric form.
+# QR codes: Nayuki's generator draws the desktop's code; quirc reads it from the phone's camera.
+set(QRCODEGEN_VERSION 1.8.0)
+set(QUIRC_VERSION 1.2)
 get_filename_component(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/../external" ABSOLUTE)
 set(FONTS_DIR "${EXTERNAL_DIR}/fonts")
 # Archives are downloaded here and removed after extraction. A fixed folder rather than the
@@ -87,6 +90,16 @@ vendor_dependency(sqlite
     "https://www.sqlite.org/2025/sqlite-amalgamation-${SQLITE_VERSION}.zip"
     "sqlite-amalgamation-${SQLITE_VERSION}"
     "${EXTERNAL_DIR}/sqlite")
+
+vendor_dependency(qrcodegen
+    "https://github.com/nayuki/QR-Code-generator/archive/refs/tags/v${QRCODEGEN_VERSION}.tar.gz"
+    "QR-Code-generator-${QRCODEGEN_VERSION}"
+    "${EXTERNAL_DIR}/qrcodegen")
+
+vendor_dependency(quirc
+    "https://github.com/dlbeer/quirc/archive/refs/tags/v${QUIRC_VERSION}.tar.gz"
+    "quirc-${QUIRC_VERSION}"
+    "${EXTERNAL_DIR}/quirc")
 
 if(NOT EXISTS "${FONTS_DIR}/Rubik-Regular.ttf" OR NOT EXISTS "${FONTS_DIR}/Rubik-Medium.ttf")
     vendor_google_font(Rubik "400;500" "${FONTS_DIR}"

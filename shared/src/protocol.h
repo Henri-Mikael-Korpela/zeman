@@ -41,6 +41,13 @@ enum {
 #define PROTOCOL_DISCOVERY_PROBE "CALENDAR-DISCOVER 1"
 #define PROTOCOL_DISCOVERY_REPLY "CALENDAR-SERVER 1 "
 
+// What the desktop's QR code holds: where to connect, as "calendar://192.168.1.20:47800".
+#define PROTOCOL_LINK_PREFIX "calendar://"
+enum {
+    // The prefix, "255.255.255.255:65535" and the terminator, rounded up.
+    PROTOCOL_LINK_SIZE = 48,
+};
+
 typedef enum ProtocolOperation {
     PROTOCOL_HELLO = 1,          // version -> version
     PROTOCOL_REVISION,           // -> revision
@@ -103,6 +110,13 @@ Event reader_event(Reader *reader);
 TaskCompletion reader_completion(Reader *reader);
 // True when the whole message was read and nothing failed.
 bool reader_done(const Reader *reader);
+
+// Writes the link to the desktop app at address and port, as the QR code holds it.
+void protocol_link_format(char *link, size_t link_size, const char *address, uint16_t port);
+// Reads address and port from a link, or from "address" or "address:port" typed without the
+// prefix, the port then being PROTOCOL_PORT_DEFAULT. Returns false for anything else; whether
+// the address is local is left to the caller.
+bool protocol_link_parse(const char *link, char *address, size_t address_size, uint16_t *port);
 
 // Little-endian length prefix of a message.
 void protocol_length_write(uint8_t *bytes, uint32_t length);

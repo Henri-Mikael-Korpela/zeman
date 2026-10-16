@@ -132,6 +132,7 @@ function Get-SourceFlags {
         '-DPLATFORM_ANDROID', '-DGRAPHICS_API_OPENGL_ES2',
         "-I$(Join-Path $ExternalDir 'raylib\src')",
         "-I$(Join-Path $ExternalDir 'raygui\src')",
+        "-I$(Join-Path $ExternalDir 'quirc\lib')",
         "-I$(Join-Path $ndk 'sources\android\native_app_glue')",
         "-I$(Join-Path $RootDir 'shared\src')",
         "-I$(Join-Path $AndroidDir 'src')"
@@ -166,7 +167,8 @@ function Build-Library([string]$Clang, [string]$RaylibLibrary) {
     New-Item -ItemType Directory -Force $objectDir | Out-Null
     $shared = @('app', 'calendar', 'client', 'discovery', 'event', 'net', 'protocol') |
         ForEach-Object { Join-Path $RootDir "shared\src\$_.c" }
-    $own = @('main', 'android_input') | ForEach-Object { Join-Path $AndroidDir "src\$_.c" }
+    $own = @('main', 'android_input', 'android_permission', 'qr_scanner') |
+        ForEach-Object { Join-Path $AndroidDir "src\$_.c" }
     $objects = @()
     foreach ($source in ($shared + $own)) {
         $object = Join-Path $objectDir ([IO.Path]::GetFileNameWithoutExtension($source) + '.o')
@@ -175,10 +177,15 @@ function Build-Library([string]$Clang, [string]$RaylibLibrary) {
         Invoke-Tool $Clang ($flags + @('-c', $source, '-o', $object))
         $objects += $object
     }
-    $rayguiObject = Join-Path $objectDir 'raygui_impl.o'
-    $rayguiSource = Join-Path $AndroidDir 'src\raygui_impl.c'
-    Invoke-Tool $Clang ((Get-SourceFlags) + @('-w', '-c', $rayguiSource, '-o', $rayguiObject))
-    $objects += $rayguiObject
+    # Third-party code: raygui's implementation and the quirc QR decoder.
+    $thirdParty = @(Join-Path $AndroidDir 'src\raygui_impl.c')
+    $thirdParty += @('quirc', 'decode', 'identify', 'version_db') |
+        ForEach-Object { Join-Path $ExternalDir "quirc\lib\$_.c" }
+    foreach ($source in $thirdParty) {
+        $object = Join-Path $objectDir ([IO.Path]::GetFileNameWithoutExtension($source) + '.o')
+        Invoke-Tool $Clang ((Get-SourceFlags) + @('-w', '-c', $source, '-o', $object))
+        $objects += $object
+    }
 
     $libraryDir = Join-Path $BuildDir "apk\lib\$Abi"
     New-Item -ItemType Directory -Force $libraryDir | Out-Null
@@ -190,7 +197,9 @@ function Build-Library([string]$Clang, [string]$RaylibLibrary) {
         '-u', 'ANativeActivity_onCreate',
         '-Wl,--gc-sections', '-Wl,--no-undefined', '-Wl,-z,max-page-size=16384'
     )
-    $libraries = @('-llog', '-landroid', '-lEGL', '-lGLESv2', '-lOpenSLES', '-lm', '-ldl')
+    # camera2ndk and mediandk: the native camera, for scanning QR codes.
+    $libraries = @('-llog', '-landroid', '-lEGL', '-lGLESv2', '-lOpenSLES', '-lcamera2ndk',
+                   '-lmediandk', '-lm', '-ldl')
     Invoke-Tool $Clang ($linkFlags + $objects + @($RaylibLibrary) + $libraries)
     return $library
 }

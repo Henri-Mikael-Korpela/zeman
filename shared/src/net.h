@@ -26,8 +26,10 @@ bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, NetSocket 
                  char *error, size_t error_size);
 bool net_listen(uint16_t port, NetSocket *socket_out, char *error, size_t error_size);
 // Returns a new connection, or NET_SOCKET_INVALID when none is waiting. Sets *peer_is_local to
-// whether it comes from the local network (see net_address_is_local).
-NetSocket net_accept(NetSocket listener, bool *peer_is_local);
+// whether it comes from the local network (see net_address_is_local), and peer_address to where
+// it comes from.
+NetSocket net_accept(NetSocket listener, bool *peer_is_local, char *peer_address,
+                     size_t peer_address_size);
 // Return the bytes moved, 0 when the call would block, or -1 when the connection failed or
 // closed.
 int32_t net_send(NetSocket socket, const void *data, int32_t length);

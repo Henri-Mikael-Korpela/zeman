@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 enum {
     // Ranges asked for by phones are kept to plausible calendar views, which also keeps every
@@ -85,7 +86,8 @@ void server_poll(Server *server) {
             continue;
         }
         bool peer_is_local = false;
-        NetSocket socket = net_accept(server->listener, &peer_is_local);
+        NetSocket socket = net_accept(server->listener, &peer_is_local, client->address,
+                                      sizeof(client->address));
         if (socket == NET_SOCKET_INVALID) {
             break;
         }
@@ -97,6 +99,7 @@ void server_poll(Server *server) {
         client->request_length = 0;
         client->response_length = 0;
         client->response_sent = 0;
+        client->connected_at = (int64_t)time(NULL);
         client->active = true;
     }
     for (int32_t i = 0; i < SERVER_CLIENT_COUNT_MAX; i++) {

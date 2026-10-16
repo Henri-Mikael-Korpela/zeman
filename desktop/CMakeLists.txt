@@ -36,8 +36,12 @@ endif()
 # Application: the shared user interface and network code, plus the desktop's database,
 # server and entry point.
 # ---------------------------------------------------------------------------
+# Nayuki's QR code generator, for the code that phones scan to connect.
+set(QRCODEGEN_DIR "${EXTERNAL_DIR}/qrcodegen/c")
+
 add_executable(calendar
     src/main.c
+    src/devices_view.c
     src/event_store.c
     src/local_backend.c
     src/server.c
@@ -49,8 +53,9 @@ add_executable(calendar
     "${SHARED_DIR}/event.c"
     "${SHARED_DIR}/net.c"
     "${SHARED_DIR}/protocol.c"
+    "${QRCODEGEN_DIR}/qrcodegen.c"
 )
-target_include_directories(calendar PRIVATE src "${SHARED_DIR}")
+target_include_directories(calendar PRIVATE src "${SHARED_DIR}" "${QRCODEGEN_DIR}")
 target_link_libraries(calendar PRIVATE raylib raygui sqlite3)
 if(WIN32)
     target_link_libraries(calendar PRIVATE ws2_32)
@@ -64,7 +69,8 @@ add_custom_command(TARGET calendar POST_BUILD
 
 # Third-party implementation: don't report its warnings as ours.
 if(NOT MSVC)
-    set_source_files_properties(src/raygui_impl.c PROPERTIES COMPILE_OPTIONS "-w")
+    set_source_files_properties(src/raygui_impl.c "${QRCODEGEN_DIR}/qrcodegen.c"
+                                PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
 # Assertions stay on in every build type, as in TIGER_STYLE: they catch bugs in use, not only

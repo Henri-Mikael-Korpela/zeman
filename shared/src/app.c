@@ -204,6 +204,9 @@ typedef struct Fonts {
     // Screen pixels per layout pixel. Kept with the fonts, which are rasterized at this scale,
     // because every function that draws text receives them.
     float scale;
+    // Screen position of the layout's top-left corner during app_frame, for scissor rectangles,
+    // which raylib takes in screen pixels.
+    Vector2 origin;
     bool loaded;             // False when Rubik was missing and raylib's default font is used
 } Fonts;
 
@@ -346,9 +349,6 @@ App *app_create(Backend *backend, const AppConfig *config) {
     GuiSetStyle(DEFAULT, TEXT_SIZE, TEXT_SIZE_PIXELS);
     // Rubik's advances already space its glyphs; raylib's default font needs extra room.
     GuiSetStyle(DEFAULT, TEXT_SPACING, app.fonts.loaded ? 0 : 2);
-    // Everything is laid out in layout pixels, so mouse and touch positions are scaled the same
-    // way; raygui then works unchanged.
-    SetMouseScale(1.0f / config->scale, 1.0f / config->scale);
     if (!app.fonts.loaded) {
         snprintf(app.status, sizeof(app.status), "Rubik font not found: using the default.");
     }
@@ -367,18 +367,22 @@ void app_destroy(App *app) {
     app->created = false;
 }
 
-void app_frame(App *app) {
+void app_frame(App *app, Rectangle area) {
+    assert(area.width > 0.0f);
+    assert(area.height > 0.0f);
     const float scale = app->fonts.scale;
-    Layout layout = layout_compute((float)GetScreenWidth() / scale,
-                                   (float)GetScreenHeight() / scale, app->form.open);
+    // Layout pixels start at the area's corner: mouse positions, drawing and scissor
+    // rectangles are all moved and scaled the same way, so raygui works unchanged.
+    app->fonts.origin = (Vector2){ area.x, area.y };
+    SetMouseOffset(-(int)area.x, -(int)area.y);
+    SetMouseScale(1.0f / scale, 1.0f / scale);
+    Layout layout = layout_compute(area.width / scale, area.height / scale, app->form.open);
     app_handle_keys(app, &layout);
     app_sync(app);
 
-    BeginDrawing();
-    ClearBackground(style_color(BACKGROUND_COLOR));
-    // Layout pixels to screen pixels. The fonts were rasterized at this scale, so text stays
-    // sharp; on the desktop the scale is 1 and this changes nothing.
-    BeginMode2D((Camera2D){ .offset = { 0, 0 }, .target = { 0, 0 }, .rotation = 0,
+    // The fonts were rasterized at this scale, so text stays sharp; on the desktop the scale is
+    // 1 and only the offset matters.
+    BeginMode2D((Camera2D){ .offset = { area.x, area.y }, .target = { 0, 0 }, .rotation = 0,
                             .zoom = scale });
     draw_header(app, layout.header);
     if (layout.grid_visible) {
@@ -388,7 +392,41 @@ void app_frame(App *app) {
     draw_panel(app, layout.panel);
     draw_status(app, layout.status);
     EndMode2D();
-    EndDrawing();
+    app->fonts.origin = (Vector2){ 0, 0 };
+    SetMouseOffset(0, 0);
+    SetMouseScale(1.0f, 1.0f);
+}
+
+void app_draw_text(const App *app, AppText style, const char *text, float x, float y) {
+    switch (style) {
+    case APP_TEXT_HEADING:
+        draw_text(&app->fonts.heading, text, x, y, style_color(TEXT_COLOR_NORMAL));
+        return;
+    case APP_TEXT_NORMAL:
+        draw_text(&app->fonts.ui, text, x, y, style_color(TEXT_COLOR_NORMAL));
+        return;
+    case APP_TEXT_DIM:
+        draw_text(&app->fonts.ui, text, x, y, style_color(TEXT_COLOR_DISABLED));
+        return;
+    case APP_TEXT_SMALL:
+        draw_text(&app->fonts.small, text, x, y, style_color(TEXT_COLOR_NORMAL));
+        return;
+    }
+    assert(false); // Not an AppText.
+}
+
+float app_measure_text(const App *app, AppText style, const char *text) {
+    switch (style) {
+    case APP_TEXT_HEADING:
+        return measure_text(&app->fonts.heading, text).x;
+    case APP_TEXT_NORMAL:
+    case APP_TEXT_DIM:
+        return measure_text(&app->fonts.ui, text).x;
+    case APP_TEXT_SMALL:
+        return measure_text(&app->fonts.small, text).x;
+    }
+    assert(false); // Not an AppText.
+    return 0.0f;
 }
 
 void app_set_info(App *app, const char *info) {
@@ -1922,6 +1960,6 @@ static void draw_text_centered(const TextStyle *style, const char *text, Rectang
 // raylib's scissor rectangle is in screen pixels, so the layout rectangle is scaled to match.
 static void scissor_begin(const Fonts *fonts, float x, float y, float width, float height) {
     const float scale = fonts->scale;
-    BeginScissorMode((int)(x * scale), (int)(y * scale), (int)(width * scale),
-                     (int)(height * scale));
+    BeginScissorMode((int)(fonts->origin.x + x * scale), (int)(fonts->origin.y + y * scale),
+                     (int)(width * scale), (int)(height * scale));
 }
