@@ -65,6 +65,14 @@ enum {
     // markers. The markers that fit beside it depend on the cell width; past that a "+" is drawn.
     DAY_NUMBER_WIDTH_PIXELS = 44,
     LEGEND_HEIGHT_PIXELS = 56,
+    // The panel's list scrolls this far per wheel notch: about three lines of a card.
+    PANEL_WHEEL_STEP_PIXELS = 48,
+    // A press that moves this far scrolls the list instead of clicking, because a finger
+    // wobbles by a few pixels during a tap.
+    PANEL_DRAG_THRESHOLD_PIXELS = 8,
+    // The bar showing the list's scroll position, and the room kept free for it beside the cards.
+    SCROLLBAR_WIDTH_PIXELS = 4,
+    SCROLLBAR_GAP_PIXELS = 10,
     // Events loaded for one six-week view. If more match, the status bar says so.
     EVENT_COUNT_MAX = 512,
     // Task completions loaded for one view, including a year before it (see
@@ -221,6 +229,11 @@ typedef struct Fonts {
     // Screen position of the layout's top-left corner during app_frame, for scissor rectangles,
     // which raylib takes in screen pixels.
     Vector2 origin;
+    // Layout rectangle that scissor rectangles stay within while clipping is true: the panel's
+    // scrolling list. raylib has a single scissor rectangle, so a card's own clipping inside the
+    // list must be intersected with it rather than replace it.
+    Rectangle clip;
+    bool clipping;
     bool loaded;             // False when Rubik was missing and raylib's default font is used
 } Fonts;
 
@@ -241,12 +254,17 @@ typedef struct App {
     int32_t event_count;
     int range;                      // CalendarRange; int because raygui's toggle group writes it
     int32_t completion_count;
+    float panel_scroll_pixels;      // How far the panel's list is scrolled down
+    float panel_drag_y;             // Pointer y where the press in the list began
+    float panel_drag_scroll_pixels; // panel_scroll_pixels when that press began
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
     bool events_truncated;
     bool touch;                     // See AppConfig
     bool server_button;
     bool server_requested;
+    bool panel_pressed;             // The pointer went down in the panel's list and is held
+    bool panel_dragging;            // That press moved far enough to scroll instead of click
     bool created;
     char status[STATUS_SIZE];       // Message for the status bar, cleared on navigation
     char info[INFO_SIZE];           // Shown first in the status bar, see app_set_info
@@ -319,6 +337,11 @@ static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Co
 static void draw_check_mark(Rectangle box, bool done, Color color);
 static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
+static float draw_panel_events_height(const App *app, float card_width);
+static void draw_panel_events_scroll(App *app, Rectangle list, float content_height);
+static void draw_panel_events_list(App *app, Rectangle list);
+static void draw_panel_events_scrollbar(Rectangle list, float content_height,
+                                        float scroll_pixels);
 static bool draw_panel_event_card(App *app, const Event *event, Rectangle card);
 static void draw_panel_event_card_details(const Fonts *fonts, const Event *event,
                                           Rectangle card);
@@ -360,6 +383,7 @@ static Vector2 measure_text(const TextStyle *style, const char *text);
 static void draw_text_centered(const TextStyle *style, const char *text, Rectangle area,
                                Color color);
 static void scissor_begin(const Fonts *fonts, float x, float y, float width, float height);
+static void scissor_end(const Fonts *fonts);
 
 App *app_create(Backend *backend, const AppConfig *config) {
     // Static rather than on the stack, because App holds every loaded event; one per program.
@@ -609,6 +633,8 @@ static void app_select(App *app, Date date) {
     app->event_focused_id = 0;
     // A confirmation belongs to the card it was asked on.
     app->event_delete_id = 0;
+    // Another day has other cards, so its list starts from the top.
+    app->panel_scroll_pixels = 0.0f;
     app->status[0] = '\0';
 }
 
@@ -1237,7 +1263,7 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
         DrawLineEx((Vector2){ text_x, middle_y }, (Vector2){ text_x + width, middle_y }, 1.5f,
                    text_color);
     }
-    EndScissorMode();
+    scissor_end(&app->fonts);
 }
 
 // Outlines a bar without lines between the days of a multi-day occurrence.
@@ -1307,48 +1333,159 @@ static void draw_panel_events(App *app, Rectangle body) {
         form_open(&app->form, app->today, EVENT_KIND_PROBLEM);
     }
 
-    // Cards stop where the "+N more" line and the legend begin.
+    // The list ends above the legend; it scrolls when its cards do not fit.
     float list_top = body.y + BUTTON_HEIGHT_PIXELS + PADDING_PIXELS;
-    float list_bottom = body.y + body.height - LEGEND_HEIGHT_PIXELS - TEXT_LINE_HEIGHT_PIXELS;
+    float list_bottom = body.y + body.height - LEGEND_HEIGHT_PIXELS - PADDING_PIXELS;
+    Rectangle list = { body.x, list_top, body.width, list_bottom - list_top };
+    float content_height = draw_panel_events_height(app, list.width);
+    if (content_height > list.height) {
+        // The cards narrow to make room for the scroll bar, which can make them taller.
+        list.width -= SCROLLBAR_GAP_PIXELS;
+        content_height = draw_panel_events_height(app, list.width);
+    }
+
+    if (content_height == 0.0f) {
+        draw_text(&app->fonts.ui, "Nothing on this day.", body.x, list_top,
+                  style_color(TEXT_COLOR_DISABLED));
+    } else if (list.height > 0.0f) {
+        draw_panel_events_scroll(app, list, content_height);
+        draw_panel_events_list(app, list);
+        draw_panel_events_scrollbar(list, content_height, app->panel_scroll_pixels);
+    } else {
+        // A window too short for any list shows only the buttons and the legend.
+    }
+    draw_panel_legend(&app->fonts, (Rectangle){ body.x, body.y + body.height -
+                                                LEGEND_HEIGHT_PIXELS, body.width,
+                                                LEGEND_HEIGHT_PIXELS });
+}
+
+// Height of the selected day's cards stacked with their gaps, or 0 when the day has none.
+static float draw_panel_events_height(const App *app, float card_width) {
+    assert(card_width > 0.0f);
+    assert(app->event_count <= EVENT_COUNT_MAX);
     int32_t selected_day = date_to_day_number(app->selected);
-    float y = list_top;
-    int32_t shown_count = 0;
-    int32_t hidden_count = 0;
+    float height = 0.0f;
+    for (int32_t i = 0; i < app->event_count; i++) {
+        int32_t start_day = 0;
+        if (!event_occurrence_on_day(&app->events[i], selected_day, &start_day)) {
+            continue;
+        }
+        if (height > 0.0f) {
+            height += EVENT_CARD_GAP_PIXELS;
+        }
+        height += event_card_height(&app->fonts, &app->events[i], card_width);
+    }
+    assert(height >= 0.0f);
+    return height;
+}
+
+// Scrolls the list by the wheel, or by dragging it with a finger or the mouse, and keeps the
+// scroll within the cards.
+static void draw_panel_events_scroll(App *app, Rectangle list, float content_height) {
+    assert(list.height > 0.0f);
+    assert(content_height > 0.0f);
+    const Vector2 mouse = GetMousePosition();
+    const bool over = CheckCollisionPointRec(mouse, list);
+    // A press is forgotten one frame after its release, so that on the release frame the cards
+    // still know whether it was a drag, and do not take it as a click.
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT) && !IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        app->panel_pressed = false;
+        app->panel_dragging = false;
+    }
+    if (over && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        app->panel_pressed = true;
+        app->panel_dragging = false;
+        app->panel_drag_y = mouse.y;
+        app->panel_drag_scroll_pixels = app->panel_scroll_pixels;
+    }
+    if (app->panel_pressed && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        float moved = mouse.y - app->panel_drag_y;
+        if (moved > PANEL_DRAG_THRESHOLD_PIXELS || moved < -PANEL_DRAG_THRESHOLD_PIXELS) {
+            app->panel_dragging = true;
+        }
+        if (app->panel_dragging) {
+            app->panel_scroll_pixels = app->panel_drag_scroll_pixels - moved;
+        }
+    }
+    if (over) {
+        app->panel_scroll_pixels -= GetMouseWheelMove() * PANEL_WHEEL_STEP_PIXELS;
+    }
+
+    // Also when the cards changed or the window was resized since the last frame.
+    float scroll_max = content_height > list.height ? content_height - list.height : 0.0f;
+    if (app->panel_scroll_pixels > scroll_max) {
+        app->panel_scroll_pixels = scroll_max;
+    }
+    if (app->panel_scroll_pixels < 0.0f) {
+        app->panel_scroll_pixels = 0.0f;
+    }
+    assert(app->panel_scroll_pixels >= 0.0f);
+    assert(app->panel_scroll_pixels <= scroll_max);
+}
+
+// Draws the selected day's cards, moved up by the scroll and clipped to the list. Controls are
+// locked while the list is dragged, and while the pointer is outside the list, so that neither
+// the end of a drag nor a click on a clipped part of a card acts on it.
+static void draw_panel_events_list(App *app, Rectangle list) {
+    assert(list.height > 0.0f);
+    assert(app->panel_scroll_pixels >= 0.0f);
+    const bool locked = app->panel_dragging || !CheckCollisionPointRec(GetMousePosition(), list);
+    if (locked) {
+        GuiLock();
+    }
+    app->fonts.clip = list;
+    app->fonts.clipping = true;
+    scissor_begin(&app->fonts, list.x, list.y, list.width, list.height);
+
+    int32_t selected_day = date_to_day_number(app->selected);
+    float y = list.y - app->panel_scroll_pixels;
     for (int32_t i = 0; i < app->event_count; i++) {
         const Event *event = &app->events[i];
         int32_t start_day = 0;
         if (!event_occurrence_on_day(event, selected_day, &start_day)) {
             continue;
         }
-        float card_height = event_card_height(&app->fonts, event, body.width);
-        if (y + card_height > list_bottom) {
-            hidden_count++;
+        float card_height = event_card_height(&app->fonts, event, list.width);
+        Rectangle card = { list.x, y, list.width, card_height };
+        y += card_height + EVENT_CARD_GAP_PIXELS;
+        // Cards scrolled wholly out of the list can be neither seen nor clicked.
+        if (!CheckCollisionRecs(card, list)) {
             continue;
         }
-        Rectangle card = { body.x, y, body.width, card_height };
         // The card shows this day's occurrence, so its dates and lead time are for this day.
         Event occurrence = event_occurrence_at(event, start_day);
-        if (draw_panel_event_card(app, &occurrence, card)) {
+        bool clicked = draw_panel_event_card(app, &occurrence, card);
+        // Only a press that began in the list opens a card, not one dragged in from elsewhere.
+        if (clicked && !locked && app->panel_pressed) {
             // Edit the event itself, not this occurrence, so that the form shows its first dates.
             app->event_focused_id = event->id;
             form_open_edit(&app->form, event);
         }
-        y += card_height + EVENT_CARD_GAP_PIXELS;
-        shown_count++;
     }
 
-    Color dim = style_color(TEXT_COLOR_DISABLED);
-    if (shown_count + hidden_count == 0) {
-        draw_text(&app->fonts.ui, "Nothing on this day.", body.x, list_top, dim);
+    app->fonts.clipping = false;
+    EndScissorMode();
+    if (locked) {
+        GuiUnlock();
     }
-    if (hidden_count > 0) {
-        char more[TEXT_LINE_SIZE];
-        snprintf(more, sizeof(more), "+%" PRId32 " more", hidden_count);
-        draw_text(&app->fonts.small, more, body.x, y, dim);
+}
+
+// A thin bar right of the cards: its length is the visible share of the cards, and its place
+// is where the visible part lies among them.
+static void draw_panel_events_scrollbar(Rectangle list, float content_height,
+                                        float scroll_pixels) {
+    assert(content_height > 0.0f);
+    assert(scroll_pixels >= 0.0f);
+    if (content_height <= list.height) {
+        return;
     }
-    draw_panel_legend(&app->fonts, (Rectangle){ body.x, body.y + body.height -
-                                                LEGEND_HEIGHT_PIXELS, body.width,
-                                                LEGEND_HEIGHT_PIXELS });
+    float thumb_height = list.height * list.height / content_height;
+    float thumb_y = list.y + scroll_pixels * list.height / content_height;
+    float x = list.x + list.width + SCROLLBAR_GAP_PIXELS - SCROLLBAR_WIDTH_PIXELS;
+    DrawRectangleRec((Rectangle){ x, list.y, SCROLLBAR_WIDTH_PIXELS, list.height },
+                     style_color(BASE_COLOR_NORMAL));
+    DrawRectangleRec((Rectangle){ x, thumb_y, SCROLLBAR_WIDTH_PIXELS, thumb_height },
+                     style_color(BORDER_COLOR_NORMAL));
 }
 
 // Returns true when the card itself was clicked, not one of its buttons. Deleting asks first, on
@@ -1385,7 +1522,7 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
         DrawLineEx((Vector2){ title_x, middle_y }, (Vector2){ title_x + width, middle_y }, 1.5f,
                    title_color);
     }
-    EndScissorMode();
+    scissor_end(&app->fonts);
 
     if (confirming) {
         const char *question = event->repeat_unit != REPEAT_NONE ? "Delete it and all repeats?"
@@ -1417,7 +1554,8 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     }
     bool on_button = CheckCollisionPointRec(mouse, delete_button) ||
                      (task && CheckCollisionPointRec(mouse, checkbox));
-    return hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !on_button;
+    // On release rather than press, because the press may still become a drag of the list.
+    return hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && !on_button;
 }
 
 // The lines below the title: dates and repeat, location, description, repeat end, creation,
@@ -1470,7 +1608,7 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
         event_format_lead(event, text, sizeof(text));
         draw_text(style, text, x, y, event_color(event));
     }
-    EndScissorMode();
+    scissor_end(fonts);
 }
 
 // Explains the grid's creation dots.
@@ -1523,7 +1661,7 @@ static void draw_panel_form(App *app, Rectangle body) {
     if (form->error[0] != '\0') {
         scissor_begin(&app->fonts, body.x, y, body.width, TEXT_LINE_HEIGHT_PIXELS);
         draw_text(&app->fonts.ui, form->error, body.x, y, error_color);
-        EndScissorMode();
+        scissor_end(&app->fonts);
     }
 
     y += TEXT_LINE_HEIGHT_PIXELS + 4;
@@ -2135,8 +2273,30 @@ static void draw_text_centered(const TextStyle *style, const char *text, Rectang
 }
 
 // raylib's scissor rectangle is in screen pixels, so the layout rectangle is scaled to match.
+// Within a clip, such as the panel's scrolling list, only the part inside the clip is drawn.
 static void scissor_begin(const Fonts *fonts, float x, float y, float width, float height) {
+    assert(width >= 0.0f);
+    assert(height >= 0.0f);
+    Rectangle area = { x, y, width, height };
+    if (fonts->clipping) {
+        // An empty overlap clips everything, which is right for text wholly outside the clip.
+        area = GetCollisionRec(area, fonts->clip);
+    }
     const float scale = fonts->scale;
-    BeginScissorMode((int)(fonts->origin.x + x * scale), (int)(fonts->origin.y + y * scale),
-                     (int)(width * scale), (int)(height * scale));
+    BeginScissorMode((int)(fonts->origin.x + area.x * scale),
+                     (int)(fonts->origin.y + area.y * scale), (int)(area.width * scale),
+                     (int)(area.height * scale));
+}
+
+// Ends a scissor_begin. Within a clip, the clip's own scissor rectangle comes back, because
+// raylib cannot nest them.
+static void scissor_end(const Fonts *fonts) {
+    if (fonts->clipping) {
+        assert(fonts->clip.width > 0.0f);
+        assert(fonts->clip.height > 0.0f);
+        scissor_begin(fonts, fonts->clip.x, fonts->clip.y, fonts->clip.width,
+                      fonts->clip.height);
+    } else {
+        EndScissorMode();
+    }
 }
