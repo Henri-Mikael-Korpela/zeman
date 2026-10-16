@@ -19,8 +19,6 @@ typedef struct AppConfig {
     float scale;
     // Touch screen: swipes change month and the keyboard hints are left out.
     bool touch;
-    // Shows a "Server" button in the status bar, for the Android app's connection screen.
-    bool server_button;
 } AppConfig;
 
 typedef struct App App;
@@ -51,7 +49,8 @@ void app_set_info(App *app, const char *info);
 void app_set_status(App *app, const char *status);
 // True while a form field is being typed into, so that Android can show its keyboard.
 bool app_text_input_active(const App *app);
-// True once after each press of the "Server" button.
-bool app_take_server_request(App *app);
+// With input off, app_frame still draws and loads but ignores the pointer and keys, for example
+// while the phone's navigation drawer covers the calendar. On at start.
+void app_set_input_enabled(App *app, bool enabled);
 
 #endif

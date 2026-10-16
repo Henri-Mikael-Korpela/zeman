@@ -56,7 +56,7 @@ The phone and the desktop talk directly, within the same local network; nothing 
 
 Instead of scanning, type the address shown under the code (also in the desktop's status bar) into the phone. When the phone finds a desktop app on the network by itself, it also offers it with a **Use it** button.
 
-The phone remembers the desktop and connects to it at the next start; the **Server** button in its status bar goes back to the connection screen. Changes made on either side appear on the other within about a second.
+The phone remembers the desktop and connects to it at the next start; to change or reconnect to it, open the navigation from the left edge of the screen (tap the arrow on the edge, or drag it out) and choose **Connection settings**, which offer the QR code, a desktop found on the network and the typed address. Changes made on either side appear on the other within about a second.
 
 The desktop app accepts connections only from local network addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x and 169.254.x.x) and has no password, so anyone on the same local network can use it while it runs.
 

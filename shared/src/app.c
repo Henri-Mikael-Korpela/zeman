@@ -83,7 +83,11 @@ enum {
     FORM_ERROR_SIZE = 160,
     TEXT_LINE_SIZE = 128,
     PATH_SIZE = 1024,
-    SERVER_BUTTON_WIDTH_PIXELS = 80,
+    // Added to pointer positions while input is off, which puts them far outside any layout.
+    INPUT_OFF_MOUSE_OFFSET_PIXELS = -1000000,
+    // Text is never drawn this far from the layout's corner. Small enough that, times the
+    // largest phone scale, rounding stays within int32_t and float keeps whole pixels exact.
+    TEXT_POSITION_LIMIT_PIXELS = 100000,
     // Printable ASCII and Latin-1, so that titles with letters such as a-umlaut display.
     FONT_CODEPOINT_COUNT = (126 - 32 + 1) + (255 - 160 + 1),
 };
@@ -261,8 +265,7 @@ typedef struct App {
     bool events_stale;              // Reload events[] even though the month is unchanged
     bool events_truncated;
     bool touch;                     // See AppConfig
-    bool server_button;
-    bool server_requested;
+    bool input_enabled;             // See app_set_input_enabled
     bool panel_pressed;             // The pointer went down in the panel's list and is held
     bool panel_dragging;            // That press moved far enough to scroll instead of click
     bool created;
@@ -379,6 +382,7 @@ static void format_date_time_short(Date date, int32_t minute_of_day, char *buffe
                                    size_t buffer_size);
 static Color style_color(int32_t property);
 static void draw_text(const TextStyle *style, const char *text, float x, float y, Color color);
+static float draw_text_round(float position, float scale);
 static Vector2 measure_text(const TextStyle *style, const char *text);
 static void draw_text_centered(const TextStyle *style, const char *text, Rectangle area,
                                Color color);
@@ -394,7 +398,7 @@ App *app_create(Backend *backend, const AppConfig *config) {
     app.created = true;
     app.backend = backend;
     app.touch = config->touch;
-    app.server_button = config->server_button;
+    app.input_enabled = true;
 
     fonts_load(&app.fonts, config->font_directory, config->scale);
     GuiSetFont(app.fonts.ui.font);
@@ -426,11 +430,18 @@ void app_frame(App *app, Rectangle area) {
     // Layout pixels start at the area's corner: mouse positions, drawing and scissor
     // rectangles are all moved and scaled the same way, so raygui works unchanged.
     app->fonts.origin = (Vector2){ area.x, area.y };
-    SetMouseOffset(-(int)area.x, -(int)area.y);
     SetMouseScale(1.0f / scale, 1.0f / scale);
     Layout layout = layout_compute(area.width / scale, area.height / scale, app->form.open,
                                    app->range);
-    app_handle_keys(app, &layout);
+    if (app->input_enabled) {
+        SetMouseOffset(-(int)area.x, -(int)area.y);
+        app_handle_keys(app, &layout);
+    } else {
+        // The pointer is moved far away, so that nothing is hovered, clicked, scrolled or
+        // swiped, and raygui is locked; one place covers every control instead of each.
+        SetMouseOffset(INPUT_OFF_MOUSE_OFFSET_PIXELS, INPUT_OFF_MOUSE_OFFSET_PIXELS);
+        GuiLock();
+    }
     app_sync(app);
     // Again, because a key may have changed the range or opened the form.
     layout = layout_compute(area.width / scale, area.height / scale, app->form.open, app->range);
@@ -447,6 +458,9 @@ void app_frame(App *app, Rectangle area) {
     draw_panel(app, layout.panel);
     draw_status(app, layout.status);
     EndMode2D();
+    if (!app->input_enabled) {
+        GuiUnlock();
+    }
     app->fonts.origin = (Vector2){ 0, 0 };
     SetMouseOffset(0, 0);
     SetMouseScale(1.0f, 1.0f);
@@ -496,10 +510,9 @@ bool app_text_input_active(const App *app) {
     return app->form.open && app->form.field_active != FORM_FIELD_NONE;
 }
 
-bool app_take_server_request(App *app) {
-    bool requested = app->server_requested;
-    app->server_requested = false;
-    return requested;
+void app_set_input_enabled(App *app, bool enabled) {
+    assert(app->created);
+    app->input_enabled = enabled;
 }
 
 // Loads Rubik at each size it is drawn at, times the scale, so that each glyph covers exactly
@@ -1430,6 +1443,8 @@ static void draw_panel_events_list(App *app, Rectangle list) {
     assert(list.height > 0.0f);
     assert(app->panel_scroll_pixels >= 0.0f);
     const bool locked = app->panel_dragging || !CheckCollisionPointRec(GetMousePosition(), list);
+    // Locked already when the app has no input; that lock stays until app_frame lifts it.
+    const bool locked_before = GuiIsLocked();
     if (locked) {
         GuiLock();
     }
@@ -1465,7 +1480,7 @@ static void draw_panel_events_list(App *app, Rectangle list) {
 
     app->fonts.clipping = false;
     EndScissorMode();
-    if (locked) {
+    if (locked && !locked_before) {
         GuiUnlock();
     }
 }
@@ -1798,14 +1813,6 @@ static void draw_status(App *app, Rectangle status) {
         snprintf(text, sizeof(text), "%s", message);
     }
     GuiStatusBar(status, text);
-
-    if (app->server_button) {
-        Rectangle button = { status.x + status.width - SERVER_BUTTON_WIDTH_PIXELS - 2,
-                             status.y + 2, SERVER_BUTTON_WIDTH_PIXELS, status.height - 4 };
-        if (GuiButton(button, "Server")) {
-            app->server_requested = true;
-        }
-    }
 }
 
 static void form_open(Form *form, Date date, int32_t kind) {
@@ -2249,15 +2256,28 @@ static Color style_color(int32_t property) {
 }
 
 // Positions are rounded to whole screen pixels, so that glyphs, rasterized at the screen
-// scale, map one to one onto screen pixels and stay sharp.
+// scale, map one to one onto screen pixels and stay sharp. A position may be left of or above
+// the screen, as in the phone's drawer while it slides in.
 static void draw_text(const TextStyle *style, const char *text, float x, float y, Color color) {
-    assert(x >= 0.0f);
-    assert(y >= 0.0f);
+    // Far beyond any screen, which would also overflow the rounding.
+    assert(x > -(float)TEXT_POSITION_LIMIT_PIXELS);
+    assert(x < (float)TEXT_POSITION_LIMIT_PIXELS);
+    assert(y > -(float)TEXT_POSITION_LIMIT_PIXELS);
+    assert(y < (float)TEXT_POSITION_LIMIT_PIXELS);
     const float scale = style->scale;
-    Vector2 position = { (float)(int32_t)(x * scale + 0.5f) / scale,
-                         (float)(int32_t)(y * scale + 0.5f) / scale };
+    Vector2 position = { draw_text_round(x, scale), draw_text_round(y, scale) };
     DrawTextEx(style->font, text, position, style->size_pixels,
                (float)GuiGetStyle(DEFAULT, TEXT_SPACING), color);
+}
+
+// Rounds a layout position to the nearest whole screen pixel. Casting truncates toward zero,
+// so negative positions are moved up by the limit first, which keeps the cast's input positive.
+static float draw_text_round(float position, float scale) {
+    assert(scale > 0.0f);
+    const float shift = (float)TEXT_POSITION_LIMIT_PIXELS * scale;
+    float screen = position * scale + shift + 0.5f;
+    assert(screen >= 0.0f);
+    return ((float)(int32_t)screen - shift) / scale;
 }
 
 static Vector2 measure_text(const TextStyle *style, const char *text) {

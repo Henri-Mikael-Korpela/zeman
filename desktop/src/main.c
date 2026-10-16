@@ -93,7 +93,6 @@ int main(int argc, char **argv) {
         .font_directory = GetApplicationDirectory(),
         .scale = 1.0f,
         .touch = false,
-        .server_button = false,
     };
     App *app = app_create(&desktop.backend, &config);
     app_set_info(app, desktop.info);
