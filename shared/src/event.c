@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 enum {
     // Monthly and yearly occurrences skip months without the start's day, so finding the
@@ -17,6 +18,8 @@ enum {
 
 static bool event_occurrence_on_day_monthly(const Event *event, int32_t day_number,
                                             int32_t month_step, int32_t *start_day);
+static bool minute_is_valid(int32_t minute_of_day);
+static bool text_is_terminated(const char *text, size_t size);
 
 int32_t event_duration_days(const Event *event) {
     int32_t duration = date_to_day_number(event->end_date) -
@@ -159,4 +162,76 @@ static bool event_occurrence_on_day_monthly(const Event *event, int32_t day_numb
         occurrence_index--;
     }
     return false;
+}
+
+bool event_is_valid(const Event *event) {
+    if (!text_is_terminated(event->title, sizeof(event->title))) {
+        return false;
+    }
+    if (!text_is_terminated(event->description, sizeof(event->description))) {
+        return false;
+    }
+    if (!text_is_terminated(event->location.address, sizeof(event->location.address))) {
+        return false;
+    }
+    if (!text_is_terminated(event->location.city, sizeof(event->location.city))) {
+        return false;
+    }
+    if (event->title[0] == '\0' || event->location.id < 0) {
+        return false;
+    }
+    if (!date_is_valid(event->start_date) || !date_is_valid(event->end_date)) {
+        return false;
+    }
+    int32_t start_day = date_to_day_number(event->start_date);
+    if (date_to_day_number(event->end_date) < start_day) {
+        return false;
+    }
+    if (!minute_is_valid(event->start_minute) || !minute_is_valid(event->end_minute)) {
+        return false;
+    }
+    if (date_equal(event->start_date, event->end_date)) {
+        if (event->start_minute != TIME_NONE && event->end_minute != TIME_NONE) {
+            if (event->end_minute < event->start_minute) {
+                return false;
+            }
+        }
+    }
+    if (event->kind < 0 || event->kind >= EVENT_KIND_COUNT) {
+        return false;
+    }
+    if (event->repeat_unit < 0 || event->repeat_unit >= REPEAT_UNIT_COUNT) {
+        return false;
+    }
+    if (event->repeat_interval < 1 || event->repeat_interval > REPEAT_INTERVAL_MAX) {
+        return false;
+    }
+    if (event->repeat_has_end) {
+        if (event->repeat_unit == REPEAT_NONE || !date_is_valid(event->repeat_end_date)) {
+            return false;
+        }
+        if (date_to_day_number(event->repeat_end_date) < start_day) {
+            return false;
+        }
+    }
+    if (event->kind == EVENT_KIND_PROBLEM) {
+        if (event_duration_days(event) != 0 || event->start_minute != TIME_NONE) {
+            return false;
+        }
+        if (event->end_minute != TIME_NONE || event->repeat_unit != REPEAT_NONE) {
+            return false;
+        }
+        if (event->location.id != 0) {
+            return false;
+        }
+    }
+    return event_duration_days(event) < event_repeat_gap_days_min(event);
+}
+
+static bool minute_is_valid(int32_t minute_of_day) {
+    return minute_of_day == TIME_NONE || (minute_of_day >= 0 && minute_of_day < MINUTES_PER_DAY);
+}
+
+static bool text_is_terminated(const char *text, size_t size) {
+    return memchr(text, '\0', size) != NULL;
 }

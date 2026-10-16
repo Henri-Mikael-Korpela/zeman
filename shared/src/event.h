@@ -65,6 +65,19 @@ typedef struct Event {
     char description[EVENT_DESCRIPTION_SIZE];  // Empty for none
 } Event;
 
+// One checked-off occurrence of a task.
+typedef struct TaskCompletion {
+    int64_t event_id;
+    int32_t occurrence_start_day;  // Day number of the occurrence's start date
+} TaskCompletion;
+
+// Checks every rule an event must follow before it is stored: terminated texts, a title, valid
+// dates and times, a known kind and repeat, and occurrences that do not overlap; a problem has
+// one day and no times, repeat or location. The form enforces these already; this is for data
+// from outside the program, such as the network, which the store's assertions must never see.
+// That a problem falls on the day it was created is left to the caller and the database.
+bool event_is_valid(const Event *event);
+
 // Whole days from the start date to the end date of one occurrence; 0 for a one-day event.
 int32_t event_duration_days(const Event *event);
 

@@ -1,3 +1,6 @@
 build/
 build-*/
 external/
+# Android: downloaded JDK, SDK and NDK; build output; the signing key made on first build.
+android/tools/
+android/keystore/

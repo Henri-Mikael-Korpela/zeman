@@ -8,17 +8,13 @@
 #include "raylib.h"
 #include "raygui.h"
 
+#include "app.h"
+#include "backend.h"
 #include "calendar.h"
-#include "event_store.h"
+#include "event.h"
 
 enum {
-    WINDOW_WIDTH_PIXELS = 1320,
-    WINDOW_HEIGHT_PIXELS = 820,
-    // Below this the grid cells get too small for an event bar and the panel too narrow for
-    // its text.
-    WINDOW_WIDTH_PIXELS_MIN = 1000,
-    // Tall enough for every row of the event form and its buttons.
-    WINDOW_HEIGHT_PIXELS_MIN = 720,
+    // All sizes are layout pixels, which AppConfig.scale turns into screen pixels.
     // Each size is rasterized once at startup (see fonts_load), so that text is drawn at the
     // size its glyphs were made for. Calendar entries and cards use the small size, so that
     // more of each title fits.
@@ -28,6 +24,11 @@ enum {
     TEXT_LINE_HEIGHT_PIXELS = 24,
     TEXT_LINE_HEIGHT_PIXELS_SMALL = 20,
     PADDING_PIXELS = 16,
+    // Less padding on a phone, where every pixel of width counts.
+    PADDING_PIXELS_PORTRAIT = 8,
+    // In the portrait layout, the share of the height the calendar grid takes; the panel gets
+    // the rest.
+    GRID_HEIGHT_PERCENT_PORTRAIT = 46,
     HEADER_HEIGHT_PIXELS = 40,
     WEEKDAY_HEIGHT_PIXELS = 32,
     STATUS_HEIGHT_PIXELS = 28,
@@ -45,11 +46,11 @@ enum {
     // Six weeks always cover a whole month, whatever weekday it starts on.
     GRID_ROW_COUNT = 6,
     GRID_CELL_COUNT = GRID_COLUMN_COUNT * GRID_ROW_COUNT,
-    // Day number and creation markers share the top line of a cell; bars start below it.
     // Card text starts 16 pixels in from the left and keeps 12 from the right edge.
     CARD_TEXT_MARGIN_PIXELS = 28,
     // Longer descriptions are cut off with "..." on the last line.
     DESCRIPTION_LINES_MAX = 3,
+    // Day number and creation markers share the top line of a cell; bars start below it.
     CELL_TOP_LINE_PIXELS = 32,
     EVENT_BAR_HEIGHT_PIXELS = 19,
     EVENT_BAR_GAP_PIXELS = 2,
@@ -64,21 +65,23 @@ enum {
     // Events loaded for one six-week view. If more match, the status bar says so.
     EVENT_COUNT_MAX = 512,
     // Task completions loaded for one view, including a year before it (see
-    // event_store_load_completions). More than this is reported like too many events.
+    // BackendOps.load_completions). More than this is reported like too many events.
     COMPLETION_COUNT_MAX = 1024,
     STATUS_SIZE = 192,
+    INFO_SIZE = 192,
+    FORM_ERROR_SIZE = 160,
     TEXT_LINE_SIZE = 128,
-    DATABASE_PATH_SIZE = 1024,
+    PATH_SIZE = 1024,
+    SERVER_BUTTON_WIDTH_PIXELS = 80,
     // Printable ASCII and Latin-1, so that titles with letters such as a-umlaut display.
     FONT_CODEPOINT_COUNT = (126 - 32 + 1) + (255 - 160 + 1),
 };
 
-// Downloaded from Google Fonts by CMake and copied next to the executable, so that the app
-// needs no network at run time.
+// Downloaded from Google Fonts by CMake, copied next to the desktop executable and into the
+// Android APK's assets, so that the app needs no network for them at run time.
 static const char FONT_FILE_REGULAR[] = "fonts/Rubik-Regular.ttf";
 static const char FONT_FILE_MEDIUM[] = "fonts/Rubik-Medium.ttf";
 
-static const float LEAD_TINT_ALPHA = 0.22f;
 // Tasks are drawn as tinted, outlined bars rather than solid ones, so that they stand apart from
 // events at a glance; done tasks fade further.
 static const float TASK_FILL_ALPHA = 0.20f;
@@ -182,14 +185,15 @@ typedef struct Form {
     int kind;              // EventKind; int because raygui's toggle group writes it
     bool open;
     char text[FORM_FIELD_COUNT][EVENT_DESCRIPTION_SIZE];
-    char error[EVENT_STORE_ERROR_SIZE];  // Why the last save failed, or empty
+    char error[FORM_ERROR_SIZE];  // Why the last save failed, or empty
 } Form;
 
 // A font together with the one size it is drawn at. raylib rasterizes a font once, so drawing
 // it at another size would blur or pixelate it.
 typedef struct TextStyle {
     Font font;
-    float size_pixels;
+    float size_pixels;  // Layout pixels
+    float scale;        // Screen pixels per layout pixel that the font was rasterized for
 } TextStyle;
 
 typedef struct Fonts {
@@ -197,15 +201,19 @@ typedef struct Fonts {
     TextStyle small;         // Calendar entries and the details on panel cards
     TextStyle small_strong;  // Titles on panel cards
     TextStyle heading;       // Month title and the selected date
+    // Screen pixels per layout pixel. Kept with the fonts, which are rasterized at this scale,
+    // because every function that draws text receives them.
+    float scale;
     bool loaded;             // False when Rubik was missing and raylib's default font is used
 } Fonts;
 
 typedef struct App {
     Event events[EVENT_COUNT_MAX];  // Events of the visible six weeks, ordered by start
     TaskCompletion completions[COMPLETION_COUNT_MAX];  // Done task occurrences near the view
-    EventStore store;
+    Backend *backend;
     Fonts fonts;
-    int64_t event_focused_id;       // Event whose lead time is highlighted, or 0
+    uint64_t events_revision;       // Backend revision that events[] was loaded at
+    int64_t event_focused_id;       // Selected item on the panel, ringed in the grid, or 0
     int64_t event_delete_id;        // Event waiting for the user to confirm deleting, or 0
     Date today;
     Date selected;
@@ -215,8 +223,12 @@ typedef struct App {
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
     bool events_truncated;
-    bool store_open;
+    bool touch;                     // See AppConfig
+    bool server_button;
+    bool server_requested;
+    bool created;
     char status[STATUS_SIZE];       // Message for the status bar, cleared on navigation
+    char info[INFO_SIZE];           // Shown first in the status bar, see app_set_info
 } App;
 
 // A text broken into lines no wider than a given width: where each line starts in the text and
@@ -228,14 +240,6 @@ typedef struct TextLines {
     bool cut;  // The text continues past the last line
 } TextLines;
 
-// The focused event and the days of its lead time: from its creation to the start of the
-// occurrence on the selected date.
-typedef struct Highlight {
-    const Event *event;  // NULL when nothing is highlighted
-    int32_t lead_first_day;
-    int32_t lead_last_day;
-} Highlight;
-
 typedef struct Layout {
     Rectangle header;
     Rectangle weekdays;
@@ -244,33 +248,35 @@ typedef struct Layout {
     Rectangle status;
     float cell_width;
     float cell_height;
+    bool grid_visible;  // False in the portrait layout while the form takes the screen
+    bool portrait;
 } Layout;
 
-static void app_init(App *app);
-static void fonts_load(Fonts *fonts);
-static TextStyle fonts_load_style(const char *file_name, int32_t size_pixels,
-                                  const int *codepoints, bool *loaded);
+static void fonts_load(Fonts *fonts, const char *directory, float scale);
+static TextStyle fonts_load_style(const char *directory, const char *file_name,
+                                  int32_t size_pixels, float scale, const int *codepoints,
+                                  bool *loaded);
 static void fonts_unload(Fonts *fonts);
-static void app_deinit(App *app);
 static void app_handle_keys(App *app, const Layout *layout);
 static void app_select(App *app, Date date);
 static void app_sync(App *app);
-static void app_load_events(App *app, Date month);
+static void app_load_events(App *app, Date month, uint64_t revision);
 static const Event *app_event_find(const App *app, int64_t id);
 static int64_t app_event_first_on_day(const App *app, int32_t day_number);
 static void app_form_submit(App *app);
 static void app_event_delete(App *app, int64_t id);
 static bool app_task_done(const App *app, int64_t id, int32_t start_day);
 static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done);
-static Layout layout_compute(float width, float height);
+static Layout layout_compute(float width, float height, bool form_open);
+static Layout layout_compute_portrait(float width, float height, bool form_open);
 static Rectangle grid_cell_rectangle(const Layout *layout, int32_t cell_index);
 static Date grid_first_date(Date month);
 static void draw_header(App *app, Rectangle header);
 static void draw_weekdays(const Fonts *fonts, const Layout *layout);
 static void draw_grid(App *app, const Layout *layout);
-static Highlight highlight_compute(const App *app);
+static const Event *focused_event_find(const App *app);
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
-                           const Highlight *highlight);
+                           const Event *focused);
 static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date, bool in_month);
 static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int32_t day_number,
                                             const Event *focused);
@@ -291,7 +297,7 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y);
 static void draw_panel_form_fields_problem(App *app, Rectangle body, float y);
 static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
                                   const char *label, Rectangle box);
-static void draw_status(const App *app, Rectangle status);
+static void draw_status(App *app, Rectangle status);
 static void form_open(Form *form, Date date, int32_t kind);
 static void form_open_edit(Form *form, const Event *event);
 static void form_close(Form *form);
@@ -303,6 +309,7 @@ static bool text_line_fits(const TextStyle *style, const char *text, int32_t len
                            float width_pixels);
 static const char *form_parse(const Form *form, Date today, Event *event);
 static const char *form_parse_problem(const Form *form, Date today, Event *event);
+static const char *form_parse_order(const Event *event);
 static bool form_parse_time(const char *text, int32_t *minute_of_day);
 static bool form_parse_repeat_days(const char *text, int32_t *days);
 static bool event_occurs_on_day(const Event *event, int32_t day_number);
@@ -321,80 +328,90 @@ static void draw_text(const TextStyle *style, const char *text, float x, float y
 static Vector2 measure_text(const TextStyle *style, const char *text);
 static void draw_text_centered(const TextStyle *style, const char *text, Rectangle area,
                                Color color);
+static void scissor_begin(const Fonts *fonts, float x, float y, float width, float height);
 
-int main(void) {
-    // Static rather than on the stack, because App holds every loaded event.
+App *app_create(Backend *backend, const AppConfig *config) {
+    // Static rather than on the stack, because App holds every loaded event; one per program.
     static App app;
-    app_init(&app);
+    assert(!app.created);
+    assert(backend != NULL);
+    assert(config->scale > 0.0f);
+    app.created = true;
+    app.backend = backend;
+    app.touch = config->touch;
+    app.server_button = config->server_button;
 
-    // The one intentionally unbounded loop: it runs until the window is closed.
-    while (!WindowShouldClose()) {
-        Layout layout = layout_compute((float)GetScreenWidth(), (float)GetScreenHeight());
-        app_handle_keys(&app, &layout);
-        app_sync(&app);
-
-        BeginDrawing();
-        ClearBackground(style_color(BACKGROUND_COLOR));
-        draw_header(&app, layout.header);
-        draw_weekdays(&app.fonts, &layout);
-        draw_grid(&app, &layout);
-        draw_panel(&app, layout.panel);
-        draw_status(&app, layout.status);
-        EndDrawing();
-    }
-
-    app_deinit(&app);
-    return 0;
-}
-
-static void app_init(App *app) {
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
-    InitWindow(WINDOW_WIDTH_PIXELS, WINDOW_HEIGHT_PIXELS, "Calendar");
-    SetWindowMinSize(WINDOW_WIDTH_PIXELS_MIN, WINDOW_HEIGHT_PIXELS_MIN);
-    SetTargetFPS(60);
-    // Escape cancels the event form; closing the window stays with the window controls.
-    SetExitKey(KEY_NULL);
-    fonts_load(&app->fonts);
-    GuiSetFont(app->fonts.ui.font);
+    fonts_load(&app.fonts, config->font_directory, config->scale);
+    GuiSetFont(app.fonts.ui.font);
     GuiSetStyle(DEFAULT, TEXT_SIZE, TEXT_SIZE_PIXELS);
     // Rubik's advances already space its glyphs; raylib's default font needs extra room.
-    GuiSetStyle(DEFAULT, TEXT_SPACING, app->fonts.loaded ? 0 : 2);
-    if (!app->fonts.loaded) {
-        snprintf(app->status, sizeof(app->status), "Rubik font not found: using the default.");
+    GuiSetStyle(DEFAULT, TEXT_SPACING, app.fonts.loaded ? 0 : 2);
+    // Everything is laid out in layout pixels, so mouse and touch positions are scaled the same
+    // way; raygui then works unchanged.
+    SetMouseScale(1.0f / config->scale, 1.0f / config->scale);
+    if (!app.fonts.loaded) {
+        snprintf(app.status, sizeof(app.status), "Rubik font not found: using the default.");
     }
 
-    app->today = date_today();
-    app->selected = app->today;
-    app->events_month = (Date){ app->today.year, app->today.month, 1 };
-    app->events_stale = true;
-    app->form.field_active = FORM_FIELD_NONE;
-
-    // Beside the executable: the app has no settings or installer, so this is the one place
-    // that is both writable and predictable.
-    char path[DATABASE_PATH_SIZE];
-    int written = snprintf(path, sizeof(path), "%scalendar.db", GetApplicationDirectory());
-    if (written < 0 || written >= (int)sizeof(path)) {
-        snprintf(app->status, sizeof(app->status), "Database path is too long.");
-        return;
-    }
-    app->store_open = event_store_open(&app->store, path);
-    if (!app->store_open) {
-        snprintf(app->status, sizeof(app->status), "%s", app->store.error);
-        event_store_close(&app->store);
-    }
+    app.today = date_today();
+    app.selected = app.today;
+    app.events_month = (Date){ app.today.year, app.today.month, 1 };
+    app.events_stale = true;
+    app.form.field_active = FORM_FIELD_NONE;
+    return &app;
 }
 
-static void app_deinit(App *app) {
-    if (app->store_open) {
-        event_store_close(&app->store);
-        app->store_open = false;
-    }
+void app_destroy(App *app) {
+    assert(app->created);
     fonts_unload(&app->fonts);
-    CloseWindow();
+    app->created = false;
 }
 
-// Loads Rubik at each size it is drawn at. Needs the window, because glyphs go to a texture.
-static void fonts_load(Fonts *fonts) {
+void app_frame(App *app) {
+    const float scale = app->fonts.scale;
+    Layout layout = layout_compute((float)GetScreenWidth() / scale,
+                                   (float)GetScreenHeight() / scale, app->form.open);
+    app_handle_keys(app, &layout);
+    app_sync(app);
+
+    BeginDrawing();
+    ClearBackground(style_color(BACKGROUND_COLOR));
+    // Layout pixels to screen pixels. The fonts were rasterized at this scale, so text stays
+    // sharp; on the desktop the scale is 1 and this changes nothing.
+    BeginMode2D((Camera2D){ .offset = { 0, 0 }, .target = { 0, 0 }, .rotation = 0,
+                            .zoom = scale });
+    draw_header(app, layout.header);
+    if (layout.grid_visible) {
+        draw_weekdays(&app->fonts, &layout);
+        draw_grid(app, &layout);
+    }
+    draw_panel(app, layout.panel);
+    draw_status(app, layout.status);
+    EndMode2D();
+    EndDrawing();
+}
+
+void app_set_info(App *app, const char *info) {
+    snprintf(app->info, sizeof(app->info), "%s", info);
+}
+
+void app_set_status(App *app, const char *status) {
+    snprintf(app->status, sizeof(app->status), "%s", status);
+}
+
+bool app_text_input_active(const App *app) {
+    return app->form.open && app->form.field_active != FORM_FIELD_NONE;
+}
+
+bool app_take_server_request(App *app) {
+    bool requested = app->server_requested;
+    app->server_requested = false;
+    return requested;
+}
+
+// Loads Rubik at each size it is drawn at, times the scale, so that each glyph covers exactly
+// the screen pixels it is drawn on. Needs the window, because glyphs go to a texture.
+static void fonts_load(Fonts *fonts, const char *directory, float scale) {
     int codepoints[FONT_CODEPOINT_COUNT];
     int32_t count = 0;
     for (int32_t codepoint = 32; codepoint <= 126; codepoint++) {
@@ -406,29 +423,35 @@ static void fonts_load(Fonts *fonts) {
     assert(count == FONT_CODEPOINT_COUNT);
 
     fonts->loaded = true;
-    fonts->ui = fonts_load_style(FONT_FILE_REGULAR, TEXT_SIZE_PIXELS, codepoints, &fonts->loaded);
-    fonts->small = fonts_load_style(FONT_FILE_REGULAR, TEXT_SIZE_PIXELS_SMALL, codepoints,
-                                    &fonts->loaded);
-    fonts->small_strong = fonts_load_style(FONT_FILE_MEDIUM, TEXT_SIZE_PIXELS_SMALL, codepoints,
-                                           &fonts->loaded);
-    fonts->heading = fonts_load_style(FONT_FILE_MEDIUM, TEXT_SIZE_PIXELS_HEADING, codepoints,
-                                      &fonts->loaded);
+    fonts->scale = scale;
+    fonts->ui = fonts_load_style(directory, FONT_FILE_REGULAR, TEXT_SIZE_PIXELS, scale,
+                                 codepoints, &fonts->loaded);
+    fonts->small = fonts_load_style(directory, FONT_FILE_REGULAR, TEXT_SIZE_PIXELS_SMALL, scale,
+                                    codepoints, &fonts->loaded);
+    fonts->small_strong = fonts_load_style(directory, FONT_FILE_MEDIUM, TEXT_SIZE_PIXELS_SMALL,
+                                           scale, codepoints, &fonts->loaded);
+    fonts->heading = fonts_load_style(directory, FONT_FILE_MEDIUM, TEXT_SIZE_PIXELS_HEADING,
+                                      scale, codepoints, &fonts->loaded);
 }
 
 // Falls back to raylib's default font, scaled, when the file is missing or unreadable, so that
 // the calendar still works; *loaded then becomes false.
-static TextStyle fonts_load_style(const char *file_name, int32_t size_pixels,
-                                  const int *codepoints, bool *loaded) {
+static TextStyle fonts_load_style(const char *directory, const char *file_name,
+                                  int32_t size_pixels, float scale, const int *codepoints,
+                                  bool *loaded) {
     assert(size_pixels > 0);
-    TextStyle style = { GetFontDefault(), (float)size_pixels };
-    char path[DATABASE_PATH_SIZE];
-    int written = snprintf(path, sizeof(path), "%s%s", GetApplicationDirectory(), file_name);
+    assert(scale > 0.0f);
+    TextStyle style = { GetFontDefault(), (float)size_pixels, scale };
+    char path[PATH_SIZE];
+    int written = snprintf(path, sizeof(path), "%s%s", directory, file_name);
     if (written < 0 || written >= (int)sizeof(path)) {
         *loaded = false;
         return style;
     }
+    // The texture holds glyphs at screen size; size_pixels stays in layout pixels.
+    int32_t raster_pixels = (int32_t)((float)size_pixels * scale + 0.5f);
     // raylib takes a non-const pointer but only reads the codepoints.
-    Font font = LoadFontEx(path, size_pixels, (int *)codepoints, FONT_CODEPOINT_COUNT);
+    Font font = LoadFontEx(path, raster_pixels, (int *)codepoints, FONT_CODEPOINT_COUNT);
     if (!IsFontValid(font)) {
         *loaded = false;
         return style;
@@ -443,11 +466,12 @@ static void fonts_unload(Fonts *fonts) {
     UnloadFont(fonts->small.font);
     UnloadFont(fonts->small_strong.font);
     UnloadFont(fonts->heading.font);
-    *fonts = (Fonts){ 0 };
+    fonts->loaded = false;
 }
 
 static void app_handle_keys(App *app, const Layout *layout) {
-    if (IsKeyPressed(KEY_ESCAPE)) {
+    // Android's Back button does what Escape does on the desktop.
+    if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_BACK)) {
         if (app->form.open) {
             form_close(&app->form);
         }
@@ -472,6 +496,15 @@ static void app_handle_keys(App *app, const Layout *layout) {
     }
     if (IsKeyPressed(KEY_HOME)) {
         target = app->today;
+    }
+    // On a touch screen, a sideways swipe over the grid changes month, as the wheel does.
+    if (app->touch && CheckCollisionPointRec(GetMousePosition(), layout->grid)) {
+        if (IsGestureDetected(GESTURE_SWIPE_LEFT)) {
+            target = date_add_months(target, 1);
+        }
+        if (IsGestureDetected(GESTURE_SWIPE_RIGHT)) {
+            target = date_add_months(target, -1);
+        }
     }
     // The wheel changes month only over the grid, so that it means nothing over the panel.
     if (CheckCollisionPointRec(GetMousePosition(), layout->grid)) {
@@ -503,8 +536,13 @@ static void app_select(App *app, Date date) {
 static void app_sync(App *app) {
     app->today = date_today();
     Date month = { app->selected.year, app->selected.month, 1 };
+    // A new revision means a change from anywhere: this app, the desktop, or another phone.
+    uint64_t revision = backend_revision(app->backend);
+    if (revision != app->events_revision) {
+        app->events_stale = true;
+    }
     if (app->events_stale || !date_equal(month, app->events_month)) {
-        app_load_events(app, month);
+        app_load_events(app, month, revision);
     }
 
     int32_t selected_day = date_to_day_number(app->selected);
@@ -514,33 +552,33 @@ static void app_sync(App *app) {
     }
 }
 
-static void app_load_events(App *app, Date month) {
+// Also records the revision when loading fails, so that a failure is not retried every frame;
+// the next change of revision, or of month, tries again.
+static void app_load_events(App *app, Date month, uint64_t revision) {
     assert(month.day == 1);
     app->events_month = month;
+    app->events_revision = revision;
     app->events_stale = false;
     app->events_truncated = false;
     app->event_count = 0;
     app->completion_count = 0;
-    if (!app->store_open) {
-        return;
-    }
 
     Date first = grid_first_date(month);
     Date last = date_add_days(first, GRID_CELL_COUNT - 1);
-    int32_t count = event_store_load_range(&app->store, first, last, app->events,
-                                           EVENT_COUNT_MAX, &app->events_truncated);
+    int32_t count = backend_load_range(app->backend, first, last, app->events, EVENT_COUNT_MAX,
+                                       &app->events_truncated);
     if (count < 0) {
-        snprintf(app->status, sizeof(app->status), "%s", app->store.error);
+        snprintf(app->status, sizeof(app->status), "%s", backend_error(app->backend));
         return;
     }
     assert(count <= EVENT_COUNT_MAX);
     app->event_count = count;
 
     bool completions_truncated = false;
-    count = event_store_load_completions(&app->store, first, last, app->completions,
-                                         COMPLETION_COUNT_MAX, &completions_truncated);
+    count = backend_load_completions(app->backend, first, last, app->completions,
+                                     COMPLETION_COUNT_MAX, &completions_truncated);
     if (count < 0) {
-        snprintf(app->status, sizeof(app->status), "%s", app->store.error);
+        snprintf(app->status, sizeof(app->status), "%s", backend_error(app->backend));
         return;
     }
     assert(count <= COMPLETION_COUNT_MAX);
@@ -562,8 +600,8 @@ static void app_task_set_done(App *app, const Event *event, int32_t start_day, b
     assert(event->kind == EVENT_KIND_TASK);
     assert(app_task_done(app, event->id, start_day) != done);
     Date occurrence_start = date_from_day_number(start_day);
-    if (!event_store_set_task_done(&app->store, event->id, occurrence_start, done)) {
-        snprintf(app->status, sizeof(app->status), "%s", app->store.error);
+    if (!backend_set_task_done(app->backend, event->id, occurrence_start, done)) {
+        snprintf(app->status, sizeof(app->status), "%s", backend_error(app->backend));
         return;
     }
     // completions[] is reloaded by the next app_sync, together with the events.
@@ -601,18 +639,14 @@ static void app_form_submit(App *app) {
         snprintf(app->form.error, sizeof(app->form.error), "%s", mistake);
         return;
     }
-    if (!app->store_open) {
-        snprintf(app->form.error, sizeof(app->form.error), "No database: cannot save.");
-        return;
-    }
     // Typing the address and city of an existing location links to it, so that events at the
     // same place share one location.
     bool has_location = event.location.address[0] != '\0' || event.location.city[0] != '\0';
     if (has_location) {
-        event.location.id = event_store_location_find_or_create(
-            &app->store, event.location.address, event.location.city);
+        event.location.id = backend_location_find_or_create(
+            app->backend, event.location.address, event.location.city);
         if (event.location.id == 0) {
-            snprintf(app->form.error, sizeof(app->form.error), "%s", app->store.error);
+            snprintf(app->form.error, sizeof(app->form.error), "%s", backend_error(app->backend));
             return;
         }
     }
@@ -620,14 +654,14 @@ static void app_form_submit(App *app) {
     int64_t id = app->form.editing_id;
     if (editing) {
         event.id = id;
-        if (!event_store_update(&app->store, &event)) {
-            snprintf(app->form.error, sizeof(app->form.error), "%s", app->store.error);
+        if (!backend_update(app->backend, &event)) {
+            snprintf(app->form.error, sizeof(app->form.error), "%s", backend_error(app->backend));
             return;
         }
     } else {
-        id = event_store_insert(&app->store, &event);
+        id = backend_insert(app->backend, &event);
         if (id == 0) {
-            snprintf(app->form.error, sizeof(app->form.error), "%s", app->store.error);
+            snprintf(app->form.error, sizeof(app->form.error), "%s", backend_error(app->backend));
             return;
         }
     }
@@ -654,8 +688,8 @@ static void app_event_delete(App *app, int64_t id) {
         snprintf(title, sizeof(title), "%s", event->title);
     }
 
-    if (!event_store_delete(&app->store, id)) {
-        snprintf(app->status, sizeof(app->status), "%s", app->store.error);
+    if (!backend_remove(app->backend, id)) {
+        snprintf(app->status, sizeof(app->status), "%s", backend_error(app->backend));
         // The event may be gone, so show the real state.
         app->events_stale = true;
         return;
@@ -666,10 +700,15 @@ static void app_event_delete(App *app, int64_t id) {
     snprintf(app->status, sizeof(app->status), "Deleted \"%s\".", title);
 }
 
-static Layout layout_compute(float width, float height) {
+// width and height are in layout pixels. A window taller than wide, such as a phone, gets the
+// portrait layout; otherwise the panel sits to the right of the calendar.
+static Layout layout_compute(float width, float height, bool form_open) {
+    if (width < height) {
+        return layout_compute_portrait(width, height, form_open);
+    }
     const float padding = (float)PADDING_PIXELS;
     const float status_height = (float)STATUS_HEIGHT_PIXELS;
-    Layout layout = { 0 };
+    Layout layout = { .grid_visible = true, .portrait = false };
     layout.status = (Rectangle){ 0, height - status_height, width, status_height };
     layout.panel = (Rectangle){ width - padding - PANEL_WIDTH_PIXELS, padding,
                                 PANEL_WIDTH_PIXELS, height - status_height - 2 * padding };
@@ -686,6 +725,36 @@ static Layout layout_compute(float width, float height) {
     // The minimum window size guarantees room for every part.
     assert(layout.cell_width > 0.0f);
     assert(layout.cell_height > 0.0f);
+    return layout;
+}
+
+// The calendar above and the panel below, each the full width. While the form is open it takes
+// everything below the header, because it needs the height and the grid cannot be used then.
+static Layout layout_compute_portrait(float width, float height, bool form_open) {
+    const float padding = (float)PADDING_PIXELS_PORTRAIT;
+    const float status_height = (float)STATUS_HEIGHT_PIXELS;
+    const float content_width = width - 2 * padding;
+    Layout layout = { .grid_visible = !form_open, .portrait = true };
+    layout.status = (Rectangle){ 0, height - status_height, width, status_height };
+    layout.header = (Rectangle){ padding, padding, content_width, HEADER_HEIGHT_PIXELS };
+    float top = layout.header.y + layout.header.height + padding;
+    float bottom = layout.status.y - padding;
+    if (form_open) {
+        layout.panel = (Rectangle){ padding, top, content_width, bottom - top };
+        return layout;
+    }
+
+    float grid_height = (bottom - top) * GRID_HEIGHT_PERCENT_PORTRAIT / 100.0f -
+                        WEEKDAY_HEIGHT_PIXELS;
+    layout.weekdays = (Rectangle){ padding, top, content_width, WEEKDAY_HEIGHT_PIXELS };
+    layout.grid = (Rectangle){ padding, top + WEEKDAY_HEIGHT_PIXELS, content_width, grid_height };
+    layout.cell_width = layout.grid.width / GRID_COLUMN_COUNT;
+    layout.cell_height = layout.grid.height / GRID_ROW_COUNT;
+    float panel_y = layout.grid.y + layout.grid.height + padding;
+    layout.panel = (Rectangle){ padding, panel_y, content_width, bottom - panel_y };
+    assert(layout.cell_width > 0.0f);
+    assert(layout.cell_height > 0.0f);
+    assert(layout.panel.height > 0.0f);
     return layout;
 }
 
@@ -722,7 +791,20 @@ static void draw_header(App *app, Rectangle header) {
     char title[TEXT_LINE_SIZE];
     snprintf(title, sizeof(title), "%s %" PRId32, month_name(app->events_month.month),
              app->events_month.year);
-    draw_text_centered(&app->fonts.heading, title, header, style_color(TEXT_COLOR_NORMAL));
+    // Centered over the whole calendar when there is room, as on the desktop; on a phone,
+    // centered in the space right of the buttons, in the normal font if the heading font is
+    // too wide for it.
+    const float buttons_width = 194;
+    Rectangle area = header;
+    const TextStyle *style = &app->fonts.heading;
+    if (header.width < 2 * buttons_width + measure_text(style, title).x) {
+        area = (Rectangle){ header.x + buttons_width, header.y, header.width - buttons_width,
+                            header.height };
+        if (measure_text(style, title).x > area.width) {
+            style = &app->fonts.ui;
+        }
+    }
+    draw_text_centered(style, title, area, style_color(TEXT_COLOR_NORMAL));
 }
 
 static void draw_weekdays(const Fonts *fonts, const Layout *layout) {
@@ -740,37 +822,29 @@ static void draw_weekdays(const Fonts *fonts, const Layout *layout) {
 // mid-frame never draws one month's days with another month's events.
 static void draw_grid(App *app, const Layout *layout) {
     int32_t first_day = date_to_day_number(grid_first_date(app->events_month));
-    Highlight highlight = highlight_compute(app);
+    const Event *focused = focused_event_find(app);
     for (int32_t cell_index = 0; cell_index < GRID_CELL_COUNT; cell_index++) {
         Rectangle cell = grid_cell_rectangle(layout, cell_index);
         int32_t column = cell_index % GRID_COLUMN_COUNT;
-        draw_grid_cell(app, cell, first_day + cell_index, column, &highlight);
+        draw_grid_cell(app, cell, first_day + cell_index, column, focused);
     }
 }
 
-static Highlight highlight_compute(const App *app) {
-    Highlight highlight = { NULL, 0, 0 };
+// The focused item, if it occurs on the selected day; its creation dot is ringed in the grid.
+static const Event *focused_event_find(const App *app) {
     const Event *event = app_event_find(app, app->event_focused_id);
     if (event == NULL) {
-        return highlight;
+        return NULL;
     }
     // A click earlier in this frame may have moved the selection off the focused event.
-    int32_t start_day = 0;
-    if (!event_occurrence_on_day(event, date_to_day_number(app->selected), &start_day)) {
-        return highlight;
+    if (!event_occurs_on_day(event, date_to_day_number(app->selected))) {
+        return NULL;
     }
-
-    int32_t created_day = date_to_day_number(event->created_date);
-    highlight.event = event;
-    // An event added after its occurrence began runs its lead time backwards.
-    highlight.lead_first_day = created_day < start_day ? created_day : start_day;
-    highlight.lead_last_day = created_day < start_day ? start_day : created_day;
-    assert(highlight.lead_first_day <= highlight.lead_last_day);
-    return highlight;
+    return event;
 }
 
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
-                           const Highlight *highlight) {
+                           const Event *focused) {
     Date date = date_from_day_number(day_number);
     bool in_month = date.month == app->events_month.month;
     bool hovered = CheckCollisionPointRec(GetMousePosition(), cell);
@@ -783,15 +857,10 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
         fill = style_color(BASE_COLOR_FOCUSED);
     }
     DrawRectangleRec(cell, fill);
-    if (highlight->event != NULL) {
-        if (highlight->lead_first_day <= day_number && day_number <= highlight->lead_last_day) {
-            DrawRectangleRec(cell, Fade(event_color(highlight->event), LEAD_TINT_ALPHA));
-        }
-    }
     DrawRectangleLinesEx(cell, 1, style_color(BORDER_COLOR_NORMAL));
 
     draw_grid_cell_day_number(app, cell, date, in_month);
-    draw_grid_cell_creation_markers(app, cell, day_number, highlight->event);
+    draw_grid_cell_creation_markers(app, cell, day_number, focused);
     draw_grid_cell_events(app, cell, day_number, column);
 
     if (date_equal(date, app->selected)) {
@@ -816,7 +885,7 @@ static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date,
 }
 
 // One dot per event created on this day, right to left from the top-right corner. The focused
-// event's dot gets a ring so that the start of its highlighted lead time is easy to find.
+// event's dot gets a ring, so that the day it was created is easy to find.
 static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int32_t day_number,
                                             const Event *focused) {
     const float radius = (float)CREATION_MARKER_RADIUS_PIXELS;
@@ -938,7 +1007,7 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
 
     float text_x = bar.x + 4;
     Color text_color = WHITE;
-    BeginScissorMode((int)bar.x, (int)bar.y, (int)bar.width, (int)bar.height);
+    scissor_begin(&app->fonts, bar.x, bar.y, bar.width, bar.height);
     if (task) {
         Rectangle box = { bar.x + 4, bar.y + 4, 11, 11 };
         draw_check_mark(box, done, color);
@@ -1010,9 +1079,6 @@ static void draw_panel_events(App *app, Rectangle body) {
                               BUTTON_HEIGHT_PIXELS };
     Rectangle problem_button = { body.x + 2 * (button_width + gap), body.y, button_width,
                                  BUTTON_HEIGHT_PIXELS };
-    if (!app->store_open) {
-        GuiDisable();
-    }
     if (GuiButton(event_button, "New event")) {
         app->event_delete_id = 0;
         form_open(&app->form, app->selected, EVENT_KIND_EVENT);
@@ -1026,7 +1092,6 @@ static void draw_panel_events(App *app, Rectangle body) {
         app->event_delete_id = 0;
         form_open(&app->form, app->today, EVENT_KIND_PROBLEM);
     }
-    GuiEnable();
 
     // Cards stop where the "+N more" line and the legend begin.
     float list_top = body.y + BUTTON_HEIGHT_PIXELS + PADDING_PIXELS;
@@ -1098,7 +1163,7 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     // Clip the title short of the delete button. A done task's title is dimmed and struck out.
     const float title_x = task ? x + 24 : x;
     const Color title_color = style_color(done ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
-    BeginScissorMode((int)card.x, (int)card.y, (int)(card.width - 90), (int)card.height);
+    scissor_begin(&app->fonts, card.x, card.y, card.width - 90, card.height);
     draw_text(title_style, event->title, title_x, card.y + 8, title_color);
     if (done) {
         float width = measure_text(title_style, event->title).x;
@@ -1149,7 +1214,7 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
     const float line = (float)TEXT_LINE_HEIGHT_PIXELS_SMALL;
     const TextStyle *style = &fonts->small;
     char text[TEXT_LINE_SIZE];
-    BeginScissorMode((int)card.x, (int)card.y, (int)card.width - 4, (int)card.height);
+    scissor_begin(fonts, card.x, card.y, card.width - 4, card.height);
     float y = card.y + 8 + line;
     event_format_range(event, text, sizeof(text));
     draw_text(style, text, x, y, style_color(TEXT_COLOR_NORMAL));
@@ -1194,7 +1259,7 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
     EndScissorMode();
 }
 
-// Explains the two grid markings that are not self-evident.
+// Explains the grid's creation dots.
 static void draw_panel_legend(const Fonts *fonts, Rectangle area) {
     const Color sample = event_colors[0];
     const Color dim = style_color(TEXT_COLOR_DISABLED);
@@ -1203,8 +1268,10 @@ static void draw_panel_legend(const Fonts *fonts, Rectangle area) {
     draw_text(&fonts->small, "Day it was created", text_x, area.y, dim);
 
     float second_y = area.y + TEXT_LINE_HEIGHT_PIXELS_SMALL + 4;
-    DrawRectangleRec((Rectangle){ area.x, second_y, 16, 16 }, Fade(sample, LEAD_TINT_ALPHA));
-    draw_text(&fonts->small, "From creation to start, selected", text_x, second_y, dim);
+    DrawCircleV((Vector2){ area.x + 8, second_y + 8 }, CREATION_MARKER_RADIUS_PIXELS + 3,
+                style_color(BORDER_COLOR_PRESSED));
+    DrawCircleV((Vector2){ area.x + 8, second_y + 8 }, CREATION_MARKER_RADIUS_PIXELS, sample);
+    draw_text(&fonts->small, "Day the selected item was created", text_x, second_y, dim);
 }
 
 static void draw_panel_form(App *app, Rectangle body) {
@@ -1240,7 +1307,7 @@ static void draw_panel_form(App *app, Rectangle body) {
     }
     y += TEXT_LINE_HEIGHT_PIXELS_SMALL;
     if (form->error[0] != '\0') {
-        BeginScissorMode((int)body.x, (int)y, (int)body.width, TEXT_LINE_HEIGHT_PIXELS);
+        scissor_begin(&app->fonts, body.x, y, body.width, TEXT_LINE_HEIGHT_PIXELS);
         draw_text(&app->fonts.ui, form->error, body.x, y, error_color);
         EndScissorMode();
     }
@@ -1357,21 +1424,35 @@ static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
     }
 }
 
-static void draw_status(const App *app, Rectangle status) {
-    char text[STATUS_SIZE];
+static void draw_status(App *app, Rectangle status) {
+    char message[STATUS_SIZE];
     if (app->status[0] != '\0') {
-        snprintf(text, sizeof(text), "%s", app->status);
-    } else if (!app->store_open) {
-        snprintf(text, sizeof(text), "No database: events cannot be loaded or saved.");
+        snprintf(message, sizeof(message), "%s", app->status);
     } else if (app->events_truncated) {
-        snprintf(text, sizeof(text), "Showing the first %d events in this view; more are hidden.",
+        snprintf(message, sizeof(message), "Showing the first %d events; more are hidden.",
                  EVENT_COUNT_MAX);
+    } else if (app->touch) {
+        snprintf(message, sizeof(message), "%" PRId32 " items in view", app->event_count);
     } else {
-        snprintf(text, sizeof(text),
+        snprintf(message, sizeof(message),
                  "%" PRId32 " items in view    Arrows: day/week    PgUp/PgDn: month    "
                  "Click an item to edit", app->event_count);
     }
+    char text[INFO_SIZE + STATUS_SIZE + 8];
+    if (app->info[0] != '\0') {
+        snprintf(text, sizeof(text), "%s    %s", app->info, message);
+    } else {
+        snprintf(text, sizeof(text), "%s", message);
+    }
     GuiStatusBar(status, text);
+
+    if (app->server_button) {
+        Rectangle button = { status.x + status.width - SERVER_BUTTON_WIDTH_PIXELS - 2,
+                             status.y + 2, SERVER_BUTTON_WIDTH_PIXELS, status.height - 4 };
+        if (GuiButton(button, "Server")) {
+            app->server_requested = true;
+        }
+    }
 }
 
 static void form_open(Form *form, Date date, int32_t kind) {
@@ -1514,6 +1595,11 @@ static const char *form_parse(const Form *form, Date today, Event *event) {
         }
     }
 
+    return form_parse_order(event);
+}
+
+// Checks that the parsed dates and times come in order. Returns NULL, or what to fix.
+static const char *form_parse_order(const Event *event) {
     int32_t start_day = date_to_day_number(event->start_date);
     int32_t end_day = date_to_day_number(event->end_date);
     if (end_day < start_day) {
@@ -1809,12 +1895,14 @@ static Color style_color(int32_t property) {
     return GetColor((unsigned int)GuiGetStyle(DEFAULT, property));
 }
 
-// Positions are rounded to whole pixels, so that glyphs map one to one onto screen pixels and
-// stay sharp.
+// Positions are rounded to whole screen pixels, so that glyphs, rasterized at the screen
+// scale, map one to one onto screen pixels and stay sharp.
 static void draw_text(const TextStyle *style, const char *text, float x, float y, Color color) {
     assert(x >= 0.0f);
     assert(y >= 0.0f);
-    Vector2 position = { (float)(int32_t)(x + 0.5f), (float)(int32_t)(y + 0.5f) };
+    const float scale = style->scale;
+    Vector2 position = { (float)(int32_t)(x * scale + 0.5f) / scale,
+                         (float)(int32_t)(y * scale + 0.5f) / scale };
     DrawTextEx(style->font, text, position, style->size_pixels,
                (float)GuiGetStyle(DEFAULT, TEXT_SPACING), color);
 }
@@ -1829,4 +1917,11 @@ static void draw_text_centered(const TextStyle *style, const char *text, Rectang
     Vector2 text_size = measure_text(style, text);
     draw_text(style, text, area.x + (area.width - text_size.x) / 2,
               area.y + (area.height - text_size.y) / 2, color);
+}
+
+// raylib's scissor rectangle is in screen pixels, so the layout rectangle is scaled to match.
+static void scissor_begin(const Fonts *fonts, float x, float y, float width, float height) {
+    const float scale = fonts->scale;
+    BeginScissorMode((int)(x * scale), (int)(y * scale), (int)(width * scale),
+                     (int)(height * scale));
 }

@@ -15,12 +15,6 @@ enum {
     EVENT_STORE_STATEMENT_COUNT = 8,
 };
 
-// One checked-off occurrence of a task.
-typedef struct TaskCompletion {
-    int64_t event_id;
-    int32_t occurrence_start_day;  // Day number of the occurrence's start date
-} TaskCompletion;
-
 typedef struct EventStore {
     struct sqlite3 *database;
     struct sqlite3_stmt *statements[EVENT_STORE_STATEMENT_COUNT];

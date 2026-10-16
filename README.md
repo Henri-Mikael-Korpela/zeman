@@ -1,31 +1,62 @@
 # Calendar
 
-## Getting Started
+## Project structure
+
+- `desktop/` - the desktop app (Windows). It keeps the calendar in an SQLite database and serves it to phones on the same local network.
+- `android/` - the Android app. It shows and edits the desktop app's calendar over the network; it keeps no data of its own.
+- `shared/` - code both apps compile: the user interface, dates, events, and the network protocol and client.
+- `cmake/dependencies.cmake` - downloads raylib 5.5, raygui 4.0, SQLite 3.51.0 and the [Rubik](https://fonts.google.com/specimen/Rubik) font (with its SIL Open Font License) into `external/`, once; after that both builds are offline.
+
+## Desktop app
 
 ### Prerequisites
 
 - C compiler (tested with MinGW-w64 GCC 16)
 - CMake 3.21 or newer (tested on version 4.4)
 
-raylib 5.5, raygui 4.0, SQLite 3.51.0 and the [Rubik](https://fonts.google.com/specimen/Rubik) font (regular and medium, from Google Fonts, with its SIL Open Font License) are downloaded into `external/` on the first configure; after that the project builds offline. The build copies the fonts into a `fonts` folder next to the executable, which the app needs at run time; without it, the app falls back to raylib's default font.
-
 ### Building
 
-To build the project with MinGW, run the following CMake commands:
-
 ```sh
+cd desktop
 cmake --preset mingw-release
 cmake --build --preset mingw-release
 ```
 
-The executable is written to `build/calendar.exe`. Use the `mingw-debug` preset for a debug build in `build-debug/`.
-
-Without presets, pass the generator explicitly, otherwise CMake on Windows falls back to NMake:
+The executable is written to `desktop/build/calendar.exe`, with the fonts it needs in `desktop/build/fonts`. Use the `mingw-debug` preset for a debug build in `desktop/build-debug/`. Without presets, pass the generator explicitly, otherwise CMake on Windows falls back to NMake:
 
 ```sh
-cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake -S desktop -B desktop/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build desktop/build
 ```
+
+`calendar.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
+
+## Android app
+
+### Building
+
+From the `android` folder, on Windows:
+
+```bat
+build.bat
+```
+
+The first run downloads a JDK, the Android SDK and the NDK into `android/tools` (about 1.5 GB) and asks you to accept the Android SDK licenses (`build.bat -AcceptLicenses` accepts them without asking). Nothing is installed system-wide; CMake, which the desktop build needs anyway, is the only outside tool. Later builds take seconds.
+
+The result is `android/build/calendar.apk`, for 64-bit ARM phones running Android 7.0 or newer. Copy it to the phone and open it there; Android asks to allow installing apps from that source. The APK is signed with a key made on the first build and kept in `android/keystore/` (not committed); keep it, because Android installs an update only when it is signed with the same key.
+
+### Connecting
+
+The phone and the desktop talk directly, within the same local network; nothing goes through the internet.
+
+1. Start the desktop app. Its status bar shows "Phone access:" and its address on the network. The first time, Windows asks whether to allow it through the firewall: allow it on private networks.
+2. Open the app on the phone, on the same Wi-Fi network. It looks for the desktop app and connects by itself; if it cannot find it, type the address from the desktop's status bar.
+
+The phone remembers the desktop and connects to it at the next start; the **Server** button in its status bar goes back to the connection screen. Changes made on either side appear on the other within about a second.
+
+The desktop app accepts connections only from local network addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x and 169.254.x.x) and has no password, so anyone on the same local network can use it while it runs.
+
+On the phone, swipe sideways over the calendar to change month; Back closes the form. Typing on the phone supports letters, digits and common punctuation, not letters such as a-umlaut.
 
 ## Usage
 
@@ -46,8 +77,8 @@ To delete an event, press **Delete** on its card and confirm; deleting a repeati
 Each event records when it was created:
 
 - A colored dot in a day cell marks the day an event was created.
-- Selecting an event tints the days from its creation to its start (for a repeating event, to the occurrence on the selected day), and its card shows how long that lead time was.
+- The dot of the selected event or task is ringed, and its card shows how long before its start it was created (for a repeating event, before the occurrence on the selected day).
 
 Keys: arrows move by a day or a week, Page Up/Page Down change month, Home jumps to today, Tab moves between form fields, and Escape cancels the form.
 
-Events are stored in `calendar.db`, an SQLite database next to the executable (for example `build/calendar.db`). Deleting the build directory deletes the events. Databases from earlier versions are upgraded automatically when opened.
+Events are stored in `calendar.db`, an SQLite database next to the desktop executable (`desktop/build/calendar.db`). Deleting the build directory deletes the events. Databases from earlier versions are upgraded automatically when opened.

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A NativeActivity app: all code is the C library libmain.so, so there is no Java code
+     (hasCode="false"). Portrait only, because the phone layout is built for it. Cleartext
+     traffic is allowed because the app talks plain TCP to the desktop on the local network. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.calendar.mobile"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+
+    <application
+        android:label="Calendar"
+        android:hasCode="false"
+        android:usesCleartextTraffic="true"
+        android:allowBackup="false">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout"
+            android:windowSoftInputMode="adjustNothing">
+            <meta-data android:name="android.app.lib_name" android:value="main" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
