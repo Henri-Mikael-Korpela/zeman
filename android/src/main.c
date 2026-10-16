@@ -31,8 +31,10 @@ enum {
     LINE_PIXELS = 28,
     BUTTON_HEIGHT_PIXELS = 44,
     // A strip along the left edge, always shown: its handle says that the navigation can be
-    // pulled out from there, and touches on it never reach the view beside it.
-    GUTTER_WIDTH_PIXELS = 14,
+    // pulled out from there, and touches on it never reach the view beside it. It is also the
+    // target for starting a drag, so it is wide enough for a thumb: about 8 mm on a typical
+    // phone, where 14 pixels (3 mm) was too hard to hit.
+    GUTTER_WIDTH_PIXELS = 32,
     // Wide enough for "Connection settings" and an address, narrow enough that the view still
     // shows beside it on a 420 pixel wide layout.
     DRAWER_WIDTH_PIXELS = 280,
@@ -487,10 +489,14 @@ static void gutter_draw(float height) {
     DrawRectangleRec((Rectangle){ 0, 0, GUTTER_WIDTH_PIXELS, height },
                      GetColor((unsigned int)GuiGetStyle(DEFAULT, BASE_COLOR_NORMAL)));
     DrawRectangleRec((Rectangle){ GUTTER_WIDTH_PIXELS - 1, 0, 1, height }, border);
-    DrawRectangleRounded((Rectangle){ 5, middle - 44, 3, 28 }, 1.0f, 4, border);
-    DrawRectangleRounded((Rectangle){ 5, middle + 16, 3, 28 }, 1.0f, 4, border);
-    DrawLineEx((Vector2){ 4, middle - 7 }, (Vector2){ 9.5f, middle }, 2.0f, accent);
-    DrawLineEx((Vector2){ 9.5f, middle }, (Vector2){ 4, middle + 7 }, 2.0f, accent);
+    // The grip lines and arrow are centred in the strip.
+    const float center = (GUTTER_WIDTH_PIXELS - 1) / 2.0f;
+    DrawRectangleRounded((Rectangle){ center - 2, middle - 64, 4, 44 }, 1.0f, 4, border);
+    DrawRectangleRounded((Rectangle){ center - 2, middle + 20, 4, 44 }, 1.0f, 4, border);
+    DrawLineEx((Vector2){ center - 4, middle - 10 }, (Vector2){ center + 4, middle }, 3.0f,
+               accent);
+    DrawLineEx((Vector2){ center + 4, middle }, (Vector2){ center - 4, middle + 10 }, 3.0f,
+               accent);
 }
 
 // The scan screen uses the calendar's layout pixels: drawing and touches are scaled the same
