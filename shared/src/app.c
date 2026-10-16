@@ -42,6 +42,9 @@ enum {
     // Title, start, end, location, description, repeat and repeat until. The rows keep their
     // place for every kind of entry, so that the buttons below never move.
     FORM_ROW_COUNT = 7,
+    // The Month/Week/Day selector: one toggle per range.
+    RANGE_ITEM_WIDTH_PIXELS = 72,
+    RANGE_BAR_HEIGHT_PIXELS = 28,
     GRID_COLUMN_COUNT = 7,
     // Six weeks always cover a whole month, whatever weekday it starts on.
     GRID_ROW_COUNT = 6,
@@ -162,19 +165,30 @@ static const Color error_color = { 190, 30, 30, 255 };
 // at a glance rather than as one more event.
 static const Color problem_color = { 130, 20, 20, 255 };
 
+// How many days the calendar shows at once. Every range uses the same day cells; a week is one
+// row of seven, and a day one cell the width of the calendar, so that whole titles show.
+typedef enum CalendarRange {
+    RANGE_MONTH,
+    RANGE_WEEK,
+    RANGE_DAY,
+    RANGE_COUNT,
+} CalendarRange;
+
+// raygui separates toggle group items with semicolons; the order is CalendarRange's.
+static const char range_labels[] = "Month;Week;Day";
+
 typedef struct KeyStep {
     int32_t key;     // raylib KeyboardKey
     int32_t days;
-    int32_t months;
 } KeyStep;
 
+// The arrow keys move the selection by a day or a week, whatever the range; Page Up and Page
+// Down move by the range (see range_step).
 static const KeyStep key_steps[] = {
-    { KEY_LEFT, -1, 0 },
-    { KEY_RIGHT, 1, 0 },
-    { KEY_UP, -7, 0 },
-    { KEY_DOWN, 7, 0 },
-    { KEY_PAGE_UP, 0, -1 },
-    { KEY_PAGE_DOWN, 0, 1 },
+    { KEY_LEFT, -1 },
+    { KEY_RIGHT, 1 },
+    { KEY_UP, -7 },
+    { KEY_DOWN, 7 },
 };
 enum { KEY_STEP_COUNT = sizeof(key_steps) / sizeof(key_steps[0]) };
 
@@ -221,7 +235,11 @@ typedef struct App {
     Date today;
     Date selected;
     Date events_month;              // First day of the month that events[] was loaded for
+    // First day shown, set by app_sync. The six weeks loaded for a month contain every week and
+    // day within it, so week and day views need no loading of their own.
+    Date visible_first;
     int32_t event_count;
+    int range;                      // CalendarRange; int because raygui's toggle group writes it
     int32_t completion_count;
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
@@ -245,12 +263,15 @@ typedef struct TextLines {
 
 typedef struct Layout {
     Rectangle header;
+    Rectangle range_bar;  // The Month/Week/Day selector; empty when not shown
     Rectangle weekdays;
     Rectangle grid;
     Rectangle panel;
     Rectangle status;
     float cell_width;
     float cell_height;
+    int32_t columns;    // Days across, 7 or 1
+    int32_t rows;       // Weeks down, 6 or 1
     bool grid_visible;  // False in the portrait layout while the form takes the screen
     bool portrait;
 } Layout;
@@ -270,12 +291,19 @@ static void app_form_submit(App *app);
 static void app_event_delete(App *app, int64_t id);
 static bool app_task_done(const App *app, int64_t id, int32_t start_day);
 static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done);
-static Layout layout_compute(float width, float height, bool form_open);
-static Layout layout_compute_portrait(float width, float height, bool form_open);
+static Layout layout_compute(float width, float height, bool form_open, int32_t range);
+static Layout layout_compute_portrait(float width, float height, bool form_open,
+                                      int32_t range);
+static void layout_set_grid(Layout *layout, int32_t range);
+static int32_t range_day_count(int32_t range);
+static Date range_step(Date date, int32_t range, int32_t direction);
+static Date range_first_date(const App *app);
+static void range_title(const App *app, char *buffer, size_t buffer_size);
+static int32_t app_visible_item_count(const App *app);
 static Rectangle grid_cell_rectangle(const Layout *layout, int32_t cell_index);
 static Date grid_first_date(Date month);
-static void draw_header(App *app, Rectangle header);
-static void draw_weekdays(const Fonts *fonts, const Layout *layout);
+static void draw_header(App *app, const Layout *layout);
+static void draw_weekdays(const Fonts *fonts, const Layout *layout, Date first);
 static void draw_grid(App *app, const Layout *layout);
 static const Event *focused_event_find(const App *app);
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
@@ -376,17 +404,20 @@ void app_frame(App *app, Rectangle area) {
     app->fonts.origin = (Vector2){ area.x, area.y };
     SetMouseOffset(-(int)area.x, -(int)area.y);
     SetMouseScale(1.0f / scale, 1.0f / scale);
-    Layout layout = layout_compute(area.width / scale, area.height / scale, app->form.open);
+    Layout layout = layout_compute(area.width / scale, area.height / scale, app->form.open,
+                                   app->range);
     app_handle_keys(app, &layout);
     app_sync(app);
+    // Again, because a key may have changed the range or opened the form.
+    layout = layout_compute(area.width / scale, area.height / scale, app->form.open, app->range);
 
     // The fonts were rasterized at this scale, so text stays sharp; on the desktop the scale is
     // 1 and only the offset matters.
     BeginMode2D((Camera2D){ .offset = { area.x, area.y }, .target = { 0, 0 }, .rotation = 0,
                             .zoom = scale });
-    draw_header(app, layout.header);
+    draw_header(app, &layout);
     if (layout.grid_visible) {
-        draw_weekdays(&app->fonts, &layout);
+        draw_weekdays(&app->fonts, &layout, app->visible_first);
         draw_grid(app, &layout);
     }
     draw_panel(app, layout.panel);
@@ -525,33 +556,45 @@ static void app_handle_keys(App *app, const Layout *layout) {
         return;
     }
 
+    if (IsKeyPressed(KEY_M)) {
+        app->range = RANGE_MONTH;
+    }
+    if (IsKeyPressed(KEY_W)) {
+        app->range = RANGE_WEEK;
+    }
+    if (IsKeyPressed(KEY_D)) {
+        app->range = RANGE_DAY;
+    }
     Date target = app->selected;
     for (int32_t i = 0; i < KEY_STEP_COUNT; i++) {
         if (IsKeyPressed(key_steps[i].key)) {
             target = date_add_days(target, key_steps[i].days);
-            target = date_add_months(target, key_steps[i].months);
         }
+    }
+    if (IsKeyPressed(KEY_PAGE_UP)) {
+        target = range_step(target, app->range, -1);
+    }
+    if (IsKeyPressed(KEY_PAGE_DOWN)) {
+        target = range_step(target, app->range, 1);
     }
     if (IsKeyPressed(KEY_HOME)) {
         target = app->today;
     }
-    // On a touch screen, a sideways swipe over the grid changes month, as the wheel does.
-    if (app->touch && CheckCollisionPointRec(GetMousePosition(), layout->grid)) {
-        if (IsGestureDetected(GESTURE_SWIPE_LEFT)) {
-            target = date_add_months(target, 1);
-        }
-        if (IsGestureDetected(GESTURE_SWIPE_RIGHT)) {
-            target = date_add_months(target, -1);
-        }
-    }
-    // The wheel changes month only over the grid, so that it means nothing over the panel.
+    // Over the grid only, so that they mean nothing over the panel: a sideways swipe on a touch
+    // screen, or the wheel, moves by the range.
     if (CheckCollisionPointRec(GetMousePosition(), layout->grid)) {
+        if (app->touch && IsGestureDetected(GESTURE_SWIPE_LEFT)) {
+            target = range_step(target, app->range, 1);
+        }
+        if (app->touch && IsGestureDetected(GESTURE_SWIPE_RIGHT)) {
+            target = range_step(target, app->range, -1);
+        }
         float wheel = GetMouseWheelMove();
         if (wheel > 0.0f) {
-            target = date_add_months(target, -1);
+            target = range_step(target, app->range, -1);
         }
         if (wheel < 0.0f) {
-            target = date_add_months(target, 1);
+            target = range_step(target, app->range, 1);
         }
     }
     app_select(app, target);
@@ -582,6 +625,8 @@ static void app_sync(App *app) {
     if (app->events_stale || !date_equal(month, app->events_month)) {
         app_load_events(app, month, revision);
     }
+    // After loading, because a month view starts from the loaded month.
+    app->visible_first = range_first_date(app);
 
     int32_t selected_day = date_to_day_number(app->selected);
     const Event *focused = app_event_find(app, app->event_focused_id);
@@ -740,9 +785,9 @@ static void app_event_delete(App *app, int64_t id) {
 
 // width and height are in layout pixels. A window taller than wide, such as a phone, gets the
 // portrait layout; otherwise the panel sits to the right of the calendar.
-static Layout layout_compute(float width, float height, bool form_open) {
+static Layout layout_compute(float width, float height, bool form_open, int32_t range) {
     if (width < height) {
-        return layout_compute_portrait(width, height, form_open);
+        return layout_compute_portrait(width, height, form_open, range);
     }
     const float padding = (float)PADDING_PIXELS;
     const float status_height = (float)STATUS_HEIGHT_PIXELS;
@@ -753,22 +798,139 @@ static Layout layout_compute(float width, float height, bool form_open) {
 
     float calendar_width = layout.panel.x - 2 * padding;
     layout.header = (Rectangle){ padding, padding, calendar_width, HEADER_HEIGHT_PIXELS };
+    // The range selector at the right end of the header, centered in its height.
+    const float range_width = RANGE_COUNT * (RANGE_ITEM_WIDTH_PIXELS + 2) - 2;
+    layout.range_bar = (Rectangle){ padding + calendar_width - range_width,
+                                    padding + (HEADER_HEIGHT_PIXELS - RANGE_BAR_HEIGHT_PIXELS) / 2,
+                                    range_width, RANGE_BAR_HEIGHT_PIXELS };
     float weekdays_y = layout.header.y + layout.header.height + padding / 2;
     layout.weekdays = (Rectangle){ padding, weekdays_y, calendar_width, WEEKDAY_HEIGHT_PIXELS };
     float grid_y = weekdays_y + WEEKDAY_HEIGHT_PIXELS;
     layout.grid = (Rectangle){ padding, grid_y, calendar_width,
                                height - status_height - padding - grid_y };
-    layout.cell_width = layout.grid.width / GRID_COLUMN_COUNT;
-    layout.cell_height = layout.grid.height / GRID_ROW_COUNT;
-    // The minimum window size guarantees room for every part.
-    assert(layout.cell_width > 0.0f);
-    assert(layout.cell_height > 0.0f);
+    layout_set_grid(&layout, range);
     return layout;
+}
+
+// Rows and columns of day cells for the range, filling the grid rectangle.
+static void layout_set_grid(Layout *layout, int32_t range) {
+    assert(range >= 0);
+    assert(range < RANGE_COUNT);
+    layout->columns = range == RANGE_DAY ? 1 : GRID_COLUMN_COUNT;
+    layout->rows = range == RANGE_MONTH ? GRID_ROW_COUNT : 1;
+    assert(layout->columns * layout->rows == range_day_count(range));
+    layout->cell_width = layout->grid.width / (float)layout->columns;
+    layout->cell_height = layout->grid.height / (float)layout->rows;
+    // The minimum window size guarantees room for every part.
+    assert(layout->cell_width > 0.0f);
+    assert(layout->cell_height > 0.0f);
+}
+
+static int32_t range_day_count(int32_t range) {
+    switch ((CalendarRange)range) {
+    case RANGE_MONTH:
+        return GRID_CELL_COUNT;
+    case RANGE_WEEK:
+        return GRID_COLUMN_COUNT;
+    case RANGE_DAY:
+        return 1;
+    case RANGE_COUNT:
+        break;
+    }
+    assert(false); // Not a CalendarRange.
+    return 1;
+}
+
+// The date one range before (direction -1) or after (1) date: a month, a week or a day.
+static Date range_step(Date date, int32_t range, int32_t direction) {
+    assert(direction == -1 || direction == 1);
+    switch ((CalendarRange)range) {
+    case RANGE_MONTH:
+        return date_add_months(date, direction);
+    case RANGE_WEEK:
+        return date_add_days(date, 7 * direction);
+    case RANGE_DAY:
+        return date_add_days(date, direction);
+    case RANGE_COUNT:
+        break;
+    }
+    assert(false); // Not a CalendarRange.
+    return date;
+}
+
+// A month starts on the Monday of the week that holds its first day, a week on its Monday, and
+// a day view shows the selected day.
+static Date range_first_date(const App *app) {
+    switch ((CalendarRange)app->range) {
+    case RANGE_MONTH:
+        return grid_first_date(app->events_month);
+    case RANGE_WEEK:
+        return date_add_days(app->selected, -date_weekday(app->selected));
+    case RANGE_DAY:
+        return app->selected;
+    case RANGE_COUNT:
+        break;
+    }
+    assert(false); // Not a CalendarRange.
+    return app->selected;
+}
+
+// "October 2026"; "12 - 18 October 2026", or with both months or years when the week spans
+// them; "Tue 20 October 2026".
+static void range_title(const App *app, char *buffer, size_t buffer_size) {
+    const Date first = app->visible_first;
+    const Date last = date_add_days(first, GRID_COLUMN_COUNT - 1);
+    switch ((CalendarRange)app->range) {
+    case RANGE_MONTH:
+        snprintf(buffer, buffer_size, "%s %" PRId32, month_name(app->events_month.month),
+                 app->events_month.year);
+        return;
+    case RANGE_WEEK:
+        if (first.month == last.month) {
+            snprintf(buffer, buffer_size, "%" PRId32 " - %" PRId32 " %s %" PRId32, first.day,
+                     last.day, month_name(first.month), first.year);
+        } else if (first.year == last.year) {
+            snprintf(buffer, buffer_size, "%" PRId32 " %s - %" PRId32 " %s %" PRId32, first.day,
+                     month_short_name(first.month), last.day, month_short_name(last.month),
+                     last.year);
+        } else {
+            snprintf(buffer, buffer_size, "%" PRId32 " %s %" PRId32 " - %" PRId32 " %s %" PRId32,
+                     first.day, month_short_name(first.month), first.year, last.day,
+                     month_short_name(last.month), last.year);
+        }
+        return;
+    case RANGE_DAY:
+        snprintf(buffer, buffer_size, "%s %" PRId32 " %s %" PRId32,
+                 weekday_short_name(date_weekday(first)), first.day, month_name(first.month),
+                 first.year);
+        return;
+    case RANGE_COUNT:
+        break;
+    }
+    assert(false); // Not a CalendarRange.
+    buffer[0] = '\0';
+}
+
+// Items with an occurrence on a day shown, for the status bar.
+static int32_t app_visible_item_count(const App *app) {
+    const int32_t first_day = date_to_day_number(app->visible_first);
+    const int32_t day_count = range_day_count(app->range);
+    int32_t count = 0;
+    for (int32_t i = 0; i < app->event_count; i++) {
+        for (int32_t day = 0; day < day_count; day++) {
+            if (event_occurs_on_day(&app->events[i], first_day + day)) {
+                count++;
+                break;
+            }
+        }
+    }
+    return count;
 }
 
 // The calendar above and the panel below, each the full width. While the form is open it takes
 // everything below the header, because it needs the height and the grid cannot be used then.
-static Layout layout_compute_portrait(float width, float height, bool form_open) {
+static Layout layout_compute_portrait(float width, float height, bool form_open,
+                                      int32_t range) {
     const float padding = (float)PADDING_PIXELS_PORTRAIT;
     const float status_height = (float)STATUS_HEIGHT_PIXELS;
     const float content_width = width - 2 * padding;
@@ -782,25 +944,25 @@ static Layout layout_compute_portrait(float width, float height, bool form_open)
         return layout;
     }
 
+    // The header has no room beside its buttons and title, so the range selector gets a row.
+    layout.range_bar = (Rectangle){ padding, top, content_width, RANGE_BAR_HEIGHT_PIXELS };
+    top += RANGE_BAR_HEIGHT_PIXELS + padding;
     float grid_height = (bottom - top) * GRID_HEIGHT_PERCENT_PORTRAIT / 100.0f -
                         WEEKDAY_HEIGHT_PIXELS;
     layout.weekdays = (Rectangle){ padding, top, content_width, WEEKDAY_HEIGHT_PIXELS };
     layout.grid = (Rectangle){ padding, top + WEEKDAY_HEIGHT_PIXELS, content_width, grid_height };
-    layout.cell_width = layout.grid.width / GRID_COLUMN_COUNT;
-    layout.cell_height = layout.grid.height / GRID_ROW_COUNT;
+    layout_set_grid(&layout, range);
     float panel_y = layout.grid.y + layout.grid.height + padding;
     layout.panel = (Rectangle){ padding, panel_y, content_width, bottom - panel_y };
-    assert(layout.cell_width > 0.0f);
-    assert(layout.cell_height > 0.0f);
     assert(layout.panel.height > 0.0f);
     return layout;
 }
 
 static Rectangle grid_cell_rectangle(const Layout *layout, int32_t cell_index) {
     assert(cell_index >= 0);
-    assert(cell_index < GRID_CELL_COUNT);
-    int32_t column = cell_index % GRID_COLUMN_COUNT;
-    int32_t row = cell_index / GRID_COLUMN_COUNT;
+    assert(cell_index < layout->rows * layout->columns);
+    int32_t column = cell_index % layout->columns;
+    int32_t row = cell_index / layout->columns;
     return (Rectangle){ layout->grid.x + (float)column * layout->cell_width,
                         layout->grid.y + (float)row * layout->cell_height,
                         layout->cell_width, layout->cell_height };
@@ -814,56 +976,68 @@ static Date grid_first_date(Date month) {
     return first;
 }
 
-static void draw_header(App *app, Rectangle header) {
+// Buttons on the left, the range selector on the right (or in its own row on a phone), and the
+// title of what is shown between them.
+static void draw_header(App *app, const Layout *layout) {
+    const Rectangle header = layout->header;
     const float height = header.height;
     if (GuiButton((Rectangle){ header.x, header.y, 40, height }, "<")) {
-        app_select(app, date_add_months(app->selected, -1));
+        app_select(app, range_step(app->selected, app->range, -1));
     }
     if (GuiButton((Rectangle){ header.x + 48, header.y, 40, height }, ">")) {
-        app_select(app, date_add_months(app->selected, 1));
+        app_select(app, range_step(app->selected, app->range, 1));
     }
     if (GuiButton((Rectangle){ header.x + 96, header.y, 90, height }, "Today")) {
         app_select(app, app->today);
     }
+    if (layout->range_bar.width > 0.0f) {
+        // raygui lays the toggles out side by side, each the size of these bounds, 2 apart.
+        Rectangle item = { layout->range_bar.x, layout->range_bar.y,
+                           (layout->range_bar.width - 2 * (RANGE_COUNT - 1)) / RANGE_COUNT,
+                           layout->range_bar.height };
+        GuiToggleGroup(item, range_labels, &app->range);
+    }
 
     char title[TEXT_LINE_SIZE];
-    snprintf(title, sizeof(title), "%s %" PRId32, month_name(app->events_month.month),
-             app->events_month.year);
-    // Centered over the whole calendar when there is room, as on the desktop; on a phone,
-    // centered in the space right of the buttons, in the normal font if the heading font is
-    // too wide for it.
+    range_title(app, title, sizeof(title));
     const float buttons_width = 194;
-    Rectangle area = header;
+    float right = header.x + header.width;
+    if (!layout->portrait) {
+        right = layout->range_bar.x - 8;
+    }
+    Rectangle area = { header.x + buttons_width, header.y, right - header.x - buttons_width,
+                       height };
+    // The normal font when the heading font is too wide for the space, as on a phone.
     const TextStyle *style = &app->fonts.heading;
-    if (header.width < 2 * buttons_width + measure_text(style, title).x) {
-        area = (Rectangle){ header.x + buttons_width, header.y, header.width - buttons_width,
-                            header.height };
-        if (measure_text(style, title).x > area.width) {
-            style = &app->fonts.ui;
-        }
+    if (measure_text(style, title).x > area.width) {
+        style = &app->fonts.ui;
     }
     draw_text_centered(style, title, area, style_color(TEXT_COLOR_NORMAL));
 }
 
-static void draw_weekdays(const Fonts *fonts, const Layout *layout) {
-    for (int32_t column = 0; column < GRID_COLUMN_COUNT; column++) {
+// The names of the days shown: short in a week or month, in full for a single day.
+static void draw_weekdays(const Fonts *fonts, const Layout *layout, Date first) {
+    for (int32_t column = 0; column < layout->columns; column++) {
         Rectangle area = { layout->weekdays.x + (float)column * layout->cell_width,
                            layout->weekdays.y, layout->cell_width, layout->weekdays.height };
+        int32_t weekday = date_weekday(date_add_days(first, column));
         // Weekend names are dimmed, as on a paper calendar.
-        bool weekend = column >= 5;
-        Color color = style_color(weekend ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
-        draw_text_centered(&fonts->ui, weekday_short_name(column), area, color);
+        Color color = style_color(weekday >= 5 ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
+        const char *name = layout->columns == 1 ? weekday_name(weekday)
+                                                : weekday_short_name(weekday);
+        draw_text_centered(&fonts->ui, name, area, color);
     }
 }
 
-// Draws from events_month rather than the selected date, so that a click that changes month
-// mid-frame never draws one month's days with another month's events.
+// Draws from visible_first, set by app_sync, rather than the selected date, so that a click
+// that changes the selection mid-frame never draws one range's days with another's events.
 static void draw_grid(App *app, const Layout *layout) {
-    int32_t first_day = date_to_day_number(grid_first_date(app->events_month));
+    int32_t first_day = date_to_day_number(app->visible_first);
     const Event *focused = focused_event_find(app);
-    for (int32_t cell_index = 0; cell_index < GRID_CELL_COUNT; cell_index++) {
+    const int32_t cell_count = layout->rows * layout->columns;
+    for (int32_t cell_index = 0; cell_index < cell_count; cell_index++) {
         Rectangle cell = grid_cell_rectangle(layout, cell_index);
-        int32_t column = cell_index % GRID_COLUMN_COUNT;
+        int32_t column = cell_index % layout->columns;
         draw_grid_cell(app, cell, first_day + cell_index, column, focused);
     }
 }
@@ -884,7 +1058,9 @@ static const Event *focused_event_find(const App *app) {
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
                            const Event *focused) {
     Date date = date_from_day_number(day_number);
-    bool in_month = date.month == app->events_month.month;
+    // Days of the next and previous month are dimmed in the month view only; a week or day
+    // shows its days alike.
+    bool in_month = app->range != RANGE_MONTH || date.month == app->events_month.month;
     bool hovered = CheckCollisionPointRec(GetMousePosition(), cell);
     if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         app_select(app, date);
@@ -1470,11 +1646,12 @@ static void draw_status(App *app, Rectangle status) {
         snprintf(message, sizeof(message), "Showing the first %d events; more are hidden.",
                  EVENT_COUNT_MAX);
     } else if (app->touch) {
-        snprintf(message, sizeof(message), "%" PRId32 " items in view", app->event_count);
+        snprintf(message, sizeof(message), "%" PRId32 " items in view",
+                 app_visible_item_count(app));
     } else {
         snprintf(message, sizeof(message),
-                 "%" PRId32 " items in view    Arrows: day/week    PgUp/PgDn: month    "
-                 "Click an item to edit", app->event_count);
+                 "%" PRId32 " items in view    Arrows: day/week    PgUp/PgDn: previous/next    "
+                 "M/W/D: month/week/day    Click an item to edit", app_visible_item_count(app));
     }
     char text[INFO_SIZE + STATUS_SIZE + 8];
     if (app->info[0] != '\0') {

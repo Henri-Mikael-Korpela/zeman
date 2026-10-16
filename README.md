@@ -60,7 +60,7 @@ The phone remembers the desktop and connects to it at the next start; the **Serv
 
 The desktop app accepts connections only from local network addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x and 169.254.x.x) and has no password, so anyone on the same local network can use it while it runs.
 
-On the phone, swipe sideways over the calendar to change month; Back closes the form. Typing on the phone supports letters, digits and common punctuation, not letters such as a-umlaut.
+On the phone, swipe sideways over the calendar to move to the previous or next month, week or day; Back closes the form. Typing on the phone supports letters, digits and common punctuation, not letters such as a-umlaut.
 
 ## Usage
 
@@ -83,6 +83,8 @@ Each event records when it was created:
 - A colored dot in a day cell marks the day an event was created.
 - The dot of the selected event or task is ringed, and its card shows how long before its start it was created (for a repeating event, before the occurrence on the selected day).
 
-Keys: arrows move by a day or a week, Page Up/Page Down change month, Home jumps to today, Tab moves between form fields, and Escape cancels the form.
+The **Month**, **Week** and **Day** buttons at the top choose how many days the calendar shows (on a phone, in a row under the header). The arrow buttons, Page Up/Page Down, the mouse wheel over the calendar and sideways swipes on a phone move by that range.
+
+Keys: arrows move by a day or a week, Page Up/Page Down move to the previous or next month, week or day, M, W and D switch between month, week and day, Home jumps to today, Tab moves between form fields, and Escape cancels the form.
 
 Events are stored in `calendar.db`, an SQLite database next to the desktop executable (`desktop/build/calendar.db`). Deleting the build directory deletes the events. Databases from earlier versions are upgraded automatically when opened.
