@@ -1,5 +1,6 @@
-Set-Location "$PSScriptRoot\desktop"
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
 cmake --preset mingw-release
 cmake --build --preset mingw-release
 .\build\calendar.exe
-Set-Location "$PSScriptRoot"
