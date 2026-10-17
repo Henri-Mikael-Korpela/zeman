@@ -180,6 +180,8 @@ static const Color error_color = { 190, 30, 30, 255 };
 // Every problem has this color, darker than any event color, so that problems read as problems
 // at a glance rather than as one more event.
 static const Color problem_color = { 130, 20, 20, 255 };
+// A done problem turns green, the usual color for "resolved", dark enough for white text.
+static const Color problem_done_color = { 34, 130, 60, 255 };
 
 // How many days the calendar shows at once. Every range uses the same day cells; a week is one
 // row of seven, and a day one cell the width of the calendar, so that whole titles show.
@@ -362,6 +364,7 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
                                      int32_t day_number, int32_t start_day, int32_t column);
 static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Color color);
 static void draw_check_mark(Rectangle box, bool done, Color color);
+static void draw_tick(Rectangle area, float thickness, Color color);
 static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
 static float draw_panel_events_height(const App *app, float card_width);
@@ -1363,13 +1366,19 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
         snprintf(label, sizeof(label), "%s %s", time, event->title);
     } else {
         // A problem has no time; its "!" marks it even where its color is hard to tell apart.
-        snprintf(label, sizeof(label), "%s%s", event->kind == EVENT_KIND_PROBLEM ? "! " : "",
-                 event->title);
+        // A done problem has a tick drawn instead, below.
+        const bool open_problem = event->kind == EVENT_KIND_PROBLEM && !event->problem_done;
+        snprintf(label, sizeof(label), "%s%s", open_problem ? "! " : "", event->title);
     }
 
     float text_x = bar.x + 4;
     Color text_color = WHITE;
     scissor_begin(&app->fonts, bar.x, bar.y, bar.width, bar.height);
+    if (event->problem_done) {
+        Rectangle tick = { bar.x + 4, bar.y + 4, 11, 11 };
+        draw_tick(tick, 2.0f, WHITE);
+        text_x = tick.x + tick.width + 4;
+    }
     if (task) {
         Rectangle box = { bar.x + 4, bar.y + 4, 11, 11 };
         draw_check_mark(box, done, color);
@@ -1398,6 +1407,18 @@ static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Co
     if (ends_here) {
         DrawRectangleRec((Rectangle){ bar.x + bar.width - 1, bar.y, 1, bar.height }, color);
     }
+}
+
+// A check mark filling area, drawn rather than typed, because Rubik as loaded has no glyph
+// for it (see FONT_CODEPOINT_COUNT).
+static void draw_tick(Rectangle area, float thickness, Color color) {
+    assert(area.width > 0.0f);
+    assert(area.height > 0.0f);
+    Vector2 start = { area.x, area.y + area.height * 0.55f };
+    Vector2 bottom = { area.x + area.width * 0.38f, area.y + area.height };
+    Vector2 end = { area.x + area.width, area.y };
+    DrawLineEx(start, bottom, thickness, color);
+    DrawLineEx(bottom, end, thickness, color);
 }
 
 // An empty box for a task that is not done, a filled one for a task that is.
@@ -1633,10 +1654,14 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     DrawRectangleLinesEx(card, focused || confirming ? 2.0f : 1.0f,
                          style_color(focused ? BORDER_COLOR_PRESSED : BORDER_COLOR_NORMAL));
 
-    // Clip the title short of the delete button. A done task's title is dimmed and struck out.
-    const float title_x = task ? x + 24 : x;
+    // Clip the title short of the delete button. A done task's title is dimmed and struck out;
+    // a done problem's has a tick before it, in the green of its stripe.
+    const float title_x = task || event->problem_done ? x + 24 : x;
     const Color title_color = style_color(done ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
     scissor_begin(&app->fonts, card.x, card.y, card.width - 90, card.height);
+    if (event->problem_done) {
+        draw_tick((Rectangle){ x + 1, card.y + 9, 14, 13 }, 2.5f, problem_done_color);
+    }
     draw_text(title_style, event->title, title_x, card.y + 8, title_color);
     if (done) {
         float width = measure_text(title_style, event->title).x;
@@ -2394,8 +2419,9 @@ static bool text_line_fits(const TextStyle *style, const char *text, int32_t len
 static Color event_color(const Event *event) {
     assert(event->id > 0);
     if (event->kind == EVENT_KIND_PROBLEM) {
-        return problem_color;
+        return event->problem_done ? problem_done_color : problem_color;
     }
+    assert(!event->problem_done);
     return event_colors[event->id % EVENT_COLOR_COUNT];
 }
 
@@ -2403,7 +2429,7 @@ static Color event_color(const Event *event) {
 static void event_format_range(const Event *event, char *buffer, size_t buffer_size) {
     // A problem has no range: it is on its one day, which the panel heading shows.
     if (event->kind == EVENT_KIND_PROBLEM) {
-        snprintf(buffer, buffer_size, "Problem");
+        snprintf(buffer, buffer_size, "%s", event->problem_done ? "Problem, completed" : "Problem");
         return;
     }
     event_format_range_dates(event, buffer, buffer_size);

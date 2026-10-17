@@ -20,8 +20,9 @@
 
 enum {
     // Raised whenever a message changes shape, so that old apps say so instead of misreading.
-    // 2 added the links between problems and the tasks that solve them.
-    PROTOCOL_VERSION = 2,
+    // 2 added the links between problems and the tasks that solve them, and 3 whether a
+    // problem is done to each event.
+    PROTOCOL_VERSION = 3,
     PROTOCOL_PORT_DEFAULT = 47800,
     // UDP port where the desktop app answers phones looking for it on the local network.
     PROTOCOL_DISCOVERY_PORT = 47801,

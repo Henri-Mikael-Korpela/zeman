@@ -157,10 +157,19 @@ static const char *const statements_sql[STATEMENT_COUNT] = {
     // A repeating event with an end is visible until its last occurrence ends: the end date
     // plus one occurrence's length.
     // The location comes with each event through a join, so that no second query is needed.
+    // The last column is Event.problem_done: a problem with linked tasks, none of them without
+    // a checked-off occurrence (see ProblemTask). It runs only for problems, which are few.
     [STATEMENT_SELECT_RANGE] =
         "SELECT e.id, e.title, e.start_date, e.start_time, e.end_date, e.end_time,"
         "       e.created_at, e.repeat_unit, e.repeat_interval, e.repeat_end_date, e.kind,"
-        "       l.id, l.address, l.city, e.description"
+        "       l.id, l.address, l.city, e.description,"
+        "       e.kind = 'problem'"
+        "       AND EXISTS (SELECT 1 FROM problem_tasks pt JOIN events t ON t.id = pt.task_id"
+        "                   WHERE pt.problem_id = e.id AND t.kind = 'task')"
+        "       AND NOT EXISTS (SELECT 1 FROM problem_tasks pt JOIN events t ON t.id = pt.task_id"
+        "                       WHERE pt.problem_id = e.id AND t.kind = 'task'"
+        "                         AND NOT EXISTS (SELECT 1 FROM task_completions c"
+        "                                         WHERE c.event_id = t.id))"
         " FROM events e LEFT JOIN locations l ON l.id = e.location_id"
         " WHERE (e.start_date <= ?2 AND (e.end_date >= ?1 OR (e.repeat_unit IS NOT NULL"
         "        AND (e.repeat_end_date IS NULL OR julianday(e.repeat_end_date)"
@@ -226,6 +235,7 @@ enum {
     COLUMN_LOCATION_ADDRESS,
     COLUMN_LOCATION_CITY,
     COLUMN_DESCRIPTION,
+    COLUMN_PROBLEM_DONE,
 };
 
 static bool event_store_fail(EventStore *store, const char *context);
@@ -249,6 +259,7 @@ static bool column_parse_date(sqlite3_stmt *statement, int column, Date *date);
 static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minute_of_day);
 static bool column_parse_repeat(sqlite3_stmt *statement, Event *event);
 static bool column_parse_kind(sqlite3_stmt *statement, Event *event);
+static bool column_parse_problem(sqlite3_stmt *statement, Event *event);
 static bool column_parse_location(sqlite3_stmt *statement, Event *event);
 
 bool event_store_open(EventStore *store, const char *path) {
@@ -819,17 +830,8 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     if (!column_parse_location(statement, event)) {
         return false;
     }
-    // The database enforces this as well; checked again because drawing relies on it.
-    if (event->kind == EVENT_KIND_PROBLEM) {
-        if (!date_equal(event->start_date, event->created_date)) {
-            return false;
-        }
-        if (!date_equal(event->end_date, event->start_date)) {
-            return false;
-        }
-        if (event->repeat_unit != REPEAT_NONE) {
-            return false;
-        }
+    if (!column_parse_problem(statement, event)) {
+        return false;
     }
     // Longer text from outside this program is cut to fit, as titles are.
     const char *description = (const char *)sqlite3_column_text(statement, COLUMN_DESCRIPTION);
@@ -838,6 +840,23 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     }
     snprintf(event->description, sizeof(event->description), "%s", description);
     return event->id > 0;
+}
+
+// A problem's rules, which the database enforces as well, checked again because drawing relies
+// on them; and whether it is done, which the query computes for problems only.
+static bool column_parse_problem(sqlite3_stmt *statement, Event *event) {
+    event->problem_done = sqlite3_column_int(statement, COLUMN_PROBLEM_DONE) != 0;
+    assert(!event->problem_done || event->kind == EVENT_KIND_PROBLEM);
+    if (event->kind != EVENT_KIND_PROBLEM) {
+        return true;
+    }
+    if (!date_equal(event->start_date, event->created_date)) {
+        return false;
+    }
+    if (!date_equal(event->end_date, event->start_date)) {
+        return false;
+    }
+    return event->repeat_unit == REPEAT_NONE;
 }
 
 // No location leaves event->location zeroed, with id 0. Longer texts from outside this program

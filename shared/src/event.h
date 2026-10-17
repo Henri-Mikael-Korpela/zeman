@@ -61,6 +61,10 @@ typedef struct Event {
     int32_t repeat_interval;  // Units between occurrences; 1 ... REPEAT_INTERVAL_MAX
     int32_t kind;             // EventKind
     bool repeat_has_end;     // False repeats forever; always false for one-time events
+    // A problem whose linked tasks are all done (see ProblemStatus). Worked out when loading,
+    // so that the calendar can show it without loading links; never saved, and always false
+    // for events and tasks.
+    bool problem_done;
     char title[EVENT_TITLE_SIZE];
     char description[EVENT_DESCRIPTION_SIZE];  // Empty for none
 } Event;

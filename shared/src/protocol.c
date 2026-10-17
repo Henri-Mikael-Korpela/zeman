@@ -70,6 +70,7 @@ void writer_event(Writer *writer, const Event *event) {
     writer_i32(writer, event->repeat_interval);
     writer_i32(writer, event->kind);
     writer_u8(writer, event->repeat_has_end ? 1 : 0);
+    writer_u8(writer, event->problem_done ? 1 : 0);
     writer_text(writer, event->title);
     writer_text(writer, event->description);
 }
@@ -175,6 +176,8 @@ Event reader_event(Reader *reader) {
     event.repeat_interval = reader_i32(reader);
     event.kind = reader_i32(reader);
     event.repeat_has_end = reader_u8(reader) != 0;
+    // event_is_valid below refuses it on anything but a problem.
+    event.problem_done = reader_u8(reader) != 0;
     reader_text(reader, event.title, sizeof(event.title));
     reader_text(reader, event.description, sizeof(event.description));
 

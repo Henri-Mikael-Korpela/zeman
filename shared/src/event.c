@@ -214,6 +214,9 @@ bool event_is_valid(const Event *event) {
             return false;
         }
     }
+    if (event->problem_done && event->kind != EVENT_KIND_PROBLEM) {
+        return false;
+    }
     if (event->kind == EVENT_KIND_PROBLEM) {
         if (event_duration_days(event) != 0 || event->start_minute != TIME_NONE) {
             return false;
