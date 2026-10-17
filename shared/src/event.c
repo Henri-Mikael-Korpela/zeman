@@ -228,6 +228,39 @@ bool event_is_valid(const Event *event) {
     return event_duration_days(event) < event_repeat_gap_days_min(event);
 }
 
+ProblemStatus problem_status(int32_t task_count, int32_t task_done_count) {
+    assert(task_count >= 0);
+    assert(task_done_count >= 0);
+    assert(task_done_count <= task_count);
+    if (task_count == 0) {
+        return PROBLEM_STATUS_NO_TASKS;
+    }
+    if (task_done_count == 0) {
+        return PROBLEM_STATUS_PLANNED;
+    }
+    if (task_done_count < task_count) {
+        return PROBLEM_STATUS_PARTLY_DONE;
+    }
+    return PROBLEM_STATUS_DONE;
+}
+
+const char *problem_status_name(ProblemStatus status) {
+    switch (status) {
+    case PROBLEM_STATUS_NO_TASKS:
+        return "No planned tasks";
+    case PROBLEM_STATUS_PLANNED:
+        return "Planned";
+    case PROBLEM_STATUS_PARTLY_DONE:
+        return "Partly completed";
+    case PROBLEM_STATUS_DONE:
+        return "Completed";
+    case PROBLEM_STATUS_COUNT:
+        break;
+    }
+    assert(false); // Not a ProblemStatus.
+    return "";
+}
+
 static bool minute_is_valid(int32_t minute_of_day) {
     return minute_of_day == TIME_NONE || (minute_of_day >= 0 && minute_of_day < MINUTES_PER_DAY);
 }

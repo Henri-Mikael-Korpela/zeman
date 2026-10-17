@@ -31,6 +31,12 @@ static bool client_update(void *context, const Event *event);
 static bool client_remove(void *context, int64_t id);
 static bool client_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
 static int64_t client_location(void *context, const char *address, const char *city);
+static int32_t client_load_problem_tasks(void *context, int64_t problem_id, ProblemTask *tasks,
+                                         int32_t task_count_max, bool *truncated);
+static int32_t client_load_task_problems(void *context, int64_t task_id, TaskProblem *problems,
+                                         int32_t problem_count_max, bool *truncated);
+static bool client_set_task_problems(void *context, int64_t task_id, const int64_t *problem_ids,
+                                     int32_t problem_count);
 static uint64_t client_revision(void *context);
 static const char *client_error(const void *context);
 
@@ -42,6 +48,9 @@ static const BackendOps client_ops = {
     .remove = client_remove,
     .set_task_done = client_set_task_done,
     .location_find_or_create = client_location,
+    .load_problem_tasks = client_load_problem_tasks,
+    .load_task_problems = client_load_task_problems,
+    .set_task_problems = client_set_task_problems,
     .revision = client_revision,
     .error = client_error,
 };
@@ -180,6 +189,70 @@ static int64_t client_location(void *context, const char *address, const char *c
     return client_response_done(client, &response) && id > 0 ? id : 0;
 }
 
+static int32_t client_load_problem_tasks(void *context, int64_t problem_id, ProblemTask *tasks,
+                                         int32_t task_count_max, bool *truncated) {
+    Client *client = context;
+    assert(problem_id > 0);
+    assert(task_count_max > 0);
+    Writer request = client_request_begin(client, PROTOCOL_LOAD_PROBLEM_TASKS);
+    writer_i64(&request, problem_id);
+    writer_i32(&request, task_count_max);
+    Reader response;
+    if (!client_call(client, &request, &response)) {
+        return -1;
+    }
+    *truncated = reader_u8(&response) != 0;
+    int32_t count = reader_i32(&response);
+    if (count < 0 || count > task_count_max) {
+        client_disconnect(client, "The desktop app sent an invalid answer.");
+        return -1;
+    }
+    for (int32_t i = 0; i < count; i++) {
+        tasks[i] = reader_problem_task(&response);
+    }
+    return client_response_done(client, &response) ? count : -1;
+}
+
+static int32_t client_load_task_problems(void *context, int64_t task_id, TaskProblem *problems,
+                                         int32_t problem_count_max, bool *truncated) {
+    Client *client = context;
+    assert(task_id >= 0);
+    assert(problem_count_max > 0);
+    Writer request = client_request_begin(client, PROTOCOL_LOAD_TASK_PROBLEMS);
+    writer_i64(&request, task_id);
+    writer_i32(&request, problem_count_max);
+    Reader response;
+    if (!client_call(client, &request, &response)) {
+        return -1;
+    }
+    *truncated = reader_u8(&response) != 0;
+    int32_t count = reader_i32(&response);
+    if (count < 0 || count > problem_count_max) {
+        client_disconnect(client, "The desktop app sent an invalid answer.");
+        return -1;
+    }
+    for (int32_t i = 0; i < count; i++) {
+        problems[i] = reader_task_problem(&response);
+    }
+    return client_response_done(client, &response) ? count : -1;
+}
+
+static bool client_set_task_problems(void *context, int64_t task_id, const int64_t *problem_ids,
+                                     int32_t problem_count) {
+    Client *client = context;
+    assert(task_id > 0);
+    assert(problem_count >= 0);
+    assert(problem_count <= PROBLEM_LINK_COUNT_MAX);
+    Writer request = client_request_begin(client, PROTOCOL_SET_TASK_PROBLEMS);
+    writer_i64(&request, task_id);
+    writer_i32(&request, problem_count);
+    for (int32_t i = 0; i < problem_count; i++) {
+        writer_i64(&request, problem_ids[i]);
+    }
+    Reader response;
+    return client_call(client, &request, &response) && client_response_done(client, &response);
+}
+
 // Asks the desktop at most every CLIENT_REVISION_INTERVAL_MS; between, the last answer stands.
 static uint64_t client_revision(void *context) {
     Client *client = context;
@@ -241,7 +314,8 @@ static bool client_connect(Client *client) {
     // In its own buffer: connecting happens inside a call whose request is already waiting in
     // client->request, and must not overwrite it.
     uint8_t hello[PROTOCOL_LENGTH_SIZE + 8];
-    Writer request = writer_make(hello + PROTOCOL_LENGTH_SIZE, sizeof(hello) - PROTOCOL_LENGTH_SIZE);
+    Writer request = writer_make(hello + PROTOCOL_LENGTH_SIZE,
+                                 sizeof(hello) - PROTOCOL_LENGTH_SIZE);
     writer_u8(&request, PROTOCOL_HELLO);
     writer_u32(&request, PROTOCOL_VERSION);
     Reader response;

@@ -24,6 +24,9 @@ static void server_handle_insert(Server *server, Reader *request, Writer *respon
 static void server_handle_update(Server *server, Reader *request, Writer *response);
 static void server_handle_set_task_done(Server *server, Reader *request, Writer *response);
 static void server_handle_location(Server *server, Reader *request, Writer *response);
+static void server_handle_load_problem_tasks(Server *server, Reader *request, Writer *response);
+static void server_handle_load_task_problems(Server *server, Reader *request, Writer *response);
+static void server_handle_set_task_problems(Server *server, Reader *request, Writer *response);
 static bool server_range_is_valid(Date first, Date last);
 static void server_fail(Writer *response, const char *message);
 
@@ -269,6 +272,15 @@ static void server_handle(Server *server, Reader *request, Writer *response) {
     case PROTOCOL_LOCATION:
         server_handle_location(server, request, response);
         return;
+    case PROTOCOL_LOAD_PROBLEM_TASKS:
+        server_handle_load_problem_tasks(server, request, response);
+        return;
+    case PROTOCOL_LOAD_TASK_PROBLEMS:
+        server_handle_load_task_problems(server, request, response);
+        return;
+    case PROTOCOL_SET_TASK_PROBLEMS:
+        server_handle_set_task_problems(server, request, response);
+        return;
     default:
         // The byte comes from the network, so values that are no operation must be answered.
         server_fail(response, "Unknown request: update the desktop app.");
@@ -393,6 +405,85 @@ static void server_handle_location(Server *server, Reader *request, Writer *resp
     }
     writer_u8(response, PROTOCOL_OK);
     writer_i64(response, id);
+}
+
+static void server_handle_load_problem_tasks(Server *server, Reader *request, Writer *response) {
+    int64_t problem_id = reader_i64(request);
+    int32_t count_max = reader_i32(request);
+    if (!reader_done(request) || problem_id <= 0 || count_max < 1) {
+        server_fail(response, "Invalid request.");
+        return;
+    }
+    if (count_max > PROBLEM_LINK_COUNT_MAX) {
+        count_max = PROBLEM_LINK_COUNT_MAX;
+    }
+    bool truncated = false;
+    int32_t count = backend_load_problem_tasks(server->backend, problem_id, server->problem_tasks,
+                                               count_max, &truncated);
+    if (count < 0) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+    writer_u8(response, truncated ? 1 : 0);
+    writer_i32(response, count);
+    for (int32_t i = 0; i < count; i++) {
+        writer_problem_task(response, &server->problem_tasks[i]);
+    }
+}
+
+// task_id 0 asks for the problems offered to a task not stored yet.
+static void server_handle_load_task_problems(Server *server, Reader *request, Writer *response) {
+    int64_t task_id = reader_i64(request);
+    int32_t count_max = reader_i32(request);
+    if (!reader_done(request) || task_id < 0 || count_max < 1) {
+        server_fail(response, "Invalid request.");
+        return;
+    }
+    if (count_max > PROBLEM_LINK_COUNT_MAX) {
+        count_max = PROBLEM_LINK_COUNT_MAX;
+    }
+    bool truncated = false;
+    int32_t count = backend_load_task_problems(server->backend, task_id, server->task_problems,
+                                               count_max, &truncated);
+    if (count < 0) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+    writer_u8(response, truncated ? 1 : 0);
+    writer_i32(response, count);
+    for (int32_t i = 0; i < count; i++) {
+        writer_task_problem(response, &server->task_problems[i]);
+    }
+}
+
+// The store asserts that each problem comes once, so repeats from the network are refused here.
+static void server_handle_set_task_problems(Server *server, Reader *request, Writer *response) {
+    int64_t task_id = reader_i64(request);
+    int32_t count = reader_i32(request);
+    if (task_id <= 0 || count < 0 || count > PROBLEM_LINK_COUNT_MAX) {
+        server_fail(response, "Invalid request.");
+        return;
+    }
+    int64_t problem_ids[PROBLEM_LINK_COUNT_MAX];
+    bool valid = true;
+    for (int32_t i = 0; i < count; i++) {
+        problem_ids[i] = reader_i64(request);
+        valid = valid && problem_ids[i] > 0;
+        for (int32_t j = 0; j < i; j++) {
+            valid = valid && problem_ids[j] != problem_ids[i];
+        }
+    }
+    if (!reader_done(request) || !valid) {
+        server_fail(response, "Invalid request.");
+        return;
+    }
+    if (!backend_set_task_problems(server->backend, task_id, problem_ids, count)) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
 }
 
 static bool server_range_is_valid(Date first, Date last) {

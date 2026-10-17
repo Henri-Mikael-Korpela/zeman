@@ -12,7 +12,7 @@ enum {
     // Bytes including the terminator for messages returned to the user interface.
     EVENT_STORE_ERROR_SIZE = 160,
     // Statements prepared at open; event_store.c names them and checks this count.
-    EVENT_STORE_STATEMENT_COUNT = 8,
+    EVENT_STORE_STATEMENT_COUNT = 12,
 };
 
 typedef struct EventStore {
@@ -62,5 +62,20 @@ bool event_store_set_task_done(EventStore *store, int64_t id, Date occurrence_st
 int32_t event_store_load_completions(EventStore *store, Date first, Date last,
                                      TaskCompletion *completions, int32_t completion_count_max,
                                      bool *truncated);
+
+// Loads the tasks linked to a problem, in start order, each with whether any occurrence is
+// done. Returns the number loaded, or -1, and sets *truncated as event_store_load_range does.
+int32_t event_store_load_problem_tasks(EventStore *store, int64_t problem_id, ProblemTask *tasks,
+                                      int32_t task_count_max, bool *truncated);
+
+// Loads every problem with how many of its linked tasks are done, the ones linked to task_id
+// first, then the newest. task_id is 0 for a task not stored yet.
+int32_t event_store_load_task_problems(EventStore *store, int64_t task_id, TaskProblem *problems,
+                                       int32_t problem_count_max, bool *truncated);
+
+// Replaces the problems linked to the task with problem_ids, each given once. Fails, changing
+// nothing, if one of them is not a problem or the task is not a task.
+bool event_store_set_task_problems(EventStore *store, int64_t task_id, const int64_t *problem_ids,
+                                   int32_t problem_count);
 
 #endif

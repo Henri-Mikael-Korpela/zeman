@@ -79,6 +79,20 @@ void writer_completion(Writer *writer, const TaskCompletion *completion) {
     writer_i32(writer, completion->occurrence_start_day);
 }
 
+void writer_problem_task(Writer *writer, const ProblemTask *task) {
+    writer_i64(writer, task->task_id);
+    writer_u8(writer, task->done ? 1 : 0);
+    writer_text(writer, task->title);
+}
+
+void writer_task_problem(Writer *writer, const TaskProblem *problem) {
+    writer_i64(writer, problem->problem_id);
+    writer_i32(writer, problem->task_count);
+    writer_i32(writer, problem->task_done_count);
+    writer_u8(writer, problem->linked ? 1 : 0);
+    writer_text(writer, problem->title);
+}
+
 Reader reader_make(const uint8_t *buffer, size_t length) {
     assert(buffer != NULL);
     return (Reader){ .buffer = buffer, .length = length, .position = 0, .failed = false };
@@ -186,6 +200,42 @@ TaskCompletion reader_completion(Reader *reader) {
     completion.event_id = reader_i64(reader);
     completion.occurrence_start_day = reader_i32(reader);
     return completion;
+}
+
+ProblemTask reader_problem_task(Reader *reader) {
+    ProblemTask task = { 0 };
+    task.task_id = reader_i64(reader);
+    uint8_t done = reader_u8(reader);
+    reader_text(reader, task.title, sizeof(task.title));
+    task.done = done == 1;
+    if (task.task_id <= 0 || done > 1 || task.title[0] == '\0') {
+        reader->failed = true;
+    }
+    if (reader->failed) {
+        return (ProblemTask){ 0 };
+    }
+    return task;
+}
+
+// The counts are checked as problem_status asserts them, because they come from the network.
+TaskProblem reader_task_problem(Reader *reader) {
+    TaskProblem problem = { 0 };
+    problem.problem_id = reader_i64(reader);
+    problem.task_count = reader_i32(reader);
+    problem.task_done_count = reader_i32(reader);
+    uint8_t linked = reader_u8(reader);
+    reader_text(reader, problem.title, sizeof(problem.title));
+    problem.linked = linked == 1;
+    if (problem.problem_id <= 0 || linked > 1 || problem.title[0] == '\0') {
+        reader->failed = true;
+    }
+    if (problem.task_done_count < 0 || problem.task_done_count > problem.task_count) {
+        reader->failed = true;
+    }
+    if (reader->failed) {
+        return (TaskProblem){ 0 };
+    }
+    return problem;
 }
 
 bool reader_done(const Reader *reader) {

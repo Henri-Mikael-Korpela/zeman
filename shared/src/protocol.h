@@ -20,7 +20,8 @@
 
 enum {
     // Raised whenever a message changes shape, so that old apps say so instead of misreading.
-    PROTOCOL_VERSION = 1,
+    // 2 added the links between problems and the tasks that solve them.
+    PROTOCOL_VERSION = 2,
     PROTOCOL_PORT_DEFAULT = 47800,
     // UDP port where the desktop app answers phones looking for it on the local network.
     PROTOCOL_DISCOVERY_PORT = 47801,
@@ -58,6 +59,9 @@ typedef enum ProtocolOperation {
     PROTOCOL_DELETE,             // id ->
     PROTOCOL_SET_TASK_DONE,      // id, occurrence start, done ->
     PROTOCOL_LOCATION,           // address, city -> id
+    PROTOCOL_LOAD_PROBLEM_TASKS, // problem id, count_max -> truncated, count, tasks
+    PROTOCOL_LOAD_TASK_PROBLEMS, // task id, count_max -> truncated, count, problems
+    PROTOCOL_SET_TASK_PROBLEMS,  // task id, count, problem ids ->
     PROTOCOL_OPERATION_END,
 } ProtocolOperation;
 
@@ -94,6 +98,8 @@ void writer_text(Writer *writer, const char *text);
 void writer_date(Writer *writer, Date date);
 void writer_event(Writer *writer, const Event *event);
 void writer_completion(Writer *writer, const TaskCompletion *completion);
+void writer_problem_task(Writer *writer, const ProblemTask *task);
+void writer_task_problem(Writer *writer, const TaskProblem *problem);
 
 Reader reader_make(const uint8_t *buffer, size_t length);
 uint8_t reader_u8(Reader *reader);
@@ -108,6 +114,9 @@ Date reader_date(Reader *reader);
 // An event that breaks event_is_valid fails the reader.
 Event reader_event(Reader *reader);
 TaskCompletion reader_completion(Reader *reader);
+// Links with no id or title, or counts that do not add up, fail the reader.
+ProblemTask reader_problem_task(Reader *reader);
+TaskProblem reader_task_problem(Reader *reader);
 // True when the whole message was read and nothing failed.
 bool reader_done(const Reader *reader);
 

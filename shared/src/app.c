@@ -65,11 +65,15 @@ enum {
     // markers. The markers that fit beside it depend on the cell width; past that a "+" is drawn.
     DAY_NUMBER_WIDTH_PIXELS = 44,
     LEGEND_HEIGHT_PIXELS = 56,
-    // The panel's list scrolls this far per wheel notch: about three lines of a card.
-    PANEL_WHEEL_STEP_PIXELS = 48,
-    // A press that moves this far scrolls the list instead of clicking, because a finger
-    // wobbles by a few pixels during a tap.
-    PANEL_DRAG_THRESHOLD_PIXELS = 8,
+    // A scrolling list moves this far per wheel notch: about three lines of a card.
+    LIST_WHEEL_STEP_PIXELS = 48,
+    // A press that moves this far scrolls a list instead of clicking, because a finger wobbles
+    // by a few pixels during a tap.
+    LIST_DRAG_THRESHOLD_PIXELS = 8,
+    // One problem in a task's checklist: tall enough to tap with a finger.
+    PROBLEM_ROW_HEIGHT_PIXELS = 36,
+    // Room kept at the right of a checklist row for the problem's status.
+    PROBLEM_STATUS_WIDTH_PIXELS = 120,
     // The bar showing the list's scroll position, and the room kept free for it beside the cards.
     SCROLLBAR_WIDTH_PIXELS = 4,
     SCROLLBAR_GAP_PIXELS = 10,
@@ -204,12 +208,32 @@ static const KeyStep key_steps[] = {
 };
 enum { KEY_STEP_COUNT = sizeof(key_steps) / sizeof(key_steps[0]) };
 
+// A list that scrolls by the wheel, or by dragging it with a finger or the mouse.
+typedef struct Scroll {
+    float offset_pixels;       // How far the list is scrolled down
+    float drag_y;              // Pointer y where the press in the list began
+    float drag_offset_pixels;  // offset_pixels when that press began
+    bool pressed;              // The pointer went down in the list and is held
+    bool dragging;             // That press moved far enough to scroll instead of click
+} Scroll;
+
 typedef struct Form {
+    // Links between problems and the tasks that solve them, loaded when the form opens: an
+    // existing problem's tasks, or else the problems a task can solve, with the user's choices
+    // in their linked flags until the form is saved.
+    ProblemTask tasks[PROBLEM_LINK_COUNT_MAX];
+    TaskProblem problems[PROBLEM_LINK_COUNT_MAX];
+    Scroll problems_scroll;
     int64_t editing_id;    // Event being edited, or 0 for a new event
     int32_t field_active;  // FormField being edited, or FORM_FIELD_NONE
+    int32_t task_count;
+    int32_t problem_count;
     int repeat_option;     // RepeatOption; int because raygui's combo box writes it
     int kind;              // EventKind; int because raygui's toggle group writes it
     bool open;
+    bool links_loaded;       // False after a failed load, so that saving keeps the stored links
+    bool links_truncated;    // More links or problems exist than were loaded
+    bool choosing_problems;  // The problem checklist replaces the fields
     char text[FORM_FIELD_COUNT][EVENT_DESCRIPTION_SIZE];
     char error[FORM_ERROR_SIZE];  // Why the last save failed, or empty
 } Form;
@@ -258,16 +282,12 @@ typedef struct App {
     int32_t event_count;
     int range;                      // CalendarRange; int because raygui's toggle group writes it
     int32_t completion_count;
-    float panel_scroll_pixels;      // How far the panel's list is scrolled down
-    float panel_drag_y;             // Pointer y where the press in the list began
-    float panel_drag_scroll_pixels; // panel_scroll_pixels when that press began
+    Scroll panel_scroll;            // The panel's list of cards
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
     bool events_truncated;
     bool touch;                     // See AppConfig
     bool input_enabled;             // See app_set_input_enabled
-    bool panel_pressed;             // The pointer went down in the panel's list and is held
-    bool panel_dragging;            // That press moved far enough to scroll instead of click
     bool created;
     char status[STATUS_SIZE];       // Message for the status bar, cleared on navigation
     char info[INFO_SIZE];           // Shown first in the status bar, see app_set_info
@@ -308,7 +328,11 @@ static void app_sync(App *app);
 static void app_load_events(App *app, Date month, uint64_t revision);
 static const Event *app_event_find(const App *app, int64_t id);
 static int64_t app_event_first_on_day(const App *app, int32_t day_number);
+static void app_form_open(App *app, Date date, int32_t kind);
+static void app_form_open_edit(App *app, const Event *event);
+static void app_form_load_links(App *app);
 static void app_form_submit(App *app);
+static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserted);
 static void app_event_delete(App *app, int64_t id);
 static bool app_task_done(const App *app, int64_t id, int32_t start_day);
 static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done);
@@ -341,17 +365,23 @@ static void draw_check_mark(Rectangle box, bool done, Color color);
 static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
 static float draw_panel_events_height(const App *app, float card_width);
-static void draw_panel_events_scroll(App *app, Rectangle list, float content_height);
 static void draw_panel_events_list(App *app, Rectangle list);
-static void draw_panel_events_scrollbar(Rectangle list, float content_height,
-                                        float scroll_pixels);
+static void scroll_update(Scroll *scroll, Rectangle list, float content_height);
+static void draw_scrollbar(Rectangle list, float content_height, float offset_pixels);
 static bool draw_panel_event_card(App *app, const Event *event, Rectangle card);
 static void draw_panel_event_card_details(const Fonts *fonts, const Event *event,
                                           Rectangle card);
 static void draw_panel_legend(const Fonts *fonts, Rectangle area);
 static void draw_panel_form(App *app, Rectangle body);
+static void draw_panel_form_buttons(App *app, Rectangle body, float y);
+static float draw_panel_form_rows_end(float y);
 static float draw_panel_form_fields(App *app, Rectangle body, float y);
-static void draw_panel_form_fields_problem(App *app, Rectangle body, float y);
+static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, float end_y);
+static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float y, float end_y);
+static float draw_panel_form_problems(App *app, Rectangle body, float y);
+static bool draw_panel_form_problems_row(const App *app, const TaskProblem *problem,
+                                         Rectangle row, bool clickable);
+static int32_t form_problems_linked_count(const Form *form);
 static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
                                   const char *label, Rectangle box);
 static void draw_status(App *app, Rectangle status);
@@ -647,7 +677,7 @@ static void app_select(App *app, Date date) {
     // A confirmation belongs to the card it was asked on.
     app->event_delete_id = 0;
     // Another day has other cards, so its list starts from the top.
-    app->panel_scroll_pixels = 0.0f;
+    app->panel_scroll.offset_pixels = 0.0f;
     app->status[0] = '\0';
 }
 
@@ -786,6 +816,11 @@ static void app_form_submit(App *app) {
             snprintf(app->form.error, sizeof(app->form.error), "%s", backend_error(app->backend));
             return;
         }
+        // Saving again after the links fail below updates this entry rather than adding another.
+        app->form.editing_id = id;
+    }
+    if (!app_form_save_links(app, id, event.kind, !editing)) {
+        return;
     }
 
     form_close(&app->form);
@@ -799,6 +834,80 @@ static void app_form_submit(App *app) {
     app->events_stale = true;
     snprintf(app->status, sizeof(app->status), "%s \"%s\".", editing ? "Updated" : "Saved",
              event.title);
+}
+
+// Opens the form for a new entry. The problems a task can solve are loaded whatever the kind,
+// because the kind can still be switched to task.
+static void app_form_open(App *app, Date date, int32_t kind) {
+    app->event_delete_id = 0;
+    form_open(&app->form, date, kind);
+    app_form_load_links(app);
+}
+
+static void app_form_open_edit(App *app, const Event *event) {
+    assert(event->id > 0);
+    form_open_edit(&app->form, event);
+    app_form_load_links(app);
+}
+
+// An existing problem's form lists its tasks; every other form offers the problems a task can
+// solve. A failure shows in the form and leaves links_loaded false, so that saving cannot erase
+// links that were never shown.
+static void app_form_load_links(App *app) {
+    Form *form = &app->form;
+    assert(form->open);
+    form->links_loaded = false;
+    form->links_truncated = false;
+    form->task_count = 0;
+    form->problem_count = 0;
+    int32_t count = 0;
+    if (form->kind == EVENT_KIND_PROBLEM && form->editing_id != 0) {
+        count = backend_load_problem_tasks(app->backend, form->editing_id, form->tasks,
+                                           PROBLEM_LINK_COUNT_MAX, &form->links_truncated);
+        form->task_count = count < 0 ? 0 : count;
+    } else {
+        count = backend_load_task_problems(app->backend, form->editing_id, form->problems,
+                                           PROBLEM_LINK_COUNT_MAX, &form->links_truncated);
+        form->problem_count = count < 0 ? 0 : count;
+    }
+    if (count < 0) {
+        snprintf(form->error, sizeof(form->error), "%s", backend_error(app->backend));
+        return;
+    }
+    assert(count <= PROBLEM_LINK_COUNT_MAX);
+    form->links_loaded = true;
+}
+
+// Saves the problems checked in a task's form. An entry saved as an event loses its links, as
+// it may have been a task until now. Returns false, with the form's error set, on failure.
+static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserted) {
+    const Form *form = &app->form;
+    assert(id > 0);
+    // A problem's links are made from its tasks' forms, and a new event has none.
+    if (kind == EVENT_KIND_PROBLEM) {
+        return true;
+    }
+    if (kind == EVENT_KIND_EVENT && inserted) {
+        return true;
+    }
+    // Links that could not be loaded were never shown, so they are kept as stored.
+    if (kind == EVENT_KIND_TASK && !form->links_loaded) {
+        return true;
+    }
+    int64_t problem_ids[PROBLEM_LINK_COUNT_MAX];
+    int32_t problem_count = 0;
+    for (int32_t i = 0; kind == EVENT_KIND_TASK && i < form->problem_count; i++) {
+        if (form->problems[i].linked) {
+            problem_ids[problem_count] = form->problems[i].problem_id;
+            problem_count++;
+        }
+    }
+    assert(problem_count == (kind == EVENT_KIND_TASK ? form_problems_linked_count(form) : 0));
+    if (!backend_set_task_problems(app->backend, id, problem_ids, problem_count)) {
+        snprintf(app->form.error, sizeof(app->form.error), "%s", backend_error(app->backend));
+        return false;
+    }
+    return true;
 }
 
 static void app_event_delete(App *app, int64_t id) {
@@ -1333,17 +1442,14 @@ static void draw_panel_events(App *app, Rectangle body) {
     Rectangle problem_button = { body.x + 2 * (button_width + gap), body.y, button_width,
                                  BUTTON_HEIGHT_PIXELS };
     if (GuiButton(event_button, "New event")) {
-        app->event_delete_id = 0;
-        form_open(&app->form, app->selected, EVENT_KIND_EVENT);
+        app_form_open(app, app->selected, EVENT_KIND_EVENT);
     }
     if (GuiButton(task_button, "New task")) {
-        app->event_delete_id = 0;
-        form_open(&app->form, app->selected, EVENT_KIND_TASK);
+        app_form_open(app, app->selected, EVENT_KIND_TASK);
     }
     // A problem is recorded today, whichever day is selected.
     if (GuiButton(problem_button, "New problem")) {
-        app->event_delete_id = 0;
-        form_open(&app->form, app->today, EVENT_KIND_PROBLEM);
+        app_form_open(app, app->today, EVENT_KIND_PROBLEM);
     }
 
     // The list ends above the legend; it scrolls when its cards do not fit.
@@ -1361,9 +1467,9 @@ static void draw_panel_events(App *app, Rectangle body) {
         draw_text(&app->fonts.ui, "Nothing on this day.", body.x, list_top,
                   style_color(TEXT_COLOR_DISABLED));
     } else if (list.height > 0.0f) {
-        draw_panel_events_scroll(app, list, content_height);
+        scroll_update(&app->panel_scroll, list, content_height);
         draw_panel_events_list(app, list);
-        draw_panel_events_scrollbar(list, content_height, app->panel_scroll_pixels);
+        draw_scrollbar(list, content_height, app->panel_scroll.offset_pixels);
     } else {
         // A window too short for any list shows only the buttons and the legend.
     }
@@ -1393,47 +1499,48 @@ static float draw_panel_events_height(const App *app, float card_width) {
 }
 
 // Scrolls the list by the wheel, or by dragging it with a finger or the mouse, and keeps the
-// scroll within the cards.
-static void draw_panel_events_scroll(App *app, Rectangle list, float content_height) {
+// offset within the content. Callers take a release as a click only while the press began in
+// the list and did not become a drag.
+static void scroll_update(Scroll *scroll, Rectangle list, float content_height) {
     assert(list.height > 0.0f);
     assert(content_height > 0.0f);
     const Vector2 mouse = GetMousePosition();
     const bool over = CheckCollisionPointRec(mouse, list);
-    // A press is forgotten one frame after its release, so that on the release frame the cards
+    // A press is forgotten one frame after its release, so that on the release frame the rows
     // still know whether it was a drag, and do not take it as a click.
     if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT) && !IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-        app->panel_pressed = false;
-        app->panel_dragging = false;
+        scroll->pressed = false;
+        scroll->dragging = false;
     }
     if (over && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        app->panel_pressed = true;
-        app->panel_dragging = false;
-        app->panel_drag_y = mouse.y;
-        app->panel_drag_scroll_pixels = app->panel_scroll_pixels;
+        scroll->pressed = true;
+        scroll->dragging = false;
+        scroll->drag_y = mouse.y;
+        scroll->drag_offset_pixels = scroll->offset_pixels;
     }
-    if (app->panel_pressed && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        float moved = mouse.y - app->panel_drag_y;
-        if (moved > PANEL_DRAG_THRESHOLD_PIXELS || moved < -PANEL_DRAG_THRESHOLD_PIXELS) {
-            app->panel_dragging = true;
+    if (scroll->pressed && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        float moved = mouse.y - scroll->drag_y;
+        if (moved > LIST_DRAG_THRESHOLD_PIXELS || moved < -LIST_DRAG_THRESHOLD_PIXELS) {
+            scroll->dragging = true;
         }
-        if (app->panel_dragging) {
-            app->panel_scroll_pixels = app->panel_drag_scroll_pixels - moved;
+        if (scroll->dragging) {
+            scroll->offset_pixels = scroll->drag_offset_pixels - moved;
         }
     }
     if (over) {
-        app->panel_scroll_pixels -= GetMouseWheelMove() * PANEL_WHEEL_STEP_PIXELS;
+        scroll->offset_pixels -= GetMouseWheelMove() * LIST_WHEEL_STEP_PIXELS;
     }
 
-    // Also when the cards changed or the window was resized since the last frame.
-    float scroll_max = content_height > list.height ? content_height - list.height : 0.0f;
-    if (app->panel_scroll_pixels > scroll_max) {
-        app->panel_scroll_pixels = scroll_max;
+    // Also when the content changed or the window was resized since the last frame.
+    float offset_max = content_height > list.height ? content_height - list.height : 0.0f;
+    if (scroll->offset_pixels > offset_max) {
+        scroll->offset_pixels = offset_max;
     }
-    if (app->panel_scroll_pixels < 0.0f) {
-        app->panel_scroll_pixels = 0.0f;
+    if (scroll->offset_pixels < 0.0f) {
+        scroll->offset_pixels = 0.0f;
     }
-    assert(app->panel_scroll_pixels >= 0.0f);
-    assert(app->panel_scroll_pixels <= scroll_max);
+    assert(scroll->offset_pixels >= 0.0f);
+    assert(scroll->offset_pixels <= offset_max);
 }
 
 // Draws the selected day's cards, moved up by the scroll and clipped to the list. Controls are
@@ -1441,8 +1548,9 @@ static void draw_panel_events_scroll(App *app, Rectangle list, float content_hei
 // the end of a drag nor a click on a clipped part of a card acts on it.
 static void draw_panel_events_list(App *app, Rectangle list) {
     assert(list.height > 0.0f);
-    assert(app->panel_scroll_pixels >= 0.0f);
-    const bool locked = app->panel_dragging || !CheckCollisionPointRec(GetMousePosition(), list);
+    const Scroll *scroll = &app->panel_scroll;
+    assert(scroll->offset_pixels >= 0.0f);
+    const bool locked = scroll->dragging || !CheckCollisionPointRec(GetMousePosition(), list);
     // Locked already when the app has no input; that lock stays until app_frame lifts it.
     const bool locked_before = GuiIsLocked();
     if (locked) {
@@ -1453,7 +1561,7 @@ static void draw_panel_events_list(App *app, Rectangle list) {
     scissor_begin(&app->fonts, list.x, list.y, list.width, list.height);
 
     int32_t selected_day = date_to_day_number(app->selected);
-    float y = list.y - app->panel_scroll_pixels;
+    float y = list.y - scroll->offset_pixels;
     for (int32_t i = 0; i < app->event_count; i++) {
         const Event *event = &app->events[i];
         int32_t start_day = 0;
@@ -1471,10 +1579,10 @@ static void draw_panel_events_list(App *app, Rectangle list) {
         Event occurrence = event_occurrence_at(event, start_day);
         bool clicked = draw_panel_event_card(app, &occurrence, card);
         // Only a press that began in the list opens a card, not one dragged in from elsewhere.
-        if (clicked && !locked && app->panel_pressed) {
+        if (clicked && !locked && scroll->pressed) {
             // Edit the event itself, not this occurrence, so that the form shows its first dates.
             app->event_focused_id = event->id;
-            form_open_edit(&app->form, event);
+            app_form_open_edit(app, event);
         }
     }
 
@@ -1485,17 +1593,16 @@ static void draw_panel_events_list(App *app, Rectangle list) {
     }
 }
 
-// A thin bar right of the cards: its length is the visible share of the cards, and its place
-// is where the visible part lies among them.
-static void draw_panel_events_scrollbar(Rectangle list, float content_height,
-                                        float scroll_pixels) {
+// A thin bar right of a list: its length is the visible share of the content, and its place is
+// where the visible part lies within it.
+static void draw_scrollbar(Rectangle list, float content_height, float offset_pixels) {
     assert(content_height > 0.0f);
-    assert(scroll_pixels >= 0.0f);
+    assert(offset_pixels >= 0.0f);
     if (content_height <= list.height) {
         return;
     }
     float thumb_height = list.height * list.height / content_height;
-    float thumb_y = list.y + scroll_pixels * list.height / content_height;
+    float thumb_y = list.y + offset_pixels * list.height / content_height;
     float x = list.x + list.width + SCROLLBAR_GAP_PIXELS - SCROLLBAR_WIDTH_PIXELS;
     DrawRectangleRec((Rectangle){ x, list.y, SCROLLBAR_WIDTH_PIXELS, list.height },
                      style_color(BASE_COLOR_NORMAL));
@@ -1643,7 +1750,6 @@ static void draw_panel_legend(const Fonts *fonts, Rectangle area) {
 
 static void draw_panel_form(App *app, Rectangle body) {
     Form *form = &app->form;
-    const float gap = 12;
     static const char *const headings[EVENT_KIND_COUNT][2] = {
         { "New event", "Edit event" },
         { "New task", "Edit task" },
@@ -1665,13 +1771,20 @@ static void draw_panel_form(App *app, Rectangle body) {
                        toggle_count == 3 ? "Event;Task;Problem" : "Event;Task", &form->kind);
     }
 
-    // The first field's label sits below the heading and its box below the label.
-    float y = draw_panel_form_fields(app, body, body.y + 32 + FORM_LABEL_HEIGHT_PIXELS);
-    Color dim = style_color(TEXT_COLOR_DISABLED);
-    if (form->kind != EVENT_KIND_PROBLEM) {
-        draw_text(&app->fonts.small, "Dates YYYY-MM-DD, times HH:MM (optional)", body.x, y,
-                  dim);
+    // Only a task solves problems; switching to another kind shows the fields again.
+    if (form->kind != EVENT_KIND_TASK) {
+        form->choosing_problems = false;
     }
+    // The first field's label sits below the heading and its box below the label.
+    const float fields_y = body.y + 32 + FORM_LABEL_HEIGHT_PIXELS;
+    float y = form->choosing_problems ? draw_panel_form_problems(app, body, fields_y)
+                                      : draw_panel_form_fields(app, body, fields_y);
+    Color dim = style_color(TEXT_COLOR_DISABLED);
+    const char *hint = form->kind == EVENT_KIND_PROBLEM ? ""
+                       : !form->choosing_problems       ? "Dates YYYY-MM-DD, times HH:MM (optional)"
+                       : form->links_truncated          ? "Only the newest problems are shown."
+                                                        : "The choices are saved with the task.";
+    draw_text(&app->fonts.small, hint, body.x, y, dim);
     y += TEXT_LINE_HEIGHT_PIXELS_SMALL;
     if (form->error[0] != '\0') {
         scissor_begin(&app->fonts, body.x, y, body.width, TEXT_LINE_HEIGHT_PIXELS);
@@ -1679,15 +1792,42 @@ static void draw_panel_form(App *app, Rectangle body) {
         scissor_end(&app->fonts);
     }
 
-    y += TEXT_LINE_HEIGHT_PIXELS + 4;
-    const float button_width = (body.width - gap) / 2;
+    draw_panel_form_buttons(app, body, y + TEXT_LINE_HEIGHT_PIXELS + 4);
+}
+
+// Cancel and Save; between them, for a task, the button that swaps the fields for the problem
+// checklist and back, with how many problems are checked.
+static void draw_panel_form_buttons(App *app, Rectangle body, float y) {
+    Form *form = &app->form;
+    const float gap = 12;
+    const bool task = form->kind == EVENT_KIND_TASK;
+    const int32_t button_count = task ? 3 : 2;
+    const float button_width = (body.width - (float)(button_count - 1) * gap) / (float)button_count;
     if (GuiButton((Rectangle){ body.x, y, button_width, BUTTON_HEIGHT_PIXELS }, "Cancel")) {
         form_close(form);
+        return;
     }
-    Rectangle save = { body.x + button_width + gap, y, button_width, BUTTON_HEIGHT_PIXELS };
-    if (GuiButton(save, "Save")) {
+    if (task) {
+        char label[TEXT_LINE_SIZE];
+        snprintf(label, sizeof(label), "Problems (%" PRId32 ")", form_problems_linked_count(form));
+        Rectangle swap = { body.x + button_width + gap, y, button_width, BUTTON_HEIGHT_PIXELS };
+        if (GuiButton(swap, form->choosing_problems ? "Fields" : label)) {
+            form->choosing_problems = !form->choosing_problems;
+            // Keys go to the checklist's form, not to a text box hidden behind it.
+            form->field_active = FORM_FIELD_NONE;
+        }
+    }
+    const float save_x = body.x + (float)(button_count - 1) * (button_width + gap);
+    if (GuiButton((Rectangle){ save_x, y, button_width, BUTTON_HEIGHT_PIXELS }, "Save")) {
         app_form_submit(app);
     }
+}
+
+// Where the rows of fields end, below the last box, with the first box at y. The checklist
+// ends there too, so that the buttons never move.
+static float draw_panel_form_rows_end(float y) {
+    const float row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
+    return y + (FORM_ROW_COUNT - 1) * row_height + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
 }
 
 // Draws the rows of fields, the first box at y. Returns the y just below the last row.
@@ -1702,10 +1842,9 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     const float city_width = 136;
     const float address_width = body.width - city_width - gap;
     const float city_x = body.x + address_width + gap;
-    const float end_y = y + (FORM_ROW_COUNT - 1) * row_height + FIELD_HEIGHT_PIXELS +
-                        FORM_ROW_GAP_PIXELS;
+    const float end_y = draw_panel_form_rows_end(y);
     if (form->kind == EVENT_KIND_PROBLEM) {
-        draw_panel_form_fields_problem(app, body, y);
+        draw_panel_form_fields_problem(app, body, y, end_y);
         return end_y;
     }
 
@@ -1748,8 +1887,9 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     return end_y;
 }
 
-// A problem has a name and a description; its day is shown, not chosen.
-static void draw_panel_form_fields_problem(App *app, Rectangle body, float y) {
+// A problem has a name and a description; its day is shown, not chosen. Below them are its
+// status and the tasks that solve it.
+static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, float end_y) {
     Form *form = &app->form;
     const Fonts *fonts = &app->fonts;
     const float row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
@@ -1775,6 +1915,145 @@ static void draw_panel_form_fields_problem(App *app, Rectangle body, float y) {
               style_color(TEXT_COLOR_NORMAL));
     draw_text(&fonts->small, "A problem is always on the day it is created.", body.x, y + 4,
               style_color(TEXT_COLOR_DISABLED));
+    draw_panel_form_problem_tasks(app, body, y + row_height, end_y);
+}
+
+// The status on the label line above y, then one line per linked task, with whether it is
+// done, down to end_y. Tasks that do not fit are counted on the last line.
+static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float y, float end_y) {
+    const Form *form = &app->form;
+    const Fonts *fonts = &app->fonts;
+    assert(form->task_count <= PROBLEM_LINK_COUNT_MAX);
+    assert(y < end_y);
+    const Color normal = style_color(TEXT_COLOR_NORMAL);
+    const Color dim = style_color(TEXT_COLOR_DISABLED);
+    if (!form->links_loaded) {
+        draw_text(&fonts->ui, "Status unknown", body.x, y - FORM_LABEL_HEIGHT_PIXELS, normal);
+        return;
+    }
+    int32_t done_count = 0;
+    for (int32_t i = 0; i < form->task_count; i++) {
+        done_count += form->tasks[i].done ? 1 : 0;
+    }
+    // With more tasks than were loaded, the counts are of the loaded ones; that many tasks for
+    // one problem is far beyond any real use (see PROBLEM_LINK_COUNT_MAX).
+    ProblemStatus status = problem_status(form->task_count, done_count);
+    char text[TEXT_LINE_SIZE];
+    snprintf(text, sizeof(text), "Status: %s", problem_status_name(status));
+    if (status == PROBLEM_STATUS_PLANNED || status == PROBLEM_STATUS_PARTLY_DONE) {
+        snprintf(text, sizeof(text), "Status: %s, %" PRId32 " of %" PRId32 " tasks done",
+                 problem_status_name(status), done_count, form->task_count);
+    }
+    draw_text(&fonts->ui, text, body.x, y - FORM_LABEL_HEIGHT_PIXELS, normal);
+    if (form->task_count == 0) {
+        draw_text(&fonts->small, "Link tasks to it in a task's form, under Problems.", body.x,
+                  y + 4, dim);
+        return;
+    }
+
+    const float line = TEXT_LINE_HEIGHT_PIXELS_SMALL;
+    const int32_t line_count = (int32_t)((end_y - y) / line);
+    assert(line_count > 1);
+    const bool all_fit = form->task_count <= line_count && !form->links_truncated;
+    const int32_t shown = all_fit ? form->task_count : line_count - 1;
+    for (int32_t i = 0; i < shown; i++) {
+        const ProblemTask *task = &form->tasks[i];
+        const float line_y = y + 4 + (float)i * line;
+        // In the task's own color, as on the calendar, so that it is easy to find there.
+        Color color = event_color(&(Event){ .id = task->task_id, .kind = EVENT_KIND_TASK });
+        draw_check_mark((Rectangle){ body.x, line_y + 3, 12, 12 }, task->done, color);
+        scissor_begin(fonts, body.x + 20, line_y, body.width - 20, line);
+        draw_text(&fonts->small, task->title, body.x + 20, line_y, task->done ? dim : normal);
+        scissor_end(fonts);
+    }
+    if (!all_fit) {
+        snprintf(text, sizeof(text), "+%" PRId32 " more%s", form->task_count - shown,
+                 form->links_truncated ? ", and others not loaded" : "");
+        draw_text(&fonts->small, text, body.x + 20, y + 4 + (float)shown * line, dim);
+    }
+}
+
+// The problems a task can solve, each with a check box, in place of the fields from y down to
+// where they end; checking one links the task to it when the form is saved. Each problem's
+// status is as stored, without the choices not saved yet. Rows scroll when they do not fit.
+static float draw_panel_form_problems(App *app, Rectangle body, float y) {
+    Form *form = &app->form;
+    const float end_y = draw_panel_form_rows_end(y);
+    draw_text(&app->fonts.ui, "Problems that completing this task solves", body.x,
+              y - FORM_LABEL_HEIGHT_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    if (!form->links_loaded || form->problem_count == 0) {
+        const char *text = form->links_loaded ? "No problems recorded yet."
+                                              : "Problems could not be loaded.";
+        draw_text(&app->fonts.small, text, body.x, y + 4, style_color(TEXT_COLOR_DISABLED));
+        return end_y;
+    }
+
+    Rectangle list = { body.x, y, body.width, end_y - FORM_ROW_GAP_PIXELS - y };
+    const float content_height = (float)form->problem_count * PROBLEM_ROW_HEIGHT_PIXELS;
+    if (content_height > list.height) {
+        list.width -= SCROLLBAR_GAP_PIXELS;
+    }
+    scroll_update(&form->problems_scroll, list, content_height);
+    const Scroll *scroll = &form->problems_scroll;
+    // A release opens nothing unless the press began here and stayed a tap.
+    const bool clickable = scroll->pressed && !scroll->dragging &&
+                           CheckCollisionPointRec(GetMousePosition(), list);
+    app->fonts.clip = list;
+    app->fonts.clipping = true;
+    scissor_begin(&app->fonts, list.x, list.y, list.width, list.height);
+    for (int32_t i = 0; i < form->problem_count; i++) {
+        Rectangle row = { list.x,
+                          list.y - scroll->offset_pixels + (float)i * PROBLEM_ROW_HEIGHT_PIXELS,
+                          list.width, PROBLEM_ROW_HEIGHT_PIXELS };
+        // Rows scrolled wholly out of the list can be neither seen nor clicked.
+        if (!CheckCollisionRecs(row, list)) {
+            continue;
+        }
+        if (draw_panel_form_problems_row(app, &form->problems[i], row, clickable)) {
+            form->problems[i].linked = !form->problems[i].linked;
+        }
+    }
+    app->fonts.clipping = false;
+    EndScissorMode();
+    draw_scrollbar(list, content_height, scroll->offset_pixels);
+    return end_y;
+}
+
+// Returns true when the row was tapped or clicked, which toggles its check box.
+static bool draw_panel_form_problems_row(const App *app, const TaskProblem *problem,
+                                         Rectangle row, bool clickable) {
+    const Fonts *fonts = &app->fonts;
+    const bool hovered = CheckCollisionPointRec(GetMousePosition(), row);
+    if (hovered) {
+        DrawRectangleRec(row, style_color(BASE_COLOR_FOCUSED));
+    }
+    DrawRectangleRec((Rectangle){ row.x, row.y + row.height - 1, row.width, 1 },
+                     style_color(BORDER_COLOR_NORMAL));
+    const float box_size = 18;
+    draw_check_mark((Rectangle){ row.x + 6, row.y + (row.height - box_size) / 2, box_size,
+                                 box_size },
+                    problem->linked, problem_color);
+
+    const float title_x = row.x + 34;
+    const float status_x = row.x + row.width - PROBLEM_STATUS_WIDTH_PIXELS;
+    const float text_y = row.y + (row.height - TEXT_LINE_HEIGHT_PIXELS) / 2;
+    scissor_begin(fonts, title_x, row.y, status_x - title_x - 8, row.height);
+    draw_text(&fonts->ui, problem->title, title_x, text_y, style_color(TEXT_COLOR_NORMAL));
+    scissor_end(fonts);
+    ProblemStatus status = problem_status(problem->task_count, problem->task_done_count);
+    draw_text(&fonts->small, problem_status_name(status), status_x, text_y + 3,
+              style_color(TEXT_COLOR_DISABLED));
+    return clickable && hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
+}
+
+static int32_t form_problems_linked_count(const Form *form) {
+    assert(form->problem_count >= 0);
+    assert(form->problem_count <= PROBLEM_LINK_COUNT_MAX);
+    int32_t count = 0;
+    for (int32_t i = 0; i < form->problem_count; i++) {
+        count += form->problems[i].linked ? 1 : 0;
+    }
+    return count;
 }
 
 static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
