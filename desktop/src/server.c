@@ -14,9 +14,9 @@ enum {
 };
 
 static void server_discovery_poll(Server *server);
-static void server_client_poll(Server *server, ServerClient *client);
-static bool server_client_flush(ServerClient *client);
-static void server_client_drop(ServerClient *client);
+static void server_client_poll(Server *server, Server_Client *client);
+static bool server_client_flush(Server_Client *client);
+static void server_client_drop(Server_Client *client);
 static void server_handle(Server *server, Reader *request, Writer *response);
 static void server_handle_load_range(Server *server, Reader *request, Writer *response);
 static void server_handle_load_completions(Server *server, Reader *request, Writer *response);
@@ -84,13 +84,13 @@ void server_poll(Server *server) {
     }
     // Bounded by the client slots: at most one new connection per free slot per frame.
     for (int32_t i = 0; i < SERVER_CLIENT_COUNT_MAX; i++) {
-        ServerClient *client = &server->clients[i];
+        Server_Client *client = &server->clients[i];
         if (client->active) {
             continue;
         }
         bool peer_is_local = false;
-        NetSocket socket = net_accept(server->listener, &peer_is_local, client->address,
-                                      sizeof(client->address));
+        Net_Socket socket = net_accept(server->listener, &peer_is_local, client->address,
+                                       sizeof(client->address));
         if (socket == NET_SOCKET_INVALID) {
             break;
         }
@@ -146,7 +146,7 @@ int32_t server_client_count(const Server *server) {
 }
 
 // Finishes sending the previous response, then reads at most one request and answers it.
-static void server_client_poll(Server *server, ServerClient *client) {
+static void server_client_poll(Server *server, Server_Client *client) {
     if (!client->active || !server_client_flush(client)) {
         return;
     }
@@ -199,7 +199,7 @@ static void server_client_poll(Server *server, ServerClient *client) {
 }
 
 // Sends what the socket takes now. Returns false if the connection was dropped.
-static bool server_client_flush(ServerClient *client) {
+static bool server_client_flush(Server_Client *client) {
     if (client->response_length == 0) {
         return true;
     }
@@ -217,7 +217,7 @@ static bool server_client_flush(ServerClient *client) {
     return true;
 }
 
-static void server_client_drop(ServerClient *client) {
+static void server_client_drop(Server_Client *client) {
     net_close(client->socket);
     client->socket = NET_SOCKET_INVALID;
     client->active = false;

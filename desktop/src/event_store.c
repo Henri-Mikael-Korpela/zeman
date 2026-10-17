@@ -112,12 +112,12 @@ static const char *const migrations_sql[] = {
 };
 enum { SCHEMA_VERSION = sizeof(migrations_sql) / sizeof(migrations_sql[0]) };
 
-// Text stored in repeat_unit, indexed by RepeatUnit. NULL is stored for REPEAT_NONE.
+// Text stored in repeat_unit, indexed by Repeat_Unit. NULL is stored for REPEAT_NONE.
 static const char *const repeat_unit_names[REPEAT_UNIT_COUNT] = {
     NULL, "day", "week", "month", "year",
 };
 
-// Text stored in kind, indexed by EventKind.
+// Text stored in kind, indexed by Event_Kind.
 static const char *const event_kind_names[EVENT_KIND_COUNT] = { "event", "task", "problem" };
 
 typedef enum Statement {
@@ -138,7 +138,7 @@ typedef enum Statement {
 
 // Cast because the constants come from different enums.
 static_assert((int)STATEMENT_COUNT == (int)EVENT_STORE_STATEMENT_COUNT,
-              "EventStore holds every statement.");
+              "Event_Store holds every statement.");
 
 // Insert and update share parameters 1 to 11, so that both bind with event_store_bind_fields.
 static const char *const statements_sql[STATEMENT_COUNT] = {
@@ -158,7 +158,7 @@ static const char *const statements_sql[STATEMENT_COUNT] = {
     // plus one occurrence's length.
     // The location comes with each event through a join, so that no second query is needed.
     // The last column is Event.problem_done: a problem with linked tasks, none of them without
-    // a checked-off occurrence (see ProblemTask). It runs only for problems, which are few.
+    // a checked-off occurrence (see Problem_Task). It runs only for problems, which are few.
     [STATEMENT_SELECT_RANGE] =
         "SELECT e.id, e.title, e.start_date, e.start_time, e.end_date, e.end_time,"
         "       e.created_at, e.repeat_unit, e.repeat_interval, e.repeat_end_date, e.kind,"
@@ -197,7 +197,7 @@ static const char *const statements_sql[STATEMENT_COUNT] = {
         " SELECT p.id, t.id FROM events p, events t"
         " WHERE p.id = ?1 AND p.kind = 'problem' AND t.id = ?2 AND t.kind = 'task';",
     // Links to an entry that is no longer a task are left out, as if they were not there; the
-    // app removes them when it saves the entry (see BackendOps.set_task_problems).
+    // app removes them when it saves the entry (see Backend_Ops.set_task_problems).
     [STATEMENT_PROBLEM_TASKS] =
         "SELECT t.id, t.title,"
         "       EXISTS (SELECT 1 FROM task_completions c WHERE c.event_id = t.id)"
@@ -238,17 +238,17 @@ enum {
     COLUMN_PROBLEM_DONE,
 };
 
-static bool event_store_fail(EventStore *store, const char *context);
+static bool event_store_fail(Event_Store *store, const char *context);
 static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_count_max);
-static bool event_store_load_problem_tasks_row(sqlite3_stmt *statement, ProblemTask *task);
-static bool event_store_load_task_problems_row(sqlite3_stmt *statement, TaskProblem *problem);
-static bool event_store_set_task_problems_rows(EventStore *store, int64_t task_id,
+static bool event_store_load_problem_tasks_row(sqlite3_stmt *statement, Problem_Task *task);
+static bool event_store_load_task_problems_row(sqlite3_stmt *statement, Task_Problem *problem);
+static bool event_store_set_task_problems_rows(Event_Store *store, int64_t task_id,
                                                const int64_t *problem_ids,
                                                int32_t problem_count);
-static bool event_store_migrate(EventStore *store);
-static bool event_store_check_foreign_keys(EventStore *store);
-static bool event_store_migrate_step(EventStore *store, int32_t version);
-static bool event_store_write(EventStore *store, sqlite3_stmt *statement, int result,
+static bool event_store_migrate(Event_Store *store);
+static bool event_store_check_foreign_keys(Event_Store *store);
+static bool event_store_migrate_step(Event_Store *store, int32_t version);
+static bool event_store_write(Event_Store *store, sqlite3_stmt *statement, int result,
                               const char *context, bool row_expected);
 static int bind_range(sqlite3_stmt *statement, Date first, Date last, int32_t row_count_max);
 static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event);
@@ -262,10 +262,10 @@ static bool column_parse_kind(sqlite3_stmt *statement, Event *event);
 static bool column_parse_problem(sqlite3_stmt *statement, Event *event);
 static bool column_parse_location(sqlite3_stmt *statement, Event *event);
 
-bool event_store_open(EventStore *store, const char *path) {
+bool event_store_open(Event_Store *store, const char *path) {
     assert(store != NULL);
     assert(path != NULL);
-    *store = (EventStore){ 0 };
+    *store = (Event_Store){ 0 };
 
     int result = sqlite3_open_v2(path, &store->database,
                                  SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL);
@@ -300,7 +300,7 @@ bool event_store_open(EventStore *store, const char *path) {
     return true;
 }
 
-void event_store_close(EventStore *store) {
+void event_store_close(Event_Store *store) {
     assert(store != NULL);
     // sqlite3_finalize and sqlite3_close accept NULL, so a partly opened store closes too.
     for (int32_t i = 0; i < STATEMENT_COUNT; i++) {
@@ -310,10 +310,10 @@ void event_store_close(EventStore *store) {
     // Every statement is finalized above, so the only failure left would be a programmer error.
     assert(result == SQLITE_OK);
     (void)result; // Unused when assertions are compiled out.
-    *store = (EventStore){ 0 };
+    *store = (Event_Store){ 0 };
 }
 
-int64_t event_store_insert(EventStore *store, const Event *event) {
+int64_t event_store_insert(Event_Store *store, const Event *event) {
     assert(store != NULL);
     assert(event != NULL);
     assert(event->id == 0);
@@ -330,7 +330,7 @@ int64_t event_store_insert(EventStore *store, const Event *event) {
     return id;
 }
 
-bool event_store_update(EventStore *store, const Event *event) {
+bool event_store_update(Event_Store *store, const Event *event) {
     assert(store != NULL);
     assert(event->id > 0);
     assert(event->title[0] != '\0');
@@ -344,7 +344,7 @@ bool event_store_update(EventStore *store, const Event *event) {
     return event_store_write(store, statement, result, "Cannot save", true);
 }
 
-bool event_store_delete(EventStore *store, int64_t id) {
+bool event_store_delete(Event_Store *store, int64_t id) {
     assert(store != NULL);
     assert(id > 0);
     sqlite3_stmt *statement = store->statements[STATEMENT_DELETE];
@@ -352,7 +352,7 @@ bool event_store_delete(EventStore *store, int64_t id) {
     return event_store_write(store, statement, result, "Cannot delete", true);
 }
 
-bool event_store_set_task_done(EventStore *store, int64_t id, Date occurrence_start, bool done) {
+bool event_store_set_task_done(Event_Store *store, int64_t id, Date occurrence_start, bool done) {
     assert(store != NULL);
     assert(id > 0);
     Statement which = done ? STATEMENT_COMPLETION_INSERT : STATEMENT_COMPLETION_DELETE;
@@ -365,7 +365,7 @@ bool event_store_set_task_done(EventStore *store, int64_t id, Date occurrence_st
     return event_store_write(store, statement, result, "Cannot update task", false);
 }
 
-int64_t event_store_location_find_or_create(EventStore *store, const char *address,
+int64_t event_store_location_find_or_create(Event_Store *store, const char *address,
                                             const char *city) {
     assert(store != NULL);
     assert(strlen(address) < LOCATION_ADDRESS_SIZE);
@@ -395,7 +395,7 @@ int64_t event_store_location_find_or_create(EventStore *store, const char *addre
     return id;
 }
 
-int32_t event_store_load_range(EventStore *store, Date first, Date last,
+int32_t event_store_load_range(Event_Store *store, Date first, Date last,
                                Event *events, int32_t event_count_max, bool *truncated) {
     assert(store != NULL);
     assert(event_count_max > 0);
@@ -440,8 +440,8 @@ int32_t event_store_load_range(EventStore *store, Date first, Date last,
     return event_count;
 }
 
-int32_t event_store_load_completions(EventStore *store, Date first, Date last,
-                                     TaskCompletion *completions, int32_t completion_count_max,
+int32_t event_store_load_completions(Event_Store *store, Date first, Date last,
+                                     Task_Completion *completions, int32_t completion_count_max,
                                      bool *truncated) {
     assert(store != NULL);
     assert(completion_count_max > 0);
@@ -472,7 +472,7 @@ int32_t event_store_load_completions(EventStore *store, Date first, Date last,
             result = SQLITE_MISMATCH;
             break;
         }
-        completions[completion_count] = (TaskCompletion){
+        completions[completion_count] = (Task_Completion){
             .event_id = sqlite3_column_int64(statement, 0),
             .occurrence_start_day = date_to_day_number(occurrence_start),
         };
@@ -488,7 +488,7 @@ int32_t event_store_load_completions(EventStore *store, Date first, Date last,
     return completion_count;
 }
 
-int32_t event_store_load_problem_tasks(EventStore *store, int64_t problem_id, ProblemTask *tasks,
+int32_t event_store_load_problem_tasks(Event_Store *store, int64_t problem_id, Problem_Task *tasks,
                                       int32_t task_count_max, bool *truncated) {
     assert(problem_id > 0);
     assert(task_count_max > 0);
@@ -526,7 +526,7 @@ int32_t event_store_load_problem_tasks(EventStore *store, int64_t problem_id, Pr
     return task_count;
 }
 
-int32_t event_store_load_task_problems(EventStore *store, int64_t task_id, TaskProblem *problems,
+int32_t event_store_load_task_problems(Event_Store *store, int64_t task_id, Task_Problem *problems,
                                        int32_t problem_count_max, bool *truncated) {
     assert(task_id >= 0);
     assert(problem_count_max > 0);
@@ -568,7 +568,7 @@ int32_t event_store_load_task_problems(EventStore *store, int64_t task_id, TaskP
 
 // One transaction, so that a link that cannot be made leaves the task's earlier links as they
 // were rather than half replaced.
-bool event_store_set_task_problems(EventStore *store, int64_t task_id, const int64_t *problem_ids,
+bool event_store_set_task_problems(Event_Store *store, int64_t task_id, const int64_t *problem_ids,
                                    int32_t problem_count) {
     assert(task_id > 0);
     assert(problem_count >= 0);
@@ -590,7 +590,7 @@ bool event_store_set_task_problems(EventStore *store, int64_t task_id, const int
 }
 
 // Deletes the task's links, then inserts the new ones, inside the caller's transaction.
-static bool event_store_set_task_problems_rows(EventStore *store, int64_t task_id,
+static bool event_store_set_task_problems_rows(Event_Store *store, int64_t task_id,
                                                const int64_t *problem_ids,
                                                int32_t problem_count) {
     sqlite3_stmt *statement = store->statements[STATEMENT_LINK_DELETE];
@@ -622,7 +622,7 @@ static bool event_store_set_task_problems_rows(EventStore *store, int64_t task_i
     return true;
 }
 
-static bool event_store_fail(EventStore *store, const char *context) {
+static bool event_store_fail(Event_Store *store, const char *context) {
     assert(store != NULL);
     assert(context != NULL);
     // sqlite3_errmsg accepts NULL and reports out of memory, which is what a NULL handle means.
@@ -634,7 +634,7 @@ static bool event_store_fail(EventStore *store, const char *context) {
 // Runs a bound write statement and resets it whatever the outcome, so that it can be reused.
 // With row_expected, a statement that changes no row fails: the row was deleted meanwhile,
 // for example from another tool.
-static bool event_store_write(EventStore *store, sqlite3_stmt *statement, int result,
+static bool event_store_write(Event_Store *store, sqlite3_stmt *statement, int result,
                               const char *context, bool row_expected) {
     if (result == SQLITE_OK) {
         result = sqlite3_step(statement);
@@ -665,12 +665,12 @@ static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_co
 }
 
 // Longer titles from outside this program are cut to fit, as in event_store_load_range_row.
-static bool event_store_load_problem_tasks_row(sqlite3_stmt *statement, ProblemTask *task) {
+static bool event_store_load_problem_tasks_row(sqlite3_stmt *statement, Problem_Task *task) {
     const char *title = (const char *)sqlite3_column_text(statement, 1);
     if (title == NULL || title[0] == '\0') {
         return false;
     }
-    *task = (ProblemTask){
+    *task = (Problem_Task){
         .task_id = sqlite3_column_int64(statement, 0),
         .done = sqlite3_column_int(statement, 2) != 0,
     };
@@ -678,7 +678,7 @@ static bool event_store_load_problem_tasks_row(sqlite3_stmt *statement, ProblemT
     return task->task_id > 0;
 }
 
-static bool event_store_load_task_problems_row(sqlite3_stmt *statement, TaskProblem *problem) {
+static bool event_store_load_task_problems_row(sqlite3_stmt *statement, Task_Problem *problem) {
     const char *title = (const char *)sqlite3_column_text(statement, 1);
     if (title == NULL || title[0] == '\0') {
         return false;
@@ -689,7 +689,7 @@ static bool event_store_load_task_problems_row(sqlite3_stmt *statement, TaskProb
     if (task_done_count < 0 || task_done_count > task_count || task_count > INT32_MAX) {
         return false;
     }
-    *problem = (TaskProblem){
+    *problem = (Task_Problem){
         .problem_id = sqlite3_column_int64(statement, 0),
         .task_count = (int32_t)task_count,
         .task_done_count = (int32_t)task_done_count,
@@ -945,7 +945,7 @@ static bool column_parse_kind(sqlite3_stmt *statement, Event *event) {
     return false;
 }
 
-static bool event_store_migrate(EventStore *store) {
+static bool event_store_migrate(Event_Store *store) {
     sqlite3_stmt *statement = NULL;
     int result = sqlite3_prepare_v2(store->database, "PRAGMA user_version;", -1, &statement,
                                     NULL);
@@ -973,7 +973,7 @@ static bool event_store_migrate(EventStore *store) {
 
 // Reports a database whose links between tables are broken, for example by a bad migration,
 // rather than letting it fail later in confusing ways.
-static bool event_store_check_foreign_keys(EventStore *store) {
+static bool event_store_check_foreign_keys(Event_Store *store) {
     sqlite3_stmt *statement = NULL;
     int result = sqlite3_prepare_v2(store->database, "PRAGMA foreign_key_check;", -1, &statement,
                                     NULL);
@@ -992,7 +992,7 @@ static bool event_store_check_foreign_keys(EventStore *store) {
 }
 
 // One transaction per step, so that a failed step leaves the database at the previous version.
-static bool event_store_migrate_step(EventStore *store, int32_t version) {
+static bool event_store_migrate_step(Event_Store *store, int32_t version) {
     assert(version >= 0);
     assert(version < SCHEMA_VERSION);
     char set_version_sql[64];

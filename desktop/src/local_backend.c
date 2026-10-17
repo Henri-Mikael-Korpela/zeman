@@ -4,28 +4,28 @@
 #include <stdio.h>
 #include <time.h>
 
-static bool local_available(LocalBackend *local);
-static void local_changed(LocalBackend *local);
+static bool local_available(Local_Backend *local);
+static void local_changed(Local_Backend *local);
 static int32_t local_load_range(void *context, Date first, Date last, Event *events,
                                 int32_t event_count_max, bool *truncated);
 static int32_t local_load_completions(void *context, Date first, Date last,
-                                      TaskCompletion *completions, int32_t completion_count_max,
+                                      Task_Completion *completions, int32_t completion_count_max,
                                       bool *truncated);
 static int64_t local_insert(void *context, const Event *event);
 static bool local_update(void *context, const Event *event);
 static bool local_remove(void *context, int64_t id);
 static bool local_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
 static int64_t local_location(void *context, const char *address, const char *city);
-static int32_t local_load_problem_tasks(void *context, int64_t problem_id, ProblemTask *tasks,
+static int32_t local_load_problem_tasks(void *context, int64_t problem_id, Problem_Task *tasks,
                                         int32_t task_count_max, bool *truncated);
-static int32_t local_load_task_problems(void *context, int64_t task_id, TaskProblem *problems,
+static int32_t local_load_task_problems(void *context, int64_t task_id, Task_Problem *problems,
                                         int32_t problem_count_max, bool *truncated);
 static bool local_set_task_problems(void *context, int64_t task_id, const int64_t *problem_ids,
                                     int32_t problem_count);
 static uint64_t local_revision(void *context);
 static const char *local_error(const void *context);
 
-static const BackendOps local_ops = {
+static const Backend_Ops local_ops = {
     .load_range = local_load_range,
     .load_completions = local_load_completions,
     .insert = local_insert,
@@ -40,11 +40,11 @@ static const BackendOps local_ops = {
     .error = local_error,
 };
 
-bool local_backend_open(LocalBackend *local, const char *path) {
+bool local_backend_open(Local_Backend *local, const char *path) {
     assert(path != NULL);
     // Starts from the clock rather than 1, so that a phone that saw the revision of an earlier
     // run of this app does not mistake a new run's revision for one it has already loaded.
-    *local = (LocalBackend){ .revision = (uint64_t)time(NULL) << 20 };
+    *local = (Local_Backend){ .revision = (uint64_t)time(NULL) << 20 };
     local->store_open = event_store_open(&local->store, path);
     if (!local->store_open) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
@@ -53,19 +53,19 @@ bool local_backend_open(LocalBackend *local, const char *path) {
     return local->store_open;
 }
 
-void local_backend_close(LocalBackend *local) {
+void local_backend_close(Local_Backend *local) {
     if (local->store_open) {
         event_store_close(&local->store);
         local->store_open = false;
     }
 }
 
-Backend local_backend(LocalBackend *local) {
+Backend local_backend(Local_Backend *local) {
     return (Backend){ .ops = &local_ops, .context = local };
 }
 
 // The store's error is copied so that it outlives the store's next call.
-static bool local_available(LocalBackend *local) {
+static bool local_available(Local_Backend *local) {
     if (!local->store_open) {
         snprintf(local->error, sizeof(local->error), "No database: events cannot be loaded or "
                                                      "saved.");
@@ -74,13 +74,13 @@ static bool local_available(LocalBackend *local) {
     return true;
 }
 
-static void local_changed(LocalBackend *local) {
+static void local_changed(Local_Backend *local) {
     local->revision++;
 }
 
 static int32_t local_load_range(void *context, Date first, Date last, Event *events,
                                 int32_t event_count_max, bool *truncated) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
@@ -93,9 +93,9 @@ static int32_t local_load_range(void *context, Date first, Date last, Event *eve
 }
 
 static int32_t local_load_completions(void *context, Date first, Date last,
-                                      TaskCompletion *completions, int32_t completion_count_max,
+                                      Task_Completion *completions, int32_t completion_count_max,
                                       bool *truncated) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
@@ -108,7 +108,7 @@ static int32_t local_load_completions(void *context, Date first, Date last,
 }
 
 static int64_t local_insert(void *context, const Event *event) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return 0;
     }
@@ -122,7 +122,7 @@ static int64_t local_insert(void *context, const Event *event) {
 }
 
 static bool local_update(void *context, const Event *event) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return false;
     }
@@ -135,7 +135,7 @@ static bool local_update(void *context, const Event *event) {
 }
 
 static bool local_remove(void *context, int64_t id) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return false;
     }
@@ -150,7 +150,7 @@ static bool local_remove(void *context, int64_t id) {
 }
 
 static bool local_set_task_done(void *context, int64_t id, Date occurrence_start, bool done) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return false;
     }
@@ -163,7 +163,7 @@ static bool local_set_task_done(void *context, int64_t id, Date occurrence_start
 }
 
 static int64_t local_location(void *context, const char *address, const char *city) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return 0;
     }
@@ -175,9 +175,9 @@ static int64_t local_location(void *context, const char *address, const char *ci
     return id;
 }
 
-static int32_t local_load_problem_tasks(void *context, int64_t problem_id, ProblemTask *tasks,
+static int32_t local_load_problem_tasks(void *context, int64_t problem_id, Problem_Task *tasks,
                                         int32_t task_count_max, bool *truncated) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
@@ -189,9 +189,9 @@ static int32_t local_load_problem_tasks(void *context, int64_t problem_id, Probl
     return count;
 }
 
-static int32_t local_load_task_problems(void *context, int64_t task_id, TaskProblem *problems,
+static int32_t local_load_task_problems(void *context, int64_t task_id, Task_Problem *problems,
                                         int32_t problem_count_max, bool *truncated) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
@@ -205,7 +205,7 @@ static int32_t local_load_task_problems(void *context, int64_t task_id, TaskProb
 
 static bool local_set_task_problems(void *context, int64_t task_id, const int64_t *problem_ids,
                                     int32_t problem_count) {
-    LocalBackend *local = context;
+    Local_Backend *local = context;
     if (!local_available(local)) {
         return false;
     }
@@ -219,11 +219,11 @@ static bool local_set_task_problems(void *context, int64_t task_id, const int64_
 }
 
 static uint64_t local_revision(void *context) {
-    const LocalBackend *local = context;
+    const Local_Backend *local = context;
     return local->revision;
 }
 
 static const char *local_error(const void *context) {
-    const LocalBackend *local = context;
+    const Local_Backend *local = context;
     return local->error;
 }

@@ -22,7 +22,7 @@ typedef struct Client {
     int64_t connect_attempt_ms;   // When the last connection attempt started, or 0
     int64_t revision_checked_ms;  // When the revision was last asked for
     uint64_t revision;            // The desktop's last reported revision, or 0 when unknown
-    NetSocket socket;
+    Net_Socket socket;
     uint16_t port;
     bool connected;
     bool net_started;

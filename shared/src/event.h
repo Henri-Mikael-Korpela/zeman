@@ -26,25 +26,25 @@ typedef struct Location {
     char city[LOCATION_CITY_SIZE];        // May be empty if address is not
 } Location;
 
-typedef enum RepeatUnit {
+typedef enum Repeat_Unit {
     REPEAT_NONE,
     REPEAT_DAY,
     REPEAT_WEEK,
     REPEAT_MONTH,  // Same day of the month; skips months that do not have that day
     REPEAT_YEAR,   // Same date; 29 February repeats only in leap years
     REPEAT_UNIT_COUNT,
-} RepeatUnit;
+} Repeat_Unit;
 
 // What kind of calendar entry an Event is. Events and tasks share every field and rule; a task
 // can also be checked off as done, once per occurrence. A problem records something that went
 // wrong: it has only a title, a description and its creation time, and it always falls on the
 // day it was created, so it has no times, location or repeat.
-typedef enum EventKind {
+typedef enum Event_Kind {
     EVENT_KIND_EVENT,
     EVENT_KIND_TASK,
     EVENT_KIND_PROBLEM,
     EVENT_KIND_COUNT,
-} EventKind;
+} Event_Kind;
 
 // Any calendar entry: an event or a task, as its kind says.
 typedef struct Event {
@@ -57,11 +57,11 @@ typedef struct Event {
     int32_t start_minute;     // Minute of day, or TIME_NONE
     int32_t end_minute;       // Minute of day, or TIME_NONE
     int32_t created_minute;   // Local minute of day when the event was inserted
-    int32_t repeat_unit;      // RepeatUnit
+    int32_t repeat_unit;      // Repeat_Unit
     int32_t repeat_interval;  // Units between occurrences; 1 ... REPEAT_INTERVAL_MAX
-    int32_t kind;             // EventKind
+    int32_t kind;             // Event_Kind
     bool repeat_has_end;     // False repeats forever; always false for one-time events
-    // A problem whose linked tasks are all done (see ProblemStatus). Worked out when loading,
+    // A problem whose linked tasks are all done (see Problem_Status). Worked out when loading,
     // so that the calendar can show it without loading links; never saved, and always false
     // for events and tasks.
     bool problem_done;
@@ -70,10 +70,10 @@ typedef struct Event {
 } Event;
 
 // One checked-off occurrence of a task.
-typedef struct TaskCompletion {
+typedef struct Task_Completion {
     int64_t event_id;
     int32_t occurrence_start_day;  // Day number of the occurrence's start date
-} TaskCompletion;
+} Task_Completion;
 
 enum {
     // Tasks linked to one problem, and problems offered to one task, loaded at once. Far more
@@ -84,29 +84,29 @@ enum {
 // A task linked to a problem: completing the task helps solve the problem. A task counts as
 // done once any of its occurrences is checked off, because doing it once is what solves the
 // problem, and a repeating task's later occurrences are reminders.
-typedef struct ProblemTask {
+typedef struct Problem_Task {
     int64_t task_id;
     bool done;  // An occurrence of the task is checked off
     char title[EVENT_TITLE_SIZE];
-} ProblemTask;
+} Problem_Task;
 
 // A problem as a task's form offers it for linking, with how far its linked tasks are done.
-typedef struct TaskProblem {
+typedef struct Task_Problem {
     int64_t problem_id;
     int32_t task_count;       // Tasks linked to the problem
-    int32_t task_done_count;  // Of those, the done ones (see ProblemTask)
+    int32_t task_done_count;  // Of those, the done ones (see Problem_Task)
     bool linked;              // Linked to the task the form is for
     char title[EVENT_TITLE_SIZE];
-} TaskProblem;
+} Task_Problem;
 
 // How far the tasks that solve a problem are done.
-typedef enum ProblemStatus {
+typedef enum Problem_Status {
     PROBLEM_STATUS_NO_TASKS,     // No tasks linked yet
     PROBLEM_STATUS_PLANNED,      // Tasks linked, none of them done
     PROBLEM_STATUS_PARTLY_DONE,  // Some linked tasks done
     PROBLEM_STATUS_DONE,         // Every linked task done
     PROBLEM_STATUS_COUNT,
-} ProblemStatus;
+} Problem_Status;
 
 // Checks every rule an event must follow before it is stored: terminated texts, a title, valid
 // dates and times, a known kind and repeat, and occurrences that do not overlap; a problem has
@@ -131,8 +131,8 @@ Event event_occurrence_at(const Event *event, int32_t start_day);
 // "every week", "every 10 days", and so on; empty for an event that does not repeat.
 void event_format_repeat(const Event *event, char *buffer, size_t buffer_size);
 
-ProblemStatus problem_status(int32_t task_count, int32_t task_done_count);
+Problem_Status problem_status(int32_t task_count, int32_t task_done_count);
 // "No planned tasks", "Planned", "Partly completed" or "Completed".
-const char *problem_status_name(ProblemStatus status);
+const char *problem_status_name(Problem_Status status);
 
 #endif

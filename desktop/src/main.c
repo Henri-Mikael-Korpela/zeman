@@ -49,10 +49,10 @@ typedef struct Options {
 // Everything the desktop app runs. The server and client hold large message buffers, so this
 // lives in static storage rather than on the stack.
 typedef struct Desktop {
-    LocalBackend local;
+    Local_Backend local;
     Server server;
     Client client;
-    DevicesView devices;
+    Devices_View devices;
     Backend backend;
     View view;
     bool client_mode;  // Without a database, server or navigation; see main
@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
 
     static Desktop desktop;
     desktop_open(&desktop, &options);
-    AppConfig config = {
+    App_Config config = {
         .font_directory = GetApplicationDirectory(),
         .scale = 1.0f,
         .touch = false,

@@ -14,7 +14,7 @@
 #include "event.h"
 
 enum {
-    // All sizes are layout pixels, which AppConfig.scale turns into screen pixels.
+    // All sizes are layout pixels, which App_Config.scale turns into screen pixels.
     // Each size is rasterized once at startup (see fonts_load), so that text is drawn at the
     // size its glyphs were made for. Calendar entries and cards use the small size, so that
     // more of each title fits.
@@ -80,7 +80,7 @@ enum {
     // Events loaded for one six-week view. If more match, the status bar says so.
     EVENT_COUNT_MAX = 512,
     // Task completions loaded for one view, including a year before it (see
-    // BackendOps.load_completions). More than this is reported like too many events.
+    // Backend_Ops.load_completions). More than this is reported like too many events.
     COMPLETION_COUNT_MAX = 1024,
     STATUS_SIZE = 192,
     INFO_SIZE = 192,
@@ -108,7 +108,7 @@ static const float TASK_DONE_FILL_ALPHA = 0.08f;
 static const float TASK_DONE_OUTLINE_ALPHA = 0.35f;
 static const float TASK_DONE_TEXT_ALPHA = 0.6f;
 
-typedef enum FormField {
+typedef enum Form_Field {
     FORM_FIELD_TITLE,
     FORM_FIELD_START_DATE,
     FORM_FIELD_START_TIME,
@@ -120,7 +120,7 @@ typedef enum FormField {
     FORM_FIELD_REPEAT_DAYS,      // Shown only for "Every X days"
     FORM_FIELD_REPEAT_END_DATE,  // Shown only for repeating events; empty repeats forever
     FORM_FIELD_COUNT,
-} FormField;
+} Form_Field;
 
 enum {
     // No form field is being edited.
@@ -137,14 +137,14 @@ static const int32_t form_field_sizes[FORM_FIELD_COUNT] = {
 };
 
 // Choices in the form's repeat selector, in the order shown, and the unit each one means.
-typedef enum RepeatOption {
+typedef enum Repeat_Option {
     REPEAT_OPTION_NONE,
     REPEAT_OPTION_WEEK,
     REPEAT_OPTION_DAYS,
     REPEAT_OPTION_MONTH,
     REPEAT_OPTION_YEAR,
     REPEAT_OPTION_COUNT,
-} RepeatOption;
+} Repeat_Option;
 
 // raygui separates combo box items with semicolons.
 static const char repeat_option_labels[] =
@@ -185,24 +185,24 @@ static const Color problem_done_color = { 34, 130, 60, 255 };
 
 // How many days the calendar shows at once. Every range uses the same day cells; a week is one
 // row of seven, and a day one cell the width of the calendar, so that whole titles show.
-typedef enum CalendarRange {
+typedef enum Calendar_Range {
     RANGE_MONTH,
     RANGE_WEEK,
     RANGE_DAY,
     RANGE_COUNT,
-} CalendarRange;
+} Calendar_Range;
 
-// raygui separates toggle group items with semicolons; the order is CalendarRange's.
+// raygui separates toggle group items with semicolons; the order is Calendar_Range's.
 static const char range_labels[] = "Month;Week;Day";
 
-typedef struct KeyStep {
+typedef struct Key_Step {
     int32_t key;     // raylib KeyboardKey
     int32_t days;
-} KeyStep;
+} Key_Step;
 
 // The arrow keys move the selection by a day or a week, whatever the range; Page Up and Page
 // Down move by the range (see range_step).
-static const KeyStep key_steps[] = {
+static const Key_Step key_steps[] = {
     { KEY_LEFT, -1 },
     { KEY_RIGHT, 1 },
     { KEY_UP, -7 },
@@ -223,15 +223,15 @@ typedef struct Form {
     // Links between problems and the tasks that solve them, loaded when the form opens: an
     // existing problem's tasks, or else the problems a task can solve, with the user's choices
     // in their linked flags until the form is saved.
-    ProblemTask tasks[PROBLEM_LINK_COUNT_MAX];
-    TaskProblem problems[PROBLEM_LINK_COUNT_MAX];
+    Problem_Task tasks[PROBLEM_LINK_COUNT_MAX];
+    Task_Problem problems[PROBLEM_LINK_COUNT_MAX];
     Scroll problems_scroll;
     int64_t editing_id;    // Event being edited, or 0 for a new event
-    int32_t field_active;  // FormField being edited, or FORM_FIELD_NONE
+    int32_t field_active;  // Form_Field being edited, or FORM_FIELD_NONE
     int32_t task_count;
     int32_t problem_count;
-    int repeat_option;     // RepeatOption; int because raygui's combo box writes it
-    int kind;              // EventKind; int because raygui's toggle group writes it
+    int repeat_option;     // Repeat_Option; int because raygui's combo box writes it
+    int kind;              // Event_Kind; int because raygui's toggle group writes it
     bool open;
     bool links_loaded;       // False after a failed load, so that saving keeps the stored links
     bool links_truncated;    // More links or problems exist than were loaded
@@ -242,17 +242,17 @@ typedef struct Form {
 
 // A font together with the one size it is drawn at. raylib rasterizes a font once, so drawing
 // it at another size would blur or pixelate it.
-typedef struct TextStyle {
+typedef struct Text_Style {
     Font font;
     float size_pixels;  // Layout pixels
     float scale;        // Screen pixels per layout pixel that the font was rasterized for
-} TextStyle;
+} Text_Style;
 
 typedef struct Fonts {
-    TextStyle ui;            // Controls, labels and day numbers; also raygui's font
-    TextStyle small;         // Calendar entries and the details on panel cards
-    TextStyle small_strong;  // Titles on panel cards
-    TextStyle heading;       // Month title and the selected date
+    Text_Style ui;            // Controls, labels and day numbers; also raygui's font
+    Text_Style small;         // Calendar entries and the details on panel cards
+    Text_Style small_strong;  // Titles on panel cards
+    Text_Style heading;       // Month title and the selected date
     // Screen pixels per layout pixel. Kept with the fonts, which are rasterized at this scale,
     // because every function that draws text receives them.
     float scale;
@@ -269,7 +269,7 @@ typedef struct Fonts {
 
 typedef struct App {
     Event events[EVENT_COUNT_MAX];  // Events of the visible six weeks, ordered by start
-    TaskCompletion completions[COMPLETION_COUNT_MAX];  // Done task occurrences near the view
+    Task_Completion completions[COMPLETION_COUNT_MAX];  // Done task occurrences near the view
     Backend *backend;
     Fonts fonts;
     uint64_t events_revision;       // Backend revision that events[] was loaded at
@@ -282,13 +282,13 @@ typedef struct App {
     // day within it, so week and day views need no loading of their own.
     Date visible_first;
     int32_t event_count;
-    int range;                      // CalendarRange; int because raygui's toggle group writes it
+    int range;                      // Calendar_Range; int because raygui's toggle group writes it
     int32_t completion_count;
     Scroll panel_scroll;            // The panel's list of cards
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
     bool events_truncated;
-    bool touch;                     // See AppConfig
+    bool touch;                     // See App_Config
     bool input_enabled;             // See app_set_input_enabled
     bool created;
     char status[STATUS_SIZE];       // Message for the status bar, cleared on navigation
@@ -297,12 +297,12 @@ typedef struct App {
 
 // A text broken into lines no wider than a given width: where each line starts in the text and
 // how long it is. The text is not copied.
-typedef struct TextLines {
+typedef struct Text_Lines {
     int32_t start[DESCRIPTION_LINES_MAX];
     int32_t length[DESCRIPTION_LINES_MAX];
     int32_t count;
     bool cut;  // The text continues past the last line
-} TextLines;
+} Text_Lines;
 
 typedef struct Layout {
     Rectangle header;
@@ -320,9 +320,9 @@ typedef struct Layout {
 } Layout;
 
 static void fonts_load(Fonts *fonts, const char *directory, float scale);
-static TextStyle fonts_load_style(const char *directory, const char *file_name,
-                                  int32_t size_pixels, float scale, const int *codepoints,
-                                  bool *loaded);
+static Text_Style fonts_load_style(const char *directory, const char *file_name,
+                                   int32_t size_pixels, float scale, const int *codepoints,
+                                   bool *loaded);
 static void fonts_unload(Fonts *fonts);
 static void app_handle_keys(App *app, const Layout *layout);
 static void app_select(App *app, Date date);
@@ -382,7 +382,7 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y);
 static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, float end_y);
 static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float y, float end_y);
 static float draw_panel_form_problems(App *app, Rectangle body, float y);
-static bool draw_panel_form_problems_row(const App *app, const TaskProblem *problem,
+static bool draw_panel_form_problems_row(const App *app, const Task_Problem *problem,
                                          Rectangle row, bool clickable);
 static int32_t form_problems_linked_count(const Form *form);
 static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
@@ -394,8 +394,8 @@ static void form_close(Form *form);
 static int32_t form_field_next(const Form *form, bool backwards);
 static bool form_field_visible(const Form *form, int32_t field);
 static float event_card_height(const Fonts *fonts, const Event *event, float card_width);
-static TextLines text_wrap(const TextStyle *style, const char *text, float width_pixels);
-static bool text_line_fits(const TextStyle *style, const char *text, int32_t length,
+static Text_Lines text_wrap(const Text_Style *style, const char *text, float width_pixels);
+static bool text_line_fits(const Text_Style *style, const char *text, int32_t length,
                            float width_pixels);
 static const char *form_parse(const Form *form, Date today, Event *event);
 static const char *form_parse_problem(const Form *form, Date today, Event *event);
@@ -414,15 +414,15 @@ static void event_format_lead(const Event *event, char *buffer, size_t buffer_si
 static void format_date_time_short(Date date, int32_t minute_of_day, char *buffer,
                                    size_t buffer_size);
 static Color style_color(int32_t property);
-static void draw_text(const TextStyle *style, const char *text, float x, float y, Color color);
+static void draw_text(const Text_Style *style, const char *text, float x, float y, Color color);
 static float draw_text_round(float position, float scale);
-static Vector2 measure_text(const TextStyle *style, const char *text);
-static void draw_text_centered(const TextStyle *style, const char *text, Rectangle area,
+static Vector2 measure_text(const Text_Style *style, const char *text);
+static void draw_text_centered(const Text_Style *style, const char *text, Rectangle area,
                                Color color);
 static void scissor_begin(const Fonts *fonts, float x, float y, float width, float height);
 static void scissor_end(const Fonts *fonts);
 
-App *app_create(Backend *backend, const AppConfig *config) {
+App *app_create(Backend *backend, const App_Config *config) {
     // Static rather than on the stack, because App holds every loaded event; one per program.
     static App app;
     assert(!app.created);
@@ -499,7 +499,7 @@ void app_frame(App *app, Rectangle area) {
     SetMouseScale(1.0f, 1.0f);
 }
 
-void app_draw_text(const App *app, AppText style, const char *text, float x, float y) {
+void app_draw_text(const App *app, App_Text style, const char *text, float x, float y) {
     switch (style) {
     case APP_TEXT_HEADING:
         draw_text(&app->fonts.heading, text, x, y, style_color(TEXT_COLOR_NORMAL));
@@ -514,10 +514,10 @@ void app_draw_text(const App *app, AppText style, const char *text, float x, flo
         draw_text(&app->fonts.small, text, x, y, style_color(TEXT_COLOR_NORMAL));
         return;
     }
-    assert(false); // Not an AppText.
+    assert(false); // Not an App_Text.
 }
 
-float app_measure_text(const App *app, AppText style, const char *text) {
+float app_measure_text(const App *app, App_Text style, const char *text) {
     switch (style) {
     case APP_TEXT_HEADING:
         return measure_text(&app->fonts.heading, text).x;
@@ -527,7 +527,7 @@ float app_measure_text(const App *app, AppText style, const char *text) {
     case APP_TEXT_SMALL:
         return measure_text(&app->fonts.small, text).x;
     }
-    assert(false); // Not an AppText.
+    assert(false); // Not an App_Text.
     return 0.0f;
 }
 
@@ -575,12 +575,12 @@ static void fonts_load(Fonts *fonts, const char *directory, float scale) {
 
 // Falls back to raylib's default font, scaled, when the file is missing or unreadable, so that
 // the calendar still works; *loaded then becomes false.
-static TextStyle fonts_load_style(const char *directory, const char *file_name,
-                                  int32_t size_pixels, float scale, const int *codepoints,
-                                  bool *loaded) {
+static Text_Style fonts_load_style(const char *directory, const char *file_name,
+                                   int32_t size_pixels, float scale, const int *codepoints,
+                                   bool *loaded) {
     assert(size_pixels > 0);
     assert(scale > 0.0f);
-    TextStyle style = { GetFontDefault(), (float)size_pixels, scale };
+    Text_Style style = { GetFontDefault(), (float)size_pixels, scale };
     char path[PATH_SIZE];
     int written = snprintf(path, sizeof(path), "%s%s", directory, file_name);
     if (written < 0 || written >= (int)sizeof(path)) {
@@ -743,7 +743,7 @@ static void app_load_events(App *app, Date month, uint64_t revision) {
 
 static bool app_task_done(const App *app, int64_t id, int32_t start_day) {
     for (int32_t i = 0; i < app->completion_count; i++) {
-        const TaskCompletion *completion = &app->completions[i];
+        const Task_Completion *completion = &app->completions[i];
         if (completion->event_id == id && completion->occurrence_start_day == start_day) {
             return true;
         }
@@ -978,7 +978,7 @@ static void layout_set_grid(Layout *layout, int32_t range) {
 }
 
 static int32_t range_day_count(int32_t range) {
-    switch ((CalendarRange)range) {
+    switch ((Calendar_Range)range) {
     case RANGE_MONTH:
         return GRID_CELL_COUNT;
     case RANGE_WEEK:
@@ -988,14 +988,14 @@ static int32_t range_day_count(int32_t range) {
     case RANGE_COUNT:
         break;
     }
-    assert(false); // Not a CalendarRange.
+    assert(false); // Not a Calendar_Range.
     return 1;
 }
 
 // The date one range before (direction -1) or after (1) date: a month, a week or a day.
 static Date range_step(Date date, int32_t range, int32_t direction) {
     assert(direction == -1 || direction == 1);
-    switch ((CalendarRange)range) {
+    switch ((Calendar_Range)range) {
     case RANGE_MONTH:
         return date_add_months(date, direction);
     case RANGE_WEEK:
@@ -1005,14 +1005,14 @@ static Date range_step(Date date, int32_t range, int32_t direction) {
     case RANGE_COUNT:
         break;
     }
-    assert(false); // Not a CalendarRange.
+    assert(false); // Not a Calendar_Range.
     return date;
 }
 
 // A month starts on the Monday of the week that holds its first day, a week on its Monday, and
 // a day view shows the selected day.
 static Date range_first_date(const App *app) {
-    switch ((CalendarRange)app->range) {
+    switch ((Calendar_Range)app->range) {
     case RANGE_MONTH:
         return grid_first_date(app->events_month);
     case RANGE_WEEK:
@@ -1022,7 +1022,7 @@ static Date range_first_date(const App *app) {
     case RANGE_COUNT:
         break;
     }
-    assert(false); // Not a CalendarRange.
+    assert(false); // Not a Calendar_Range.
     return app->selected;
 }
 
@@ -1031,7 +1031,7 @@ static Date range_first_date(const App *app) {
 static void range_title(const App *app, char *buffer, size_t buffer_size) {
     const Date first = app->visible_first;
     const Date last = date_add_days(first, GRID_COLUMN_COUNT - 1);
-    switch ((CalendarRange)app->range) {
+    switch ((Calendar_Range)app->range) {
     case RANGE_MONTH:
         snprintf(buffer, buffer_size, "%s %" PRId32, month_name(app->events_month.month),
                  app->events_month.year);
@@ -1058,7 +1058,7 @@ static void range_title(const App *app, char *buffer, size_t buffer_size) {
     case RANGE_COUNT:
         break;
     }
-    assert(false); // Not a CalendarRange.
+    assert(false); // Not a Calendar_Range.
     buffer[0] = '\0';
 }
 
@@ -1159,7 +1159,7 @@ static void draw_header(App *app, const Layout *layout) {
     Rectangle area = { header.x + buttons_width, header.y, right - header.x - buttons_width,
                        height };
     // The normal font when the heading font is too wide for the space, as on a phone.
-    const TextStyle *style = &app->fonts.heading;
+    const Text_Style *style = &app->fonts.heading;
     if (measure_text(style, title).x > area.width) {
         style = &app->fonts.ui;
     }
@@ -1339,7 +1339,7 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
     assert(start_day <= day_number);
     const bool task = event->kind == EVENT_KIND_TASK;
     const bool done = task && app_task_done(app, event->id, start_day);
-    const TextStyle *style = &app->fonts.small;
+    const Text_Style *style = &app->fonts.small;
     const Color color = event_color(event);
     bool starts_here = day_number == start_day;
     bool ends_here = day_number == start_day + event_duration_days(event);
@@ -1638,7 +1638,7 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     const float x = card.x + 16;
     const Rectangle delete_button = { card.x + card.width - 82, card.y + 6, 72, 24 };
     const Rectangle checkbox = { x, card.y + 8, 16, 16 };
-    const TextStyle *title_style = &app->fonts.small_strong;
+    const Text_Style *title_style = &app->fonts.small_strong;
     const Rectangle confirm_button = { x, card.y + card.height - 44, 110, 32 };
     const Rectangle cancel_button = { x + 122, confirm_button.y, 110, 32 };
     const bool task = event->kind == EVENT_KIND_TASK;
@@ -1711,7 +1711,7 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
                                           Rectangle card) {
     const float x = card.x + 16;
     const float line = (float)TEXT_LINE_HEIGHT_PIXELS_SMALL;
-    const TextStyle *style = &fonts->small;
+    const Text_Style *style = &fonts->small;
     char text[TEXT_LINE_SIZE];
     scissor_begin(fonts, card.x, card.y, card.width - 4, card.height);
     float y = card.y + 8 + line;
@@ -1723,8 +1723,8 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
         draw_text(style, text, x, y, style_color(TEXT_COLOR_NORMAL));
     }
     if (event->description[0] != '\0') {
-        TextLines lines = text_wrap(style, event->description,
-                                    card.width - (float)CARD_TEXT_MARGIN_PIXELS);
+        Text_Lines lines = text_wrap(style, event->description,
+                                     card.width - (float)CARD_TEXT_MARGIN_PIXELS);
         for (int32_t i = 0; i < lines.count; i++) {
             y += line;
             int32_t shown = snprintf(text, sizeof(text), "%.*s", lines.length[i],
@@ -1962,7 +1962,7 @@ static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float 
     }
     // With more tasks than were loaded, the counts are of the loaded ones; that many tasks for
     // one problem is far beyond any real use (see PROBLEM_LINK_COUNT_MAX).
-    ProblemStatus status = problem_status(form->task_count, done_count);
+    Problem_Status status = problem_status(form->task_count, done_count);
     char text[TEXT_LINE_SIZE];
     snprintf(text, sizeof(text), "Status: %s", problem_status_name(status));
     if (status == PROBLEM_STATUS_PLANNED || status == PROBLEM_STATUS_PARTLY_DONE) {
@@ -1982,7 +1982,7 @@ static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float 
     const bool all_fit = form->task_count <= line_count && !form->links_truncated;
     const int32_t shown = all_fit ? form->task_count : line_count - 1;
     for (int32_t i = 0; i < shown; i++) {
-        const ProblemTask *task = &form->tasks[i];
+        const Problem_Task *task = &form->tasks[i];
         const float line_y = y + 4 + (float)i * line;
         // In the task's own color, as on the calendar, so that it is easy to find there.
         Color color = event_color(&(Event){ .id = task->task_id, .kind = EVENT_KIND_TASK });
@@ -2045,7 +2045,7 @@ static float draw_panel_form_problems(App *app, Rectangle body, float y) {
 }
 
 // Returns true when the row was tapped or clicked, which toggles its check box.
-static bool draw_panel_form_problems_row(const App *app, const TaskProblem *problem,
+static bool draw_panel_form_problems_row(const App *app, const Task_Problem *problem,
                                          Rectangle row, bool clickable) {
     const Fonts *fonts = &app->fonts;
     const bool hovered = CheckCollisionPointRec(GetMousePosition(), row);
@@ -2065,7 +2065,7 @@ static bool draw_panel_form_problems_row(const App *app, const TaskProblem *prob
     scissor_begin(fonts, title_x, row.y, status_x - title_x - 8, row.height);
     draw_text(&fonts->ui, problem->title, title_x, text_y, style_color(TEXT_COLOR_NORMAL));
     scissor_end(fonts);
-    ProblemStatus status = problem_status(problem->task_count, problem->task_done_count);
+    Problem_Status status = problem_status(problem->task_count, problem->task_done_count);
     draw_text(&fonts->small, problem_status_name(status), status_x, text_y + 3,
               style_color(TEXT_COLOR_DISABLED));
     return clickable && hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
@@ -2363,8 +2363,8 @@ static float event_card_height(const Fonts *fonts, const Event *event, float car
 
 // Breaks text at spaces into at most DESCRIPTION_LINES_MAX lines that fit width_pixels, and
 // breaks inside a word only when one word alone is wider than a line.
-static TextLines text_wrap(const TextStyle *style, const char *text, float width_pixels) {
-    TextLines lines = { .count = 0, .cut = false };
+static Text_Lines text_wrap(const Text_Style *style, const char *text, float width_pixels) {
+    Text_Lines lines = { .count = 0, .cut = false };
     const int32_t length = (int32_t)strlen(text);
     int32_t position = 0;
     // Bounded by DESCRIPTION_LINES_MAX, and each pass either ends the loop or consumes text.
@@ -2406,7 +2406,7 @@ static TextLines text_wrap(const TextStyle *style, const char *text, float width
     return lines;
 }
 
-static bool text_line_fits(const TextStyle *style, const char *text, int32_t length,
+static bool text_line_fits(const Text_Style *style, const char *text, int32_t length,
                            float width_pixels) {
     char line[EVENT_DESCRIPTION_SIZE];
     assert(length >= 0);
@@ -2563,7 +2563,7 @@ static Color style_color(int32_t property) {
 // Positions are rounded to whole screen pixels, so that glyphs, rasterized at the screen
 // scale, map one to one onto screen pixels and stay sharp. A position may be left of or above
 // the screen, as in the phone's drawer while it slides in.
-static void draw_text(const TextStyle *style, const char *text, float x, float y, Color color) {
+static void draw_text(const Text_Style *style, const char *text, float x, float y, Color color) {
     // Far beyond any screen, which would also overflow the rounding.
     assert(x > -(float)TEXT_POSITION_LIMIT_PIXELS);
     assert(x < (float)TEXT_POSITION_LIMIT_PIXELS);
@@ -2585,12 +2585,12 @@ static float draw_text_round(float position, float scale) {
     return ((float)(int32_t)screen - shift) / scale;
 }
 
-static Vector2 measure_text(const TextStyle *style, const char *text) {
+static Vector2 measure_text(const Text_Style *style, const char *text) {
     return MeasureTextEx(style->font, text, style->size_pixels,
                          (float)GuiGetStyle(DEFAULT, TEXT_SPACING));
 }
 
-static void draw_text_centered(const TextStyle *style, const char *text, Rectangle area,
+static void draw_text_centered(const Text_Style *style, const char *text, Rectangle area,
                                Color color) {
     Vector2 text_size = measure_text(style, text);
     draw_text(style, text, area.x + (area.width - text_size.x) / 2,

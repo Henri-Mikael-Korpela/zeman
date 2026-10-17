@@ -12,14 +12,14 @@
 // Both implement these operations, so that one user interface serves both.
 //
 // Every operation reports failure through its return value, and error() then says why.
-typedef struct BackendOps {
+typedef struct Backend_Ops {
     // Loads events with an occurrence that may overlap [first, last], or created within it.
     // Returns the count, or -1. Sets *truncated when more than event_count_max matched.
     int32_t (*load_range)(void *context, Date first, Date last, Event *events,
                           int32_t event_count_max, bool *truncated);
     // Loads completions of task occurrences that may cover a day in [first, last].
     int32_t (*load_completions)(void *context, Date first, Date last,
-                                TaskCompletion *completions, int32_t completion_count_max,
+                                Task_Completion *completions, int32_t completion_count_max,
                                 bool *truncated);
     // Returns the new id, or 0.
     int64_t (*insert)(void *context, const Event *event);
@@ -30,12 +30,12 @@ typedef struct BackendOps {
     int64_t (*location_find_or_create)(void *context, const char *address, const char *city);
     // Loads the tasks linked to a problem, in start order. Returns the count, or -1. Sets
     // *truncated when more than task_count_max are linked.
-    int32_t (*load_problem_tasks)(void *context, int64_t problem_id, ProblemTask *tasks,
+    int32_t (*load_problem_tasks)(void *context, int64_t problem_id, Problem_Task *tasks,
                                   int32_t task_count_max, bool *truncated);
     // Loads the problems a task can be linked to: those linked to task_id first, so that they
     // are never cut off, then the newest. task_id is 0 for a task not stored yet. Returns the
     // count, or -1, and sets *truncated as load_problem_tasks does.
-    int32_t (*load_task_problems)(void *context, int64_t task_id, TaskProblem *problems,
+    int32_t (*load_task_problems)(void *context, int64_t task_id, Task_Problem *problems,
                                   int32_t problem_count_max, bool *truncated);
     // Makes problem_ids the problems linked to the task, replacing its earlier links, all or
     // nothing. With no ids it unlinks the entry from every problem, which also suits an entry
@@ -46,10 +46,10 @@ typedef struct BackendOps {
     // the user interface knows when to reload. 0 when unknown, for example while disconnected.
     uint64_t (*revision)(void *context);
     const char *(*error)(const void *context);
-} BackendOps;
+} Backend_Ops;
 
 typedef struct Backend {
-    const BackendOps *ops;
+    const Backend_Ops *ops;
     void *context;
 } Backend;
 
@@ -60,7 +60,7 @@ static inline int32_t backend_load_range(Backend *backend, Date first, Date last
 }
 
 static inline int32_t backend_load_completions(Backend *backend, Date first, Date last,
-                                               TaskCompletion *completions,
+                                               Task_Completion *completions,
                                                int32_t completion_count_max, bool *truncated) {
     return backend->ops->load_completions(backend->context, first, last, completions,
                                           completion_count_max, truncated);
@@ -89,14 +89,14 @@ static inline int64_t backend_location_find_or_create(Backend *backend, const ch
 }
 
 static inline int32_t backend_load_problem_tasks(Backend *backend, int64_t problem_id,
-                                                 ProblemTask *tasks, int32_t task_count_max,
+                                                 Problem_Task *tasks, int32_t task_count_max,
                                                  bool *truncated) {
     return backend->ops->load_problem_tasks(backend->context, problem_id, tasks, task_count_max,
                                             truncated);
 }
 
 static inline int32_t backend_load_task_problems(Backend *backend, int64_t task_id,
-                                                 TaskProblem *problems,
+                                                 Task_Problem *problems,
                                                  int32_t problem_count_max, bool *truncated) {
     return backend->ops->load_task_problems(backend->context, task_id, problems,
                                             problem_count_max, truncated);

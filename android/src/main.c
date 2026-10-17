@@ -60,29 +60,29 @@ typedef enum View {
 
 static const char *const view_names[VIEW_COUNT] = { "Calendar", "Connection settings" };
 
-typedef enum ConnectResult {
+typedef enum Connect_Result {
     CONNECT_NONE,
     CONNECT_CHOSEN,     // The address to use is ready
     CONNECT_SCAN,       // Scan the desktop's QR code
     CONNECT_CANCELLED,  // The scan was given up
-} ConnectResult;
+} Connect_Result;
 
 // The connection settings view: choosing the desktop app by its QR code, by a desktop found on
 // the network, or by typing its address. Choosing the same desktop again reconnects to it.
-typedef struct ConnectScreen {
+typedef struct Connect_Screen {
     Discovery discovery;
     char address[ADDRESS_TEXT_SIZE];
     char message[MESSAGE_SIZE];  // Why the address cannot be used, or empty
     bool editing;                // The address box has the keyboard
     bool open;
-} ConnectScreen;
+} Connect_Screen;
 
 // The screen that reads the desktop's QR code with the camera.
-typedef struct ScanScreen {
-    QrScanner scanner;
+typedef struct Scan_Screen {
+    QR_Scanner scanner;
     char message[MESSAGE_SIZE];  // A code that is not the desktop app's, or a camera problem
     bool permission_asked;
-} ScanScreen;
+} Scan_Screen;
 
 // The navigation, pulled out from the left edge or opened by tapping the edge's handle.
 typedef struct Drawer {
@@ -98,9 +98,9 @@ typedef struct Drawer {
 // static storage rather than on the stack.
 typedef struct Phone {
     Client client;
-    ConnectScreen connect;
-    ScanScreen scan;
-    AndroidInput input;
+    Connect_Screen connect;
+    Scan_Screen scan;
+    Android_Input input;
     Drawer drawer;
     App *app;
     float scale;
@@ -127,15 +127,15 @@ static void drawer_draw(const Drawer *drawer, const App *app, View current, cons
 static void gutter_draw(float height);
 static void screen_begin(float scale);
 static void screen_end(void);
-static void connect_screen_open(ConnectScreen *screen, const char *address);
-static void connect_screen_close(ConnectScreen *screen);
-static ConnectResult connect_screen_frame(ConnectScreen *screen, const App *app, float scale,
-                                          const char *status, bool input);
-static ConnectResult connect_screen_draw_choices(ConnectScreen *screen, float width, float *y);
-static ConnectResult connect_screen_draw_address(ConnectScreen *screen, float width, float y);
-static ConnectResult scan_screen_frame(ScanScreen *scan, float scale, char *address,
-                                       size_t address_size);
-static bool scan_screen_read(ScanScreen *scan, char *address, size_t address_size);
+static void connect_screen_open(Connect_Screen *screen, const char *address);
+static void connect_screen_close(Connect_Screen *screen);
+static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *app, float scale,
+                                           const char *status, bool input);
+static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float width, float *y);
+static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float width, float y);
+static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *address,
+                                        size_t address_size);
+static bool scan_screen_read(Scan_Screen *scan, char *address, size_t address_size);
 
 // The Android app: the calendar of a desktop app on the same local network. raylib's Android
 // platform code calls this from android_main.
@@ -152,7 +152,7 @@ int main(int argc, char **argv) {
     phone.scale = (float)shorter_side / LAYOUT_WIDTH_PIXELS;
     client_init(&phone.client);
     Backend backend = client_backend(&phone.client);
-    AppConfig config = { .font_directory = "", .scale = phone.scale, .touch = true };
+    App_Config config = { .font_directory = "", .scale = phone.scale, .touch = true };
     phone.app = app_create(&backend, &config);
     phone.view = VIEW_CALENDAR;
     if (settings_load(phone.address, sizeof(phone.address))) {
@@ -200,7 +200,7 @@ static void phone_frame(Phone *phone) {
     phone_status(phone, status, sizeof(status));
 
     bool typing = false;
-    ConnectResult result = CONNECT_NONE;
+    Connect_Result result = CONNECT_NONE;
     BeginDrawing();
     ClearBackground(GetColor((unsigned int)GuiGetStyle(DEFAULT, BACKGROUND_COLOR)));
     if (phone->view == VIEW_CALENDAR) {
@@ -238,7 +238,7 @@ static void phone_frame_scan(Phone *phone) {
     assert(phone->view == VIEW_CONNECTION);
     assert(phone->connect.open);
     char chosen[ADDRESS_TEXT_SIZE] = "";
-    ConnectResult result = scan_screen_frame(&phone->scan, phone->scale, chosen, sizeof(chosen));
+    Connect_Result result = scan_screen_frame(&phone->scan, phone->scale, chosen, sizeof(chosen));
     if (result == CONNECT_CANCELLED) {
         phone->scanning = false;
     } else if (result == CONNECT_CHOSEN) {
@@ -515,7 +515,7 @@ static void screen_end(void) {
     SetMouseScale(1.0f, 1.0f);
 }
 
-static void connect_screen_open(ConnectScreen *screen, const char *address) {
+static void connect_screen_open(Connect_Screen *screen, const char *address) {
     assert(!screen->open);
     // Searching the network starts at once; without it, the code or the address still work.
     bool searching = discovery_start(&screen->discovery);
@@ -526,7 +526,7 @@ static void connect_screen_open(ConnectScreen *screen, const char *address) {
     screen->open = true;
 }
 
-static void connect_screen_close(ConnectScreen *screen) {
+static void connect_screen_close(Connect_Screen *screen) {
     if (!screen->open) {
         return;
     }
@@ -537,8 +537,8 @@ static void connect_screen_close(ConnectScreen *screen) {
 
 // Draws the connection settings right of the edge's strip, between the caller's BeginDrawing
 // and EndDrawing. Without input, as while the drawer is out, the controls ignore touches.
-static ConnectResult connect_screen_frame(ConnectScreen *screen, const App *app, float scale,
-                                          const char *status, bool input) {
+static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *app, float scale,
+                                           const char *status, bool input) {
     assert(screen->open);
     assert(scale > 0.0f);
     discovery_poll(&screen->discovery);
@@ -560,8 +560,8 @@ static ConnectResult connect_screen_frame(ConnectScreen *screen, const App *app,
     y += 44;
     GuiLabel((Rectangle){ x, y, content_width, LINE_PIXELS }, status);
     y += 2 * LINE_PIXELS;
-    ConnectResult result = connect_screen_draw_choices(screen, width, &y);
-    ConnectResult typed = connect_screen_draw_address(screen, width, y);
+    Connect_Result result = connect_screen_draw_choices(screen, width, &y);
+    Connect_Result typed = connect_screen_draw_address(screen, width, y);
     EndMode2D();
     if (!input) {
         GuiUnlock();
@@ -572,10 +572,10 @@ static ConnectResult connect_screen_frame(ConnectScreen *screen, const App *app,
 }
 
 // The recommended way first, the QR code; then a desktop found on this network, if any.
-static ConnectResult connect_screen_draw_choices(ConnectScreen *screen, float width, float *y) {
+static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float width, float *y) {
     const float x = MARGIN_PIXELS;
     const float content_width = width - 2 * MARGIN_PIXELS;
-    ConnectResult result = CONNECT_NONE;
+    Connect_Result result = CONNECT_NONE;
     GuiLabel((Rectangle){ x, *y, content_width, LINE_PIXELS },
              "Connect, or reconnect, to the desktop:");
     *y += LINE_PIXELS + 8;
@@ -606,10 +606,10 @@ static ConnectResult connect_screen_draw_choices(ConnectScreen *screen, float wi
 }
 
 // Typing the address, as shown in the desktop's status bar and Connected Devices view.
-static ConnectResult connect_screen_draw_address(ConnectScreen *screen, float width, float y) {
+static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float width, float y) {
     const float x = MARGIN_PIXELS;
     const float content_width = width - 2 * MARGIN_PIXELS;
-    ConnectResult result = CONNECT_NONE;
+    Connect_Result result = CONNECT_NONE;
     GuiLabel((Rectangle){ x, y, content_width, LINE_PIXELS }, "Or type its address, such as");
     GuiLabel((Rectangle){ x, y + LINE_PIXELS, content_width, LINE_PIXELS }, "192.168.1.20:");
     y += 2 * LINE_PIXELS + 8;
@@ -640,9 +640,9 @@ static ConnectResult connect_screen_draw_address(ConnectScreen *screen, float wi
 
 // Asks for the camera if needed, then shows the camera and reads codes until one is the
 // desktop's. Returns CONNECT_CHOSEN with address filled in, or CONNECT_CANCELLED.
-static ConnectResult scan_screen_frame(ScanScreen *scan, float scale, char *address,
-                                       size_t address_size) {
-    QrScanner *scanner = &scan->scanner;
+static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *address,
+                                        size_t address_size) {
+    QR_Scanner *scanner = &scan->scanner;
     if (IsKeyPressed(KEY_BACK)) {
         qr_scanner_stop(scanner);
         return CONNECT_CANCELLED;
@@ -688,7 +688,7 @@ static ConnectResult scan_screen_frame(ScanScreen *scan, float scale, char *addr
 }
 
 // Reads the newest frame; a code that is not a local desktop link is reported and ignored.
-static bool scan_screen_read(ScanScreen *scan, char *address, size_t address_size) {
+static bool scan_screen_read(Scan_Screen *scan, char *address, size_t address_size) {
     char text[PROTOCOL_LINK_SIZE * 4];
     if (!qr_scanner_poll(&scan->scanner, text, sizeof(text))) {
         return false;

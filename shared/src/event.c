@@ -31,7 +31,7 @@ int32_t event_duration_days(const Event *event) {
 int32_t event_repeat_gap_days_min(const Event *event) {
     assert(event->repeat_interval >= 1);
     assert(event->repeat_interval <= REPEAT_INTERVAL_MAX);
-    switch ((RepeatUnit)event->repeat_unit) {
+    switch ((Repeat_Unit)event->repeat_unit) {
     case REPEAT_NONE:
         // A one-time event never repeats, so no length is too long.
         return INT32_MAX;
@@ -46,7 +46,7 @@ int32_t event_repeat_gap_days_min(const Event *event) {
     case REPEAT_UNIT_COUNT:
         break;
     }
-    assert(false); // Not a RepeatUnit.
+    assert(false); // Not a Repeat_Unit.
     return INT32_MAX;
 }
 
@@ -61,7 +61,7 @@ bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *st
     }
 
     int32_t candidate = first_day;
-    switch ((RepeatUnit)event->repeat_unit) {
+    switch ((Repeat_Unit)event->repeat_unit) {
     case REPEAT_NONE:
         break;
     case REPEAT_DAY:
@@ -111,7 +111,7 @@ Event event_occurrence_at(const Event *event, int32_t start_day) {
 
 void event_format_repeat(const Event *event, char *buffer, size_t buffer_size) {
     assert(buffer_size > 0);
-    switch ((RepeatUnit)event->repeat_unit) {
+    switch ((Repeat_Unit)event->repeat_unit) {
     case REPEAT_NONE:
         buffer[0] = '\0';
         return;
@@ -134,7 +134,7 @@ void event_format_repeat(const Event *event, char *buffer, size_t buffer_size) {
     case REPEAT_UNIT_COUNT:
         break;
     }
-    assert(false); // Not a RepeatUnit.
+    assert(false); // Not a Repeat_Unit.
     buffer[0] = '\0';
 }
 
@@ -231,7 +231,7 @@ bool event_is_valid(const Event *event) {
     return event_duration_days(event) < event_repeat_gap_days_min(event);
 }
 
-ProblemStatus problem_status(int32_t task_count, int32_t task_done_count) {
+Problem_Status problem_status(int32_t task_count, int32_t task_done_count) {
     assert(task_count >= 0);
     assert(task_done_count >= 0);
     assert(task_done_count <= task_count);
@@ -247,7 +247,7 @@ ProblemStatus problem_status(int32_t task_count, int32_t task_done_count) {
     return PROBLEM_STATUS_DONE;
 }
 
-const char *problem_status_name(ProblemStatus status) {
+const char *problem_status_name(Problem_Status status) {
     switch (status) {
     case PROBLEM_STATUS_NO_TASKS:
         return "No planned tasks";
@@ -260,7 +260,7 @@ const char *problem_status_name(ProblemStatus status) {
     case PROBLEM_STATUS_COUNT:
         break;
     }
-    assert(false); // Not a ProblemStatus.
+    assert(false); // Not a Problem_Status.
     return "";
 }
 

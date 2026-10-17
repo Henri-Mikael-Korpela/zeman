@@ -10,7 +10,7 @@
 // The calendar's user interface, shared by the desktop and Android apps. Each app opens its own
 // window and backend, then calls app_frame once per frame.
 
-typedef struct AppConfig {
+typedef struct App_Config {
     // Prefix for the "fonts/..." files: the executable's folder on the desktop, and "" on
     // Android, where raylib reads relative paths from the APK's assets.
     const char *font_directory;
@@ -19,21 +19,21 @@ typedef struct AppConfig {
     float scale;
     // Touch screen: swipes change month and the keyboard hints are left out.
     bool touch;
-} AppConfig;
+} App_Config;
 
 typedef struct App App;
 
 // Text styles for screens drawn outside the calendar, such as the desktop's navigation, so that
 // they look the same as the calendar.
-typedef enum AppText {
+typedef enum App_Text {
     APP_TEXT_HEADING,  // Large, medium weight
     APP_TEXT_NORMAL,
     APP_TEXT_DIM,      // Normal size, dimmed, for explanations
     APP_TEXT_SMALL,
-} AppText;
+} App_Text;
 
 // Creates the one App. Needs the window, because fonts are loaded into textures.
-App *app_create(Backend *backend, const AppConfig *config);
+App *app_create(Backend *backend, const App_Config *config);
 void app_destroy(App *app);
 // Handles input and draws the calendar into area, in screen pixels, between the caller's
 // BeginDrawing and EndDrawing. Mouse positions are moved into the area while it runs and left
@@ -41,8 +41,8 @@ void app_destroy(App *app);
 void app_frame(App *app, Rectangle area);
 // Draws text in one of the calendar's styles, at a position in screen pixels divided by the
 // scale (layout pixels), outside app_frame.
-void app_draw_text(const App *app, AppText style, const char *text, float x, float y);
-float app_measure_text(const App *app, AppText style, const char *text);
+void app_draw_text(const App *app, App_Text style, const char *text, float x, float y);
+float app_measure_text(const App *app, App_Text style, const char *text);
 // Shown first in the status bar for as long as the app runs, for example where phones connect.
 void app_set_info(App *app, const char *info);
 // Shown in the status bar until the user moves to another day.

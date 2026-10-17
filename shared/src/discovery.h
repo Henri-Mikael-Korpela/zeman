@@ -14,7 +14,7 @@ enum {
 // Broadcasts a probe every second while polled; the first desktop app to answer is found.
 typedef struct Discovery {
     int64_t probe_sent_ms;  // When the last probe went out, or 0
-    NetSocket socket;
+    Net_Socket socket;
     uint16_t found_port;
     bool open;
     bool found;

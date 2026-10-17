@@ -16,15 +16,15 @@ enum {
     CAMERA_ID_SIZE = 64,
 };
 
-static bool qr_scanner_find_camera(QrScanner *scanner, char *camera_id, size_t camera_id_size);
-static bool qr_scanner_open_session(QrScanner *scanner);
-static bool qr_scanner_copy_frame(QrScanner *scanner, AImage *image);
-static bool qr_scanner_fail(QrScanner *scanner, const char *message);
+static bool qr_scanner_find_camera(QR_Scanner *scanner, char *camera_id, size_t camera_id_size);
+static bool qr_scanner_open_session(QR_Scanner *scanner);
+static bool qr_scanner_copy_frame(QR_Scanner *scanner, AImage *image);
+static bool qr_scanner_fail(QR_Scanner *scanner, const char *message);
 static void on_device_disconnected(void *context, ACameraDevice *device);
 static void on_device_error(void *context, ACameraDevice *device, int error);
 static void on_session_state(void *context, ACameraCaptureSession *session);
 
-bool qr_scanner_start(QrScanner *scanner) {
+bool qr_scanner_start(QR_Scanner *scanner) {
     assert(!scanner->running);
     scanner->error[0] = '\0';
     scanner->has_frame = false;
@@ -66,7 +66,7 @@ bool qr_scanner_start(QrScanner *scanner) {
 
 // Releases everything in the reverse order of qr_scanner_start; also after a start that failed
 // halfway, so every step checks what exists.
-void qr_scanner_stop(QrScanner *scanner) {
+void qr_scanner_stop(QR_Scanner *scanner) {
     if (scanner->session != NULL) {
         ACameraCaptureSession_stopRepeating(scanner->session);
         ACameraCaptureSession_close(scanner->session);
@@ -111,7 +111,7 @@ void qr_scanner_stop(QrScanner *scanner) {
     scanner->has_frame = false;
 }
 
-bool qr_scanner_poll(QrScanner *scanner, char *text, size_t text_size) {
+bool qr_scanner_poll(QR_Scanner *scanner, char *text, size_t text_size) {
     assert(text_size > 0);
     if (!scanner->running) {
         return false;
@@ -154,7 +154,7 @@ bool qr_scanner_poll(QrScanner *scanner, char *text, size_t text_size) {
     return false;
 }
 
-void qr_scanner_draw(const QrScanner *scanner, Rectangle area) {
+void qr_scanner_draw(const QR_Scanner *scanner, Rectangle area) {
     DrawRectangleRec(area, BLACK);
     if (!scanner->running || !scanner->has_frame) {
         return;
@@ -175,7 +175,7 @@ void qr_scanner_draw(const QrScanner *scanner, Rectangle area) {
 }
 
 // The first back-facing camera, or else the first camera; and how its frames are turned.
-static bool qr_scanner_find_camera(QrScanner *scanner, char *camera_id, size_t camera_id_size) {
+static bool qr_scanner_find_camera(QR_Scanner *scanner, char *camera_id, size_t camera_id_size) {
     ACameraIdList *ids = NULL;
     if (ACameraManager_getCameraIdList(scanner->manager, &ids) != ACAMERA_OK || ids == NULL) {
         return false;
@@ -214,7 +214,7 @@ static bool qr_scanner_find_camera(QrScanner *scanner, char *camera_id, size_t c
 
 // Frames go to an image reader, which the app reads at its own pace; preview frames with
 // continuous autofocus, so that a code held close is sharp.
-static bool qr_scanner_open_session(QrScanner *scanner) {
+static bool qr_scanner_open_session(QR_Scanner *scanner) {
     if (AImageReader_new(QR_SCANNER_WIDTH, QR_SCANNER_HEIGHT, AIMAGE_FORMAT_YUV_420_888,
                          QR_SCANNER_IMAGE_COUNT, &scanner->reader) != AMEDIA_OK) {
         return false;
@@ -252,7 +252,7 @@ static bool qr_scanner_open_session(QrScanner *scanner) {
 }
 
 // Copies the brightness plane row by row, because its rows may be padded past the width.
-static bool qr_scanner_copy_frame(QrScanner *scanner, AImage *image) {
+static bool qr_scanner_copy_frame(QR_Scanner *scanner, AImage *image) {
     int32_t width = 0;
     int32_t height = 0;
     int32_t row_stride = 0;
@@ -277,7 +277,7 @@ static bool qr_scanner_copy_frame(QrScanner *scanner, AImage *image) {
     return true;
 }
 
-static bool qr_scanner_fail(QrScanner *scanner, const char *message) {
+static bool qr_scanner_fail(QR_Scanner *scanner, const char *message) {
     snprintf(scanner->error, sizeof(scanner->error), "%s", message);
     qr_scanner_stop(scanner);
     return false;

@@ -50,7 +50,7 @@ enum {
     PROTOCOL_LINK_SIZE = 48,
 };
 
-typedef enum ProtocolOperation {
+typedef enum Protocol_Operation {
     PROTOCOL_HELLO = 1,          // version -> version
     PROTOCOL_REVISION,           // -> revision
     PROTOCOL_LOAD_RANGE,         // first, last, count_max -> truncated, count, events
@@ -64,12 +64,12 @@ typedef enum ProtocolOperation {
     PROTOCOL_LOAD_TASK_PROBLEMS, // task id, count_max -> truncated, count, problems
     PROTOCOL_SET_TASK_PROBLEMS,  // task id, count, problem ids ->
     PROTOCOL_OPERATION_END,
-} ProtocolOperation;
+} Protocol_Operation;
 
-typedef enum ProtocolStatus {
+typedef enum Protocol_Status {
     PROTOCOL_OK = 0,
     PROTOCOL_FAILED = 1,
-} ProtocolStatus;
+} Protocol_Status;
 
 // Writes into a fixed buffer. Writing past the end sets overflow rather than writing, so that
 // a message is built without checking every call, and checked once at the end.
@@ -98,9 +98,9 @@ void writer_i64(Writer *writer, int64_t value);
 void writer_text(Writer *writer, const char *text);
 void writer_date(Writer *writer, Date date);
 void writer_event(Writer *writer, const Event *event);
-void writer_completion(Writer *writer, const TaskCompletion *completion);
-void writer_problem_task(Writer *writer, const ProblemTask *task);
-void writer_task_problem(Writer *writer, const TaskProblem *problem);
+void writer_completion(Writer *writer, const Task_Completion *completion);
+void writer_problem_task(Writer *writer, const Problem_Task *task);
+void writer_task_problem(Writer *writer, const Task_Problem *problem);
 
 Reader reader_make(const uint8_t *buffer, size_t length);
 uint8_t reader_u8(Reader *reader);
@@ -114,10 +114,10 @@ void reader_text(Reader *reader, char *text, size_t text_size);
 Date reader_date(Reader *reader);
 // An event that breaks event_is_valid fails the reader.
 Event reader_event(Reader *reader);
-TaskCompletion reader_completion(Reader *reader);
+Task_Completion reader_completion(Reader *reader);
 // Links with no id or title, or counts that do not add up, fail the reader.
-ProblemTask reader_problem_task(Reader *reader);
-TaskProblem reader_task_problem(Reader *reader);
+Problem_Task reader_problem_task(Reader *reader);
+Task_Problem reader_task_problem(Reader *reader);
 // True when the whole message was read and nothing failed.
 bool reader_done(const Reader *reader);
 

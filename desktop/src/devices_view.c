@@ -15,10 +15,10 @@ enum {
     TEXT_SIZE = SERVER_ERROR_SIZE + 64,
 };
 
-static float devices_view_draw_qr(const DevicesView *view, float x, float y);
+static float devices_view_draw_qr(const Devices_View *view, float x, float y);
 static void devices_view_draw_clients(const Server *server, const App *app, float x, float y);
 
-void devices_view_init(DevicesView *view, const Server *server) {
+void devices_view_init(Devices_View *view, const Server *server) {
     view->qr_ready = false;
     if (!server->listening) {
         return;
@@ -33,7 +33,7 @@ void devices_view_init(DevicesView *view, const Server *server) {
     assert(view->qr_ready);
 }
 
-void devices_view_draw(const DevicesView *view, const Server *server, const App *app,
+void devices_view_draw(const Devices_View *view, const Server *server, const App *app,
                        Rectangle area) {
     const float x = area.x + MARGIN_PIXELS;
     float y = area.y + MARGIN_PIXELS;
@@ -70,7 +70,7 @@ void devices_view_draw(const DevicesView *view, const Server *server, const App 
 }
 
 // Draws the code on white with its quiet zone, and returns its width in pixels.
-static float devices_view_draw_qr(const DevicesView *view, float x, float y) {
+static float devices_view_draw_qr(const Devices_View *view, float x, float y) {
     const int32_t modules = qrcodegen_getSize(view->qr);
     const float size = (float)((modules + 2 * QR_QUIET_ZONE_MODULES) * QR_MODULE_PIXELS);
     DrawRectangleRec((Rectangle){ x, y, size, size }, WHITE);
@@ -94,7 +94,7 @@ static void devices_view_draw_clients(const Server *server, const App *app, floa
     y += LINE_PIXELS + 4;
     int32_t shown = 0;
     for (int32_t i = 0; i < SERVER_CLIENT_COUNT_MAX; i++) {
-        const ServerClient *client = &server->clients[i];
+        const Server_Client *client = &server->clients[i];
         if (!client->active) {
             continue;
         }

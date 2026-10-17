@@ -53,8 +53,8 @@ This project follows [TigerBeetle's TIGER_STYLE](https://github.com/tigerbeetle/
 
 ## Naming
 
-- Use `snake_case` for functions, variables, parameters and file names, and `PascalCase` for types, in accordance with TIGER_STYLE adapted to C. Use `SCREAMING_SNAKE_CASE` for macros and constants.
-- Do not abbreviate names (except for loop indexes `i`, `j`, and widely understood terms such as `x`, `y`). Use proper capitalization for acronyms (`HTTP`, not `Http`) where they appear in type names.
+- Use `snake_case` for functions, variables, parameters and file names, and Ada case for types (`Header_Flags`, `Task_Completion`: each word capitalized, words joined by underscores; a one-word type is just capitalized, like `Event`). This departs from TIGER_STYLE's `PascalCase` because the underscores keep the words of a long type name easy to tell apart. Use `SCREAMING_SNAKE_CASE` for macros and constants. The rule is for types we define, not for raylib, raygui, SQLite or libc types.
+- Do not abbreviate names (except for loop indexes `i`, `j`, and widely understood terms such as `x`, `y`). Use proper capitalization for acronyms (`HTTP_Response`, not `Http_Response`) where they appear in type names.
 - Add units or qualifiers to variable names, and put them last, so that related names sort together and read in order of significance: `latency_ms_max` rather than `max_latency_ms`; `width_pixels`, `cell_height_pixels`.
 - Name things so that related names have the same length where it helps alignment, for example `source` and `target` rather than `src` and `dest`.
 - Use nouns for types and variables, and verbs for functions. Name a function for what it does; callbacks and predicates read as questions (`is_leap_year`).

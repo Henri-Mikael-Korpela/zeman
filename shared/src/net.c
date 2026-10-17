@@ -7,7 +7,7 @@
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
-typedef SOCKET PlatformSocket;
+typedef SOCKET Platform_Socket;
 #else
 #include <arpa/inet.h>
 #include <errno.h>
@@ -19,7 +19,7 @@ typedef SOCKET PlatformSocket;
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
-typedef int PlatformSocket;
+typedef int Platform_Socket;
 #endif
 
 #if defined(MSG_NOSIGNAL)
@@ -29,10 +29,10 @@ typedef int PlatformSocket;
 #define NET_SEND_FLAGS 0
 #endif
 
-static bool net_set_nonblocking(PlatformSocket socket);
+static bool net_set_nonblocking(Platform_Socket socket);
 static bool net_ipv4_is_local(uint32_t host_order);
 static bool net_would_block(void);
-static bool net_wait(NetSocket socket, bool for_write, int32_t timeout_ms);
+static bool net_wait(Net_Socket socket, bool for_write, int32_t timeout_ms);
 static void net_error_text(const char *context, char *error, size_t error_size);
 
 bool net_startup(void) {
@@ -50,7 +50,7 @@ void net_cleanup(void) {
 #endif
 }
 
-bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, NetSocket *socket_out,
+bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, Net_Socket *socket_out,
                  char *error, size_t error_size) {
     assert(host != NULL);
     assert(timeout_ms > 0);
@@ -67,9 +67,9 @@ bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, NetSocket 
         return false;
     }
 
-    PlatformSocket platform = socket(address->ai_family, address->ai_socktype, 0);
-    NetSocket result = (NetSocket)platform;
-    bool ok = platform != (PlatformSocket)-1 && net_set_nonblocking(platform);
+    Platform_Socket platform = socket(address->ai_family, address->ai_socktype, 0);
+    Net_Socket result = (Net_Socket)platform;
+    bool ok = platform != (Platform_Socket)-1 && net_set_nonblocking(platform);
     if (ok) {
         // Non-blocking, so that a desktop that is off cannot freeze the app beyond the timeout.
         int status = connect(platform, address->ai_addr, (int)address->ai_addrlen);
@@ -99,10 +99,10 @@ bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, NetSocket 
     return true;
 }
 
-bool net_listen(uint16_t port, NetSocket *socket_out, char *error, size_t error_size) {
+bool net_listen(uint16_t port, Net_Socket *socket_out, char *error, size_t error_size) {
     *socket_out = NET_SOCKET_INVALID;
-    PlatformSocket platform = socket(AF_INET, SOCK_STREAM, 0);
-    if (platform == (PlatformSocket)-1) {
+    Platform_Socket platform = socket(AF_INET, SOCK_STREAM, 0);
+    if (platform == (Platform_Socket)-1) {
         net_error_text("Cannot create socket", error, error_size);
         return false;
     }
@@ -121,22 +121,22 @@ bool net_listen(uint16_t port, NetSocket *socket_out, char *error, size_t error_
     ok = ok && listen(platform, 8) == 0 && net_set_nonblocking(platform);
     if (!ok) {
         net_error_text("Cannot listen for the phone", error, error_size);
-        net_close((NetSocket)platform);
+        net_close((Net_Socket)platform);
         return false;
     }
-    *socket_out = (NetSocket)platform;
+    *socket_out = (Net_Socket)platform;
     return true;
 }
 
-NetSocket net_accept(NetSocket listener, bool *peer_is_local, char *peer_address,
-                     size_t peer_address_size) {
+Net_Socket net_accept(Net_Socket listener, bool *peer_is_local, char *peer_address,
+                      size_t peer_address_size) {
     struct sockaddr_in peer = { 0 };
     socklen_t peer_length = sizeof(peer);
     *peer_is_local = false;
     snprintf(peer_address, peer_address_size, "?");
-    PlatformSocket platform = accept((PlatformSocket)listener, (struct sockaddr *)&peer,
-                                     &peer_length);
-    if (platform == (PlatformSocket)-1) {
+    Platform_Socket platform = accept((Platform_Socket)listener, (struct sockaddr *)&peer,
+                                      &peer_length);
+    if (platform == (Platform_Socket)-1) {
         return NET_SOCKET_INVALID;
     }
     *peer_is_local = peer.sin_family == AF_INET && net_ipv4_is_local(ntohl(peer.sin_addr.s_addr));
@@ -144,26 +144,26 @@ NetSocket net_accept(NetSocket listener, bool *peer_is_local, char *peer_address
         inet_ntop(AF_INET, &peer.sin_addr, peer_address, (socklen_t)peer_address_size);
     }
     if (!net_set_nonblocking(platform)) {
-        net_close((NetSocket)platform);
+        net_close((Net_Socket)platform);
         return NET_SOCKET_INVALID;
     }
     int no_delay = 1;
     setsockopt(platform, IPPROTO_TCP, TCP_NODELAY, (const char *)&no_delay, sizeof(no_delay));
-    return (NetSocket)platform;
+    return (Net_Socket)platform;
 }
 
-int32_t net_send(NetSocket socket, const void *data, int32_t length) {
+int32_t net_send(Net_Socket socket, const void *data, int32_t length) {
     assert(length > 0);
-    int result = send((PlatformSocket)socket, (const char *)data, length, NET_SEND_FLAGS);
+    int result = send((Platform_Socket)socket, (const char *)data, length, NET_SEND_FLAGS);
     if (result > 0) {
         return result;
     }
     return result < 0 && net_would_block() ? 0 : -1;
 }
 
-int32_t net_recv(NetSocket socket, void *data, int32_t length) {
+int32_t net_recv(Net_Socket socket, void *data, int32_t length) {
     assert(length > 0);
-    int result = recv((PlatformSocket)socket, (char *)data, length, 0);
+    int result = recv((Platform_Socket)socket, (char *)data, length, 0);
     if (result > 0) {
         return result;
     }
@@ -171,7 +171,7 @@ int32_t net_recv(NetSocket socket, void *data, int32_t length) {
     return result < 0 && net_would_block() ? 0 : -1;
 }
 
-bool net_send_all(NetSocket socket, const void *data, int32_t length, int32_t timeout_ms) {
+bool net_send_all(Net_Socket socket, const void *data, int32_t length, int32_t timeout_ms) {
     const uint8_t *bytes = data;
     int64_t deadline = net_monotonic_ms() + timeout_ms;
     int32_t sent = 0;
@@ -192,7 +192,7 @@ bool net_send_all(NetSocket socket, const void *data, int32_t length, int32_t ti
     return true;
 }
 
-bool net_recv_all(NetSocket socket, void *data, int32_t length, int32_t timeout_ms) {
+bool net_recv_all(Net_Socket socket, void *data, int32_t length, int32_t timeout_ms) {
     uint8_t *bytes = data;
     int64_t deadline = net_monotonic_ms() + timeout_ms;
     int32_t received = 0;
@@ -213,21 +213,21 @@ bool net_recv_all(NetSocket socket, void *data, int32_t length, int32_t timeout_
     return true;
 }
 
-void net_close(NetSocket socket) {
+void net_close(Net_Socket socket) {
     if (socket == NET_SOCKET_INVALID) {
         return;
     }
 #if defined(_WIN32)
-    closesocket((PlatformSocket)socket);
+    closesocket((Platform_Socket)socket);
 #else
-    close((PlatformSocket)socket);
+    close((Platform_Socket)socket);
 #endif
 }
 
-bool net_udp_open(uint16_t port, NetSocket *socket_out, char *error, size_t error_size) {
+bool net_udp_open(uint16_t port, Net_Socket *socket_out, char *error, size_t error_size) {
     *socket_out = NET_SOCKET_INVALID;
-    PlatformSocket platform = socket(AF_INET, SOCK_DGRAM, 0);
-    if (platform == (PlatformSocket)-1) {
+    Platform_Socket platform = socket(AF_INET, SOCK_DGRAM, 0);
+    if (platform == (Platform_Socket)-1) {
         net_error_text("Cannot create socket", error, error_size);
         return false;
     }
@@ -241,14 +241,14 @@ bool net_udp_open(uint16_t port, NetSocket *socket_out, char *error, size_t erro
     ok = ok && net_set_nonblocking(platform);
     if (!ok) {
         net_error_text("Cannot open the discovery port", error, error_size);
-        net_close((NetSocket)platform);
+        net_close((Net_Socket)platform);
         return false;
     }
-    *socket_out = (NetSocket)platform;
+    *socket_out = (Net_Socket)platform;
     return true;
 }
 
-bool net_udp_send(NetSocket socket, const char *address, uint16_t port, const void *data,
+bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, const void *data,
                   int32_t length) {
     assert(length > 0);
     struct sockaddr_in target = { 0 };
@@ -257,17 +257,17 @@ bool net_udp_send(NetSocket socket, const char *address, uint16_t port, const vo
     if (inet_pton(AF_INET, address, &target.sin_addr) != 1) {
         return false;
     }
-    int sent = sendto((PlatformSocket)socket, (const char *)data, length, 0,
+    int sent = sendto((Platform_Socket)socket, (const char *)data, length, 0,
                       (struct sockaddr *)&target, sizeof(target));
     return sent == length;
 }
 
-int32_t net_udp_recv(NetSocket socket, void *data, int32_t size, char *address,
+int32_t net_udp_recv(Net_Socket socket, void *data, int32_t size, char *address,
                      size_t address_size, uint16_t *port) {
     assert(size > 0);
     struct sockaddr_in from = { 0 };
     socklen_t from_length = sizeof(from);
-    int received = recvfrom((PlatformSocket)socket, (char *)data, size, 0,
+    int received = recvfrom((Platform_Socket)socket, (char *)data, size, 0,
                             (struct sockaddr *)&from, &from_length);
     if (received <= 0) {
         return 0;
@@ -301,8 +301,8 @@ void net_local_address(char *buffer, size_t buffer_size) {
     snprintf(buffer, buffer_size, "127.0.0.1");
     // Connecting a UDP socket sends nothing; it only makes the system pick the interface that
     // would reach the internet, which is the one on the local network.
-    PlatformSocket platform = socket(AF_INET, SOCK_DGRAM, 0);
-    if (platform == (PlatformSocket)-1) {
+    Platform_Socket platform = socket(AF_INET, SOCK_DGRAM, 0);
+    if (platform == (Platform_Socket)-1) {
         return;
     }
     struct sockaddr_in target = { 0 };
@@ -319,10 +319,10 @@ void net_local_address(char *buffer, size_t buffer_size) {
             }
         }
     }
-    net_close((NetSocket)platform);
+    net_close((Net_Socket)platform);
 }
 
-static bool net_set_nonblocking(PlatformSocket socket) {
+static bool net_set_nonblocking(Platform_Socket socket) {
 #if defined(_WIN32)
     u_long enabled = 1;
     return ioctlsocket(socket, FIONBIO, &enabled) == 0;
@@ -353,14 +353,14 @@ static bool net_would_block(void) {
 }
 
 // Waits until the socket can be written or read, or the timeout passes.
-static bool net_wait(NetSocket socket, bool for_write, int32_t timeout_ms) {
+static bool net_wait(Net_Socket socket, bool for_write, int32_t timeout_ms) {
     assert(timeout_ms >= 0);
     fd_set set;
     FD_ZERO(&set);
-    FD_SET((PlatformSocket)socket, &set);
+    FD_SET((Platform_Socket)socket, &set);
     struct timeval timeout = { timeout_ms / 1000, (timeout_ms % 1000) * 1000 };
     // The first argument is ignored by Winsock and needed by POSIX.
-    int count = select((int)((PlatformSocket)socket + 1), for_write ? NULL : &set,
+    int count = select((int)((Platform_Socket)socket + 1), for_write ? NULL : &set,
                        for_write ? &set : NULL, NULL, &timeout);
     return count > 0;
 }

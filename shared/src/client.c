@@ -16,7 +16,7 @@ enum {
 
 static bool client_connect(Client *client);
 static void client_disconnect(Client *client, const char *reason);
-static Writer client_request_begin(Client *client, ProtocolOperation operation);
+static Writer client_request_begin(Client *client, Protocol_Operation operation);
 static bool client_exchange(Client *client, const Writer *request, Reader *response);
 static bool client_call(Client *client, const Writer *request, Reader *response);
 static bool client_response_done(Client *client, const Reader *response);
@@ -24,23 +24,23 @@ static bool client_response_done(Client *client, const Reader *response);
 static int32_t client_load_range(void *context, Date first, Date last, Event *events,
                                  int32_t event_count_max, bool *truncated);
 static int32_t client_load_completions(void *context, Date first, Date last,
-                                       TaskCompletion *completions, int32_t completion_count_max,
+                                       Task_Completion *completions, int32_t completion_count_max,
                                        bool *truncated);
 static int64_t client_insert(void *context, const Event *event);
 static bool client_update(void *context, const Event *event);
 static bool client_remove(void *context, int64_t id);
 static bool client_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
 static int64_t client_location(void *context, const char *address, const char *city);
-static int32_t client_load_problem_tasks(void *context, int64_t problem_id, ProblemTask *tasks,
+static int32_t client_load_problem_tasks(void *context, int64_t problem_id, Problem_Task *tasks,
                                          int32_t task_count_max, bool *truncated);
-static int32_t client_load_task_problems(void *context, int64_t task_id, TaskProblem *problems,
+static int32_t client_load_task_problems(void *context, int64_t task_id, Task_Problem *problems,
                                          int32_t problem_count_max, bool *truncated);
 static bool client_set_task_problems(void *context, int64_t task_id, const int64_t *problem_ids,
                                      int32_t problem_count);
 static uint64_t client_revision(void *context);
 static const char *client_error(const void *context);
 
-static const BackendOps client_ops = {
+static const Backend_Ops client_ops = {
     .load_range = client_load_range,
     .load_completions = client_load_completions,
     .insert = client_insert,
@@ -114,7 +114,7 @@ static int32_t client_load_range(void *context, Date first, Date last, Event *ev
 }
 
 static int32_t client_load_completions(void *context, Date first, Date last,
-                                       TaskCompletion *completions, int32_t completion_count_max,
+                                       Task_Completion *completions, int32_t completion_count_max,
                                        bool *truncated) {
     Client *client = context;
     assert(completion_count_max > 0);
@@ -189,7 +189,7 @@ static int64_t client_location(void *context, const char *address, const char *c
     return client_response_done(client, &response) && id > 0 ? id : 0;
 }
 
-static int32_t client_load_problem_tasks(void *context, int64_t problem_id, ProblemTask *tasks,
+static int32_t client_load_problem_tasks(void *context, int64_t problem_id, Problem_Task *tasks,
                                          int32_t task_count_max, bool *truncated) {
     Client *client = context;
     assert(problem_id > 0);
@@ -213,7 +213,7 @@ static int32_t client_load_problem_tasks(void *context, int64_t problem_id, Prob
     return client_response_done(client, &response) ? count : -1;
 }
 
-static int32_t client_load_task_problems(void *context, int64_t task_id, TaskProblem *problems,
+static int32_t client_load_task_problems(void *context, int64_t task_id, Task_Problem *problems,
                                          int32_t problem_count_max, bool *truncated) {
     Client *client = context;
     assert(task_id >= 0);
@@ -342,7 +342,7 @@ static void client_disconnect(Client *client, const char *reason) {
 }
 
 // The payload goes after room for the length prefix, which client_exchange fills in.
-static Writer client_request_begin(Client *client, ProtocolOperation operation) {
+static Writer client_request_begin(Client *client, Protocol_Operation operation) {
     assert(operation > 0);
     assert(operation < PROTOCOL_OPERATION_END);
     Writer request = writer_make(client->request + PROTOCOL_LENGTH_SIZE,

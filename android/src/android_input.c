@@ -12,28 +12,28 @@
 struct android_app *GetAndroidApp(void);
 
 static int32_t android_input_callback(struct android_app *app, AInputEvent *event);
-static void android_input_push(AndroidInput *input, int32_t character);
+static void android_input_push(Android_Input *input, int32_t character);
 static int32_t android_key_character(int32_t key_code, int32_t meta_state);
 static void android_keyboard_jni(struct android_app *app, bool visible);
 static bool android_keyboard_find(JNIEnv *env, jobject activity, jobject *manager,
                                   jobject *decor_view);
 static bool jni_failed(JNIEnv *env, const void *result);
 
-void android_input_install(AndroidInput *input) {
+void android_input_install(Android_Input *input) {
     struct android_app *app = GetAndroidApp();
     assert(app != NULL);
     assert(app->onInputEvent != NULL);
     // The app structure carries the state to the callback and to android_input_char_pressed;
     // raylib leaves userData unused.
     assert(app->userData == NULL);
-    *input = (AndroidInput){ .raylib_callback = app->onInputEvent };
+    *input = (Android_Input){ .raylib_callback = app->onInputEvent };
     app->userData = input;
     app->onInputEvent = android_input_callback;
 }
 
 int android_input_char_pressed(void) {
     struct android_app *app = GetAndroidApp();
-    AndroidInput *input = app != NULL ? app->userData : NULL;
+    Android_Input *input = app != NULL ? app->userData : NULL;
     if (input == NULL || input->queue_count == 0) {
         return 0;
     }
@@ -43,7 +43,7 @@ int android_input_char_pressed(void) {
     return character;
 }
 
-void android_input_keyboard_set_visible(AndroidInput *input, bool visible) {
+void android_input_keyboard_set_visible(Android_Input *input, bool visible) {
     if (input->keyboard_visible == visible) {
         return;
     }
@@ -68,7 +68,7 @@ const char *android_input_data_directory(void) {
 // Queues the character of each key press, then lets raylib handle the event as usual, so that
 // keys such as Backspace and Enter still reach raygui.
 static int32_t android_input_callback(struct android_app *app, AInputEvent *event) {
-    AndroidInput *input = app->userData;
+    Android_Input *input = app->userData;
     assert(input != NULL);
     if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_KEY) {
         int32_t action = AKeyEvent_getAction(event);
@@ -86,7 +86,7 @@ static int32_t android_input_callback(struct android_app *app, AInputEvent *even
     return input->raylib_callback(app, event);
 }
 
-static void android_input_push(AndroidInput *input, int32_t character) {
+static void android_input_push(Android_Input *input, int32_t character) {
     if (character == 0 || input->queue_count == ANDROID_INPUT_QUEUE_SIZE) {
         return;
     }
