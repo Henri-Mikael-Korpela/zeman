@@ -5,6 +5,7 @@
 - `desktop/` - the desktop app (Windows). It keeps the calendar in an SQLite database and serves it to phones on the same local network.
 - `android/` - the Android app. It shows and edits the desktop app's calendar over the network; it keeps no data of its own.
 - `shared/` - code both apps compile: the user interface, dates, events, and the network protocol and client.
+- `assets/` - the application icon: `calendar-app.ico` goes into the desktop executable (window, taskbar and file icon), and the Android build draws its launcher icons from `calendar-app.png`. Replace both files to change the icon.
 - `cmake/dependencies.cmake` - downloads raylib 5.5, raygui 4.0, SQLite 3.51.0, the [Rubik](https://fonts.google.com/specimen/Rubik) font (with its SIL Open Font License), Nayuki's [QR code generator](https://github.com/nayuki/QR-Code-generator) 1.8.0 and the [quirc](https://github.com/dlbeer/quirc) 1.2 QR decoder into `external/`, once; after that both builds are offline.
 
 ## Desktop app

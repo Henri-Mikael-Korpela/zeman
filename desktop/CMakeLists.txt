@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.18)
 project(calendar C)
+# The icon is a Windows resource, which needs the resource compiler (windres with MinGW).
+if(WIN32)
+    enable_language(RC)
+endif()
 
 # C11 for static_assert.
 set(CMAKE_C_STANDARD 11)
@@ -56,6 +60,17 @@ add_executable(calendar
     "${QRCODEGEN_DIR}/qrcodegen.c"
 )
 target_include_directories(calendar PRIVATE src "${SHARED_DIR}" "${QRCODEGEN_DIR}")
+
+# The application icon, shared with the Android app's launcher icon (assets/calendar-app.png).
+if(WIN32)
+    set(APP_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../assets/calendar-app.ico")
+    cmake_path(NORMAL_PATH APP_ICON_FILE)
+    configure_file(app.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app.rc" @ONLY)
+    target_sources(calendar PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
+    # Rebuild the resource when the icon changes, which CMake does not see inside the .rc file.
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/app.rc"
+                                PROPERTIES OBJECT_DEPENDS "${APP_ICON_FILE}")
+endif()
 target_link_libraries(calendar PRIVATE raylib raygui sqlite3)
 if(WIN32)
     target_link_libraries(calendar PRIVATE ws2_32)

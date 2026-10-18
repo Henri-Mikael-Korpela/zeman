@@ -1,0 +1,4 @@
+// Compiled into the executable on Windows; CMake fills in the path (see CMakeLists.txt).
+// GLFW_ICON: the name GLFW looks for, so the same icon shows on the window and the
+// taskbar, and in Explorer, which shows the first icon in the file.
+GLFW_ICON ICON "@APP_ICON_FILE@"

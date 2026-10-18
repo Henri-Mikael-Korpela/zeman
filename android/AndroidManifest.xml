@@ -16,6 +16,7 @@
 
     <application
         android:label="Calendar"
+        android:icon="@mipmap/ic_launcher"
         android:hasCode="false"
         android:usesCleartextTraffic="true"
         android:allowBackup="false">

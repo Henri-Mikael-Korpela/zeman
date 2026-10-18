@@ -204,6 +204,40 @@ function Build-Library([string]$Clang, [string]$RaylibLibrary) {
     return $library
 }
 
+# Draws the launcher icon, one PNG per screen density, from the same artwork as the desktop app
+# (assets\calendar-app.png), so that there is one picture to change. Android's launcher sizes:
+# 48 dp at 1x (mdpi) up to 4x (xxxhdpi). Returns the folder that aapt2 compiles resources from.
+function New-LauncherIcons() {
+    Add-Type -AssemblyName System.Drawing
+    $resources = Join-Path $BuildDir 'apk\res'
+    if (Test-Path $resources) { Remove-Item -Recurse -Force $resources }
+    $densities = [ordered]@{ mdpi = 48; hdpi = 72; xhdpi = 96; xxhdpi = 144; xxxhdpi = 192 }
+    $source = [Drawing.Image]::FromFile((Join-Path $RootDir 'assets\calendar-app.png'))
+    try {
+        foreach ($density in $densities.Keys) {
+            $size = $densities[$density]
+            $folder = Join-Path $resources "mipmap-$density"
+            New-Item -ItemType Directory -Force $folder | Out-Null
+            $bitmap = New-Object Drawing.Bitmap $size, $size, ([Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            $graphics = [Drawing.Graphics]::FromImage($bitmap)
+            try {
+                # Smooth scaling that keeps the transparent corners.
+                $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                $graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::HighQuality
+                $graphics.DrawImage($source, 0, 0, $size, $size)
+            } finally {
+                $graphics.Dispose()
+            }
+            $bitmap.Save((Join-Path $folder 'ic_launcher.png'), [Drawing.Imaging.ImageFormat]::Png)
+            $bitmap.Dispose()
+        }
+    } finally {
+        $source.Dispose()
+    }
+    return $resources
+}
+
 function Build-Apk([string]$NativeLibrary) {
     Write-Host 'Packaging the APK...'
     $buildTools = Join-Path $SdkDir "build-tools\$BuildToolsVersion"
@@ -218,10 +252,15 @@ function Build-Apk([string]$NativeLibrary) {
     foreach ($file in @($unaligned, $aligned, $final)) {
         if (Test-Path $file) { Remove-Item -Force $file }
     }
+    $compiledIcons = Join-Path $BuildDir 'apk\icons.zip'
+    Invoke-Tool (Join-Path $buildTools 'aapt2.exe') @(
+        'compile', '--dir', (New-LauncherIcons), '-o', $compiledIcons
+    )
     Invoke-Tool (Join-Path $buildTools 'aapt2.exe') @(
         'link', '-o', $unaligned,
         '--manifest', (Join-Path $AndroidDir 'AndroidManifest.xml'),
         '-I', $androidJar,
+        '-R', $compiledIcons,
         '-A', (Join-Path $BuildDir 'apk\assets'),
         '--min-sdk-version', "$MinSdkVersion",
         '--target-sdk-version', $PlatformVersion
