@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "calendar.h"
+#include <zeman/calendar.h>
 
 enum {
     // Bytes including the terminator. Bounds the form input and every loaded title.

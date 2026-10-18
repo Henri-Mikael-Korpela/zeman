@@ -69,7 +69,7 @@ This project follows [TigerBeetle's TIGER_STYLE](https://github.com/tigerbeetle/
 - Keep lines to at most 100 columns, with no exceptions for long strings other than URLs.
 - Always put a space after keywords (`if (`, `for (`, `while (`), but not after function names (`assert(x)`).
 - Use `//` line comments. Comments are complete sentences, with a capital letter, a space after the slashes, and a full stop. Write inline comments (after code) as phrases and omit the full stop.
-- Use the order: includes (standard library, then third-party, then project), then macros and constants, then types, then function declarations, then definitions. Put `main` at the top of the file when it is the entry point, and the most important functions first.
+- Include the project's own headers as `<zeman/name.h>`: headers live in `include/zeman/` of `shared/`, `desktop/` or `android/`, never beside the .c files. Use the order: includes (standard library, then third-party, then project), then macros and constants, then types, then function declarations, then definitions. Put `main` at the top of the file when it is the entry point, and the most important functions first.
 - Use `static const` or `enum` for constants rather than `#define` where possible. Use `#define` only for macros that must be macros. Give every constant a unit or comment.
 - Avoid complex macros. If a macro has side effects or evaluates its argument more than once, it must be named in capitals and commented.
 - Put a declaration of each struct field on its own line, and order fields from largest to smallest alignment so that padding is minimal. Assert the struct size with `static_assert` when layout matters.

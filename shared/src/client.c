@@ -1,8 +1,7 @@
-#include "client.h"
+#include <zeman/client.h>
 
 #include <assert.h>
 #include <stdio.h>
-#include <string.h>
 
 enum {
     CLIENT_CONNECT_TIMEOUT_MS = 1500,

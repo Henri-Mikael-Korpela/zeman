@@ -4,8 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "calendar.h"
-#include "event.h"
+#include <zeman/event.h>
 
 // Where the calendar's data lives, as the user interface sees it. The desktop app reads and
 // writes its SQLite database directly; the Android app asks the desktop app over the network.

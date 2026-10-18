@@ -4,12 +4,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "raylib.h"
-
-#include "app.h"
-#include "protocol.h"
 #include "qrcodegen.h"
-#include "server.h"
+
+#include <zeman/app.h>
+#include <zeman/server.h>
 
 enum {
     // The link is at most PROTOCOL_LINK_SIZE bytes, which version 4 holds even at error

@@ -5,8 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "calendar.h"
-#include "event.h"
+#include <zeman/event.h>
 
 // The conversation between the Android app (client) and the desktop app (server).
 //

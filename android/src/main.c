@@ -1,22 +1,16 @@
 #include <assert.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
-#include "raylib.h"
 #include "raygui.h"
 
-#include "android_input.h"
-#include "android_permission.h"
-#include "app.h"
-#include "client.h"
-#include "discovery.h"
-#include "net.h"
-#include "protocol.h"
-#include "qr_scanner.h"
+#include <zeman/android_input.h>
+#include <zeman/android_permission.h>
+#include <zeman/app.h>
+#include <zeman/client.h>
+#include <zeman/discovery.h>
+#include <zeman/qr_scanner.h>
 
 enum {
     // The phone layout is this many layout pixels wide, whatever the screen's resolution.

@@ -4,11 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "raylib.h"
-
-#include "app.h"
-#include "backend.h"
-#include "event.h"
+#include <zeman/app.h>
 
 enum {
     // Problems loaded for the view, the newest first. Many years of a person's problems; when

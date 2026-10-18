@@ -5,8 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "calendar.h"
-#include "event.h"
+#include <zeman/event.h>
 
 enum {
     // Bytes including the terminator for messages returned to the user interface.

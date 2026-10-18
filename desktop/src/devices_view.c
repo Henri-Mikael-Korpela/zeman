@@ -1,4 +1,4 @@
-#include "devices_view.h"
+#include <zeman/devices_view.h>
 
 #include <assert.h>
 #include <stdio.h>

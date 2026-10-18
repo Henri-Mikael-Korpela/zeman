@@ -5,7 +5,7 @@
 
 #include "raylib.h"
 
-#include "backend.h"
+#include <zeman/backend.h>
 
 // The calendar's user interface, shared by the desktop and Android apps. Each app opens its own
 // window and backend, then calls app_frame once per frame.

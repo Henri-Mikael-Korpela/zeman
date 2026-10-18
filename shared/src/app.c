@@ -1,18 +1,12 @@
 #include <assert.h>
 #include <inttypes.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "raylib.h"
 #include "raygui.h"
 
-#include "app.h"
-#include "backend.h"
-#include "calendar.h"
-#include "event.h"
-#include "text_box.h"
+#include <zeman/app.h>
+#include <zeman/text_box.h>
 
 enum {
     // All sizes are layout pixels, which App_Config.scale turns into screen pixels.

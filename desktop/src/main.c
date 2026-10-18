@@ -1,21 +1,14 @@
 #include <assert.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "raylib.h"
 #include "raygui.h"
 
-#include "app.h"
-#include "backend.h"
-#include "client.h"
-#include "devices_view.h"
-#include "local_backend.h"
-#include "problems_view.h"
-#include "protocol.h"
-#include "server.h"
+#include <zeman/client.h>
+#include <zeman/devices_view.h>
+#include <zeman/local_backend.h>
+#include <zeman/problems_view.h>
 
 enum {
     WINDOW_WIDTH_PIXELS = 1520,

@@ -1,11 +1,10 @@
-#include "discovery.h"
+#include <zeman/discovery.h>
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "protocol.h"
+#include <zeman/protocol.h>
 
 enum {
     DISCOVERY_PROBE_INTERVAL_MS = 1000,

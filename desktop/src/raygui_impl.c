@@ -6,7 +6,7 @@
 #include "raylib.h"
 #include "raygui.h"
 
-#include "text_box.h"
+#include <zeman/text_box.h>
 
 // raygui's cursor is a static of the implementation above, so only this file can reach it.
 // raygui clamps it to the text's length itself, so any index from 0 up is safe to set.

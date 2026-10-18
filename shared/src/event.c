@@ -1,4 +1,4 @@
-#include "event.h"
+#include <zeman/event.h>
 
 #include <assert.h>
 #include <inttypes.h>

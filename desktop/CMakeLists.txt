@@ -12,6 +12,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Downloads raylib, raygui, SQLite and Rubik into external/ at the repository root, once.
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/dependencies.cmake")
 set(SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../shared/src")
+# Our own headers are included as <zeman/app.h>, from an include directory that holds a zeman
+# folder, so that they cannot be mistaken for third-party or system headers of the same name.
+# The shared ones are also used by the Android build (android/build.ps1).
+set(SHARED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../shared/include")
 
 # raylib: build as a static library, skip examples/games.
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -60,7 +64,7 @@ add_executable(zeman
     "${SHARED_DIR}/protocol.c"
     "${QRCODEGEN_DIR}/qrcodegen.c"
 )
-target_include_directories(zeman PRIVATE src "${SHARED_DIR}" "${QRCODEGEN_DIR}")
+target_include_directories(zeman PRIVATE include "${SHARED_INCLUDE_DIR}" "${QRCODEGEN_DIR}")
 
 # The database lives in the repository root, not beside the executable, so that deleting a build
 # directory (which is routine) never deletes the events. An absolute path, so that every build

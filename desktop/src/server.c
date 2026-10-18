@@ -1,4 +1,4 @@
-#include "server.h"
+#include <zeman/server.h>
 
 #include <assert.h>
 #include <stdio.h>

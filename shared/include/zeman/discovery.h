@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "net.h"
+#include <zeman/net.h>
 
 enum {
     DISCOVERY_ERROR_SIZE = 160,

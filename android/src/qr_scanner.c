@@ -1,4 +1,4 @@
-#include "qr_scanner.h"
+#include <zeman/qr_scanner.h>
 
 #include <assert.h>
 #include <stdio.h>

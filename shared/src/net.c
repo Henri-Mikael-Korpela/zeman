@@ -1,4 +1,4 @@
-#include "net.h"
+#include <zeman/net.h>
 
 #include <assert.h>
 #include <stdio.h>

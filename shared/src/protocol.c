@@ -1,4 +1,4 @@
-#include "protocol.h"
+#include <zeman/protocol.h>
 
 #include <assert.h>
 #include <stdio.h>

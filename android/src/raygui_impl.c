@@ -4,7 +4,7 @@
 
 #include "raylib.h"
 
-#include "android_input.h"
+#include <zeman/android_input.h>
 
 // raylib on Android never produces typed characters, so raygui's text boxes read them from
 // android_input instead. Defined after raylib.h, so that only raygui's calls are redirected.
@@ -13,7 +13,7 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
-#include "text_box.h"
+#include <zeman/text_box.h>
 
 // raygui's cursor is a static of the implementation above, so only this file can reach it.
 // raygui clamps it to the text's length itself, so any index from 0 up is safe to set.

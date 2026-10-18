@@ -134,8 +134,9 @@ function Get-SourceFlags {
         "-I$(Join-Path $ExternalDir 'raygui\src')",
         "-I$(Join-Path $ExternalDir 'quirc\lib')",
         "-I$(Join-Path $ndk 'sources\android\native_app_glue')",
-        "-I$(Join-Path $RootDir 'shared\src')",
-        "-I$(Join-Path $AndroidDir 'src')"
+        # Our own headers are included as <zeman/app.h>, as in the desktop build's CMake.
+        "-I$(Join-Path $RootDir 'shared\include')",
+        "-I$(Join-Path $AndroidDir 'include')"
     )
 }
 

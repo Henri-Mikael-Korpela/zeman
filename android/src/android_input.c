@@ -1,10 +1,9 @@
-#include "android_input.h"
+#include <zeman/android_input.h>
 
 #include <assert.h>
 #include <stddef.h>
 
 #include <jni.h>
-#include <android/input.h>
 #include <android/native_activity.h>
 #include <android_native_app_glue.h>
 

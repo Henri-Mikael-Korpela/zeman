@@ -4,9 +4,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "backend.h"
-#include "net.h"
-#include "protocol.h"
+#include <zeman/backend.h>
+#include <zeman/net.h>
+#include <zeman/protocol.h>
 
 enum {
     // Phones served at once. More are accepted and closed at once.

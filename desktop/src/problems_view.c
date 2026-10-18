@@ -1,4 +1,4 @@
-#include "problems_view.h"
+#include <zeman/problems_view.h>
 
 #include <assert.h>
 #include <inttypes.h>

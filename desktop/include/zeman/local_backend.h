@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "backend.h"
-#include "event_store.h"
+#include <zeman/backend.h>
+#include <zeman/event_store.h>
 
 // A Backend over the desktop's own SQLite database. Every change made through it, by the desktop
 // user interface or by a phone through the server, raises the revision, so that both see it.

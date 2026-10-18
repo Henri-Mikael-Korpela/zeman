@@ -1,4 +1,4 @@
-#include "event_store.h"
+#include <zeman/event_store.h>
 
 #include <assert.h>
 #include <stdio.h>
