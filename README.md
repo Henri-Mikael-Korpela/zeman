@@ -75,7 +75,7 @@ Events and tasks also have an optional one-line description (up to 199 character
 
 Use **New problem** to record a problem: something that went wrong, with a name and an optional description. A problem is always recorded on the day it is created, whichever day is selected, and keeps that day when edited; it has no times, location or repeat. Problems show in dark red, marked with "!", and an event or task cannot be turned into a problem or back.
 
-Tasks can solve problems. In a task's form, **Problems** shows a checklist of problems; check the ones that completing the task solves, and save. Opening a problem then lists its tasks and its status: **No planned tasks**, **Planned** (tasks linked, none done), **Partly completed** or **Completed**. A task counts as completed once any of its occurrences is checked off. A completed problem turns green, with a check mark, in the calendar and in the day's list.
+Tasks can solve problems. A task's form lists every problem below its fields, under **Problems this task solves**, with how many are checked; check the ones that completing the task solves, and save. The list scrolls when it does not fit. Opening a problem then lists its tasks and its status: **No planned tasks**, **Planned** (tasks linked, none done), **Partly completed** or **Completed**. A task counts as completed once any of its occurrences is checked off. A completed problem turns green, with a check mark, in the calendar and in the day's list.
 
 To edit an event, click its card: the form opens with its details, and **Save** updates it. A repeating event is edited as a whole, so the form shows the dates of its first occurrence. Editing keeps the original creation time.
 

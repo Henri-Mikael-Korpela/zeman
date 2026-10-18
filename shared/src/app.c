@@ -273,7 +273,6 @@ typedef struct Form {
     bool open;
     bool links_loaded;       // False after a failed load, so that saving keeps the stored links
     bool links_truncated;    // More links or problems exist than were loaded
-    bool choosing_problems;  // The problem checklist replaces the fields
     char text[FORM_FIELD_COUNT][EVENT_DESCRIPTION_SIZE];
     char error[FORM_ERROR_SIZE];  // Why the last save failed, or empty
 } Form;
@@ -423,7 +422,7 @@ static float draw_panel_form_rows_end(float y);
 static float draw_panel_form_fields(App *app, Rectangle body, float y);
 static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, float end_y);
 static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float y, float end_y);
-static float draw_panel_form_problems(App *app, Rectangle body, float y);
+static void draw_panel_form_problems(App *app, Rectangle body, float y, float end_y);
 static bool draw_panel_form_problems_row(const App *app, const Task_Problem *problem,
                                          Rectangle row, bool clickable);
 static int32_t form_problems_linked_count(const Form *form);
@@ -1970,60 +1969,46 @@ static void draw_panel_form(App *app, Rectangle body) {
                        toggle_count == 3 ? "Event;Task;Problem" : "Event;Task", &form->kind);
     }
 
-    // Only a task solves problems; switching to another kind shows the fields again.
-    if (form->kind != EVENT_KIND_TASK) {
-        form->choosing_problems = false;
-    }
     // The first field's label sits below the heading and its box below the label.
     const float fields_y = body.y + 32 + FORM_LABEL_HEIGHT_PIXELS;
-    float y = form->choosing_problems ? draw_panel_form_problems(app, body, fields_y)
-                                      : draw_panel_form_fields(app, body, fields_y);
-    Color dim = style_color(TEXT_COLOR_DISABLED);
-    const char *hint = form->kind == EVENT_KIND_PROBLEM ? ""
-                       : !form->choosing_problems       ? "Dates YYYY-MM-DD, times HH:MM (optional)"
-                       : form->links_truncated          ? "Only the newest problems are shown."
-                                                        : "The choices are saved with the task.";
-    draw_text(&app->fonts.small, hint, body.x, y, dim);
-    y += TEXT_LINE_HEIGHT_PIXELS_SMALL;
+    float y = draw_panel_form_fields(app, body, fields_y);
+    // An error takes the hint's line, because both are about the fields and the error is what
+    // needs reading then; sharing the line leaves a task's checklist more room.
     if (form->error[0] != '\0') {
         scissor_begin(&app->fonts, body.x, y, body.width, TEXT_LINE_HEIGHT_PIXELS);
         draw_text(&app->fonts.ui, form->error, body.x, y, error_color);
         scissor_end(&app->fonts);
+    } else if (form->kind != EVENT_KIND_PROBLEM) {
+        draw_text(&app->fonts.small, "Dates YYYY-MM-DD, times HH:MM (optional)", body.x, y,
+                  style_color(TEXT_COLOR_DISABLED));
     }
+    y += TEXT_LINE_HEIGHT_PIXELS + 4;
 
-    draw_panel_form_buttons(app, body, y + TEXT_LINE_HEIGHT_PIXELS + 4);
+    // The buttons sit at the bottom of the panel, so that they stay in place whatever the kind,
+    // and a task's problem checklist fills the room between the fields and them.
+    const float buttons_y = body.y + body.height - BUTTON_HEIGHT_PIXELS;
+    if (form->kind == EVENT_KIND_TASK) {
+        draw_panel_form_problems(app, body, y + FORM_LABEL_HEIGHT_PIXELS,
+                                 buttons_y - FORM_ROW_GAP_PIXELS);
+    }
+    draw_panel_form_buttons(app, body, buttons_y);
 }
 
-// Cancel and Save; between them, for a task, the button that swaps the fields for the problem
-// checklist and back, with how many problems are checked.
 static void draw_panel_form_buttons(App *app, Rectangle body, float y) {
-    Form *form = &app->form;
     const float gap = 12;
-    const bool task = form->kind == EVENT_KIND_TASK;
-    const int32_t button_count = task ? 3 : 2;
-    const float button_width = (body.width - (float)(button_count - 1) * gap) / (float)button_count;
+    const float button_width = (body.width - gap) / 2;
     if (GuiButton((Rectangle){ body.x, y, button_width, BUTTON_HEIGHT_PIXELS }, "Cancel")) {
-        form_close(form);
+        form_close(&app->form);
         return;
     }
-    if (task) {
-        char label[TEXT_LINE_SIZE];
-        snprintf(label, sizeof(label), "Problems (%" PRId32 ")", form_problems_linked_count(form));
-        Rectangle swap = { body.x + button_width + gap, y, button_width, BUTTON_HEIGHT_PIXELS };
-        if (GuiButton(swap, form->choosing_problems ? "Fields" : label)) {
-            form->choosing_problems = !form->choosing_problems;
-            // Keys go to the checklist's form, not to a text box hidden behind it.
-            form->field_active = FORM_FIELD_NONE;
-        }
-    }
-    const float save_x = body.x + (float)(button_count - 1) * (button_width + gap);
+    const float save_x = body.x + button_width + gap;
     if (GuiButton((Rectangle){ save_x, y, button_width, BUTTON_HEIGHT_PIXELS }, "Save")) {
         app_form_submit(app);
     }
 }
 
-// Where the rows of fields end, below the last box, with the first box at y. The checklist
-// ends there too, so that the buttons never move.
+// Where the rows of fields end, below the last box, with the first box at y. Rows are kept for
+// hidden fields, so that what follows them does not move as the repeat choice changes.
 static float draw_panel_form_rows_end(float y) {
     const float row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
     return y + (FORM_ROW_COUNT - 1) * row_height + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
@@ -2172,22 +2157,33 @@ static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float 
     }
 }
 
-// The problems a task can solve, each with a check box, in place of the fields from y down to
-// where they end; checking one links the task to it when the form is saved. Each problem's
-// status is as stored, without the choices not saved yet. Rows scroll when they do not fit.
-static float draw_panel_form_problems(App *app, Rectangle body, float y) {
+// The problems a task can solve, each with a check box, below the task's fields: the heading
+// on the label line above y, the rows from y down to end_y. Checking one links the task to it
+// when the form is saved. Each problem's status is as stored, without the choices not saved
+// yet. Rows scroll when they do not fit, which at the smallest window is after about one.
+static void draw_panel_form_problems(App *app, Rectangle body, float y, float end_y) {
     Form *form = &app->form;
-    const float end_y = draw_panel_form_rows_end(y);
-    draw_text(&app->fonts.ui, "Problems that completing this task solves", body.x,
-              y - FORM_LABEL_HEIGHT_PIXELS, style_color(TEXT_COLOR_NORMAL));
+    char heading[TEXT_LINE_SIZE];
+    snprintf(heading, sizeof(heading), "Problems this task solves (%" PRId32 ")%s",
+             form_problems_linked_count(form), form->links_truncated ? ", newest only" : "");
+    scissor_begin(&app->fonts, body.x, y - FORM_LABEL_HEIGHT_PIXELS, body.width,
+                  FORM_LABEL_HEIGHT_PIXELS);
+    draw_text(&app->fonts.ui, heading, body.x, y - FORM_LABEL_HEIGHT_PIXELS,
+              style_color(TEXT_COLOR_NORMAL));
+    scissor_end(&app->fonts);
     if (!form->links_loaded || form->problem_count == 0) {
         const char *text = form->links_loaded ? "No problems recorded yet."
                                               : "Problems could not be loaded.";
         draw_text(&app->fonts.small, text, body.x, y + 4, style_color(TEXT_COLOR_DISABLED));
-        return end_y;
+        return;
+    }
+    // A window too short for any row shows only the heading; it is never that short at the
+    // minimum window size, but a phone's height is not ours to choose.
+    if (end_y - y < 1.0f) {
+        return;
     }
 
-    Rectangle list = { body.x, y, body.width, end_y - FORM_ROW_GAP_PIXELS - y };
+    Rectangle list = { body.x, y, body.width, end_y - y };
     const float content_height = (float)form->problem_count * PROBLEM_ROW_HEIGHT_PIXELS;
     if (content_height > list.height) {
         list.width -= SCROLLBAR_GAP_PIXELS;
@@ -2215,7 +2211,6 @@ static float draw_panel_form_problems(App *app, Rectangle body, float y) {
     app->fonts.clipping = false;
     EndScissorMode();
     draw_scrollbar(list, content_height, scroll->offset_pixels);
-    return end_y;
 }
 
 // Returns true when the row was tapped or clicked, which toggles its check box.
