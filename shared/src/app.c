@@ -12,6 +12,7 @@
 #include "backend.h"
 #include "calendar.h"
 #include "event.h"
+#include "text_box.h"
 
 enum {
     // All sizes are layout pixels, which App_Config.scale turns into screen pixels.
@@ -92,6 +93,9 @@ enum {
     // Text is never drawn this far from the layout's corner. Small enough that, times the
     // largest phone scale, rounding stays within int32_t and float keeps whole pixels exact.
     TEXT_POSITION_LIMIT_PIXELS = 100000,
+    // Pasting reads at most this many bytes of the clipboard: far more than the longest field,
+    // so that a huge clipboard of mostly line breaks still fills it, while the read stays bounded.
+    CLIPBOARD_READ_SIZE_MAX = 4096,
     // Printable ASCII and Latin-1, so that titles with letters such as a-umlaut display.
     FONT_CODEPOINT_COUNT = (126 - 32 + 1) + (255 - 160 + 1),
 };
@@ -333,6 +337,10 @@ static int64_t app_event_first_on_day(const App *app, int32_t day_number);
 static void app_form_open(App *app, Date date, int32_t kind);
 static void app_form_open_edit(App *app, const Event *event);
 static void app_form_load_links(App *app);
+static void app_form_clipboard(App *app);
+static int32_t form_field_paste(char *text, int32_t text_size, int32_t cursor_index,
+                                const char *clipboard);
+static int32_t utf8_sequence_size(const char *text);
 static void app_form_submit(App *app);
 static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserted);
 static void app_event_delete(App *app, int64_t id);
@@ -623,6 +631,9 @@ static void app_handle_keys(App *app, const Layout *layout) {
             bool backwards = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
             app->form.field_active = form_field_next(&app->form, backwards);
         }
+        if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) {
+            app_form_clipboard(app);
+        }
         return;
     }
 
@@ -837,6 +848,111 @@ static void app_form_submit(App *app) {
     app->events_stale = true;
     snprintf(app->status, sizeof(app->status), "%s \"%s\".", editing ? "Updated" : "Saved",
              event.title);
+}
+
+// Ctrl+C copies the field being edited, Ctrl+X cuts it, and Ctrl+V pastes at its cursor.
+// raygui's text box has no selection, so copying and cutting take the whole field, which the
+// status bar says. GLFW drops the control characters these keys type, so the text box itself
+// sees nothing of them. On Android raylib has no clipboard, and pasting finds nothing.
+static void app_form_clipboard(App *app) {
+    Form *form = &app->form;
+    const int32_t field = form->field_active;
+    assert(field >= 0);
+    assert(field < FORM_FIELD_COUNT);
+    char *text = form->text[field];
+    const bool cut = IsKeyPressed(KEY_X);
+    if (IsKeyPressed(KEY_C) || cut) {
+        if (text[0] == '\0') {
+            return; // Copying nothing would only empty the clipboard.
+        }
+        SetClipboardText(text);
+        if (cut) {
+            text[0] = '\0';
+            text_box_cursor_index_set(0);
+        }
+        snprintf(app->status, sizeof(app->status), "%s the whole field.",
+                 cut ? "Cut" : "Copied");
+        return;
+    }
+    if (IsKeyPressed(KEY_V)) {
+        // NULL when the clipboard is empty, holds no text, or does not exist.
+        const char *clipboard = GetClipboardText();
+        if (clipboard == NULL) {
+            return;
+        }
+        int32_t cursor_index = text_box_cursor_index();
+        const int32_t length = (int32_t)strlen(text);
+        if (cursor_index > length) {
+            cursor_index = length; // raygui clamps it only when it next draws the box.
+        }
+        text_box_cursor_index_set(form_field_paste(text, form_field_sizes[field], cursor_index,
+                                                   clipboard));
+    }
+}
+
+// Inserts the clipboard's text at cursor_index as one line, because every field is one line:
+// line breaks and tabs become spaces, and other control characters and broken UTF-8 are left
+// out. What does not fit is cut at a whole character. Returns the index after the pasted text.
+static int32_t form_field_paste(char *text, int32_t text_size, int32_t cursor_index,
+                                const char *clipboard) {
+    const int32_t length = (int32_t)strlen(text);
+    assert(length < text_size);
+    assert(text_size <= EVENT_DESCRIPTION_SIZE);
+    assert(cursor_index >= 0);
+    assert(cursor_index <= length);
+    char pasted[EVENT_DESCRIPTION_SIZE];
+    int32_t pasted_length = 0;
+    const int32_t room = text_size - 1 - length;
+    int32_t i = 0;
+    while (i < CLIPBOARD_READ_SIZE_MAX && clipboard[i] != '\0' && pasted_length < room) {
+        const unsigned char byte = (unsigned char)clipboard[i];
+        const int32_t size = utf8_sequence_size(clipboard + i);
+        if (byte == '\n' || byte == '\t') {
+            pasted[pasted_length] = ' ';
+            pasted_length++;
+        } else if (byte >= 0x20 && byte != 0x7F && size > 0) {
+            if (pasted_length + size > room) {
+                break; // A character that does not fit whole is left out, and the rest with it.
+            }
+            memcpy(pasted + pasted_length, clipboard + i, (size_t)size);
+            pasted_length += size;
+        }
+        // Anything else, such as the carriage return of a Windows line break, is skipped.
+        i += size > 0 ? size : 1;
+    }
+    assert(pasted_length <= room);
+    // The tail moves right, terminator included, to make room at the cursor.
+    memmove(text + cursor_index + pasted_length, text + cursor_index,
+            (size_t)(length - cursor_index + 1));
+    memcpy(text + cursor_index, pasted, (size_t)pasted_length);
+    assert((int32_t)strlen(text) == length + pasted_length);
+    return cursor_index + pasted_length;
+}
+
+// Bytes in the UTF-8 character that text starts with, or 0 when it is not valid UTF-8 there,
+// such as a stray continuation byte or a sequence cut short by the end of the text.
+static int32_t utf8_sequence_size(const char *text) {
+    const unsigned char first = (unsigned char)text[0];
+    assert(first != 0);
+    int32_t size = 0;
+    if (first < 0x80) {
+        size = 1;
+    } else if (first >= 0xC2 && first <= 0xDF) {
+        size = 2;
+    } else if (first >= 0xE0 && first <= 0xEF) {
+        size = 3;
+    } else if (first >= 0xF0 && first <= 0xF4) {
+        size = 4;
+    } else {
+        return 0;
+    }
+    // Stops at the terminator too, which is no continuation byte.
+    for (int32_t i = 1; i < size; i++) {
+        if (((unsigned char)text[i] & 0xC0) != 0x80) {
+            return 0;
+        }
+    }
+    return size;
 }
 
 // Opens the form for a new entry. The problems a task can solve are loaded whatever the kind,
