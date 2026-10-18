@@ -62,6 +62,13 @@ add_executable(zeman
 )
 target_include_directories(zeman PRIVATE src "${SHARED_DIR}" "${QRCODEGEN_DIR}")
 
+# The database lives in the repository root, not beside the executable, so that deleting a build
+# directory (which is routine) never deletes the events. An absolute path, so that every build
+# directory, wherever it is, uses the same file.
+set(DATABASE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../zeman.db")
+cmake_path(NORMAL_PATH DATABASE_FILE)
+target_compile_definitions(zeman PRIVATE "ZEMAN_DATABASE_PATH=\"${DATABASE_FILE}\"")
+
 # The application icon, shared with the Android app's launcher icon (assets/zeman-app.png).
 if(WIN32)
     set(APP_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../assets/zeman-app.ico")

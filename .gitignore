@@ -4,3 +4,7 @@ external/
 # Android: downloaded JDK, SDK and NDK; build output; the signing key made on first build.
 android/tools/
 android/keystore/
+
+# The events: user data, kept in the repository root (see README.md).
+zeman.db
+zeman.db-*

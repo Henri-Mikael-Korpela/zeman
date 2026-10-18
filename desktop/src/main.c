@@ -27,10 +27,18 @@ enum {
     WINDOW_HEIGHT_PIXELS_MIN = 720,
     NAVIGATION_WIDTH_PIXELS = 200,
     NAVIGATION_ITEM_HEIGHT_PIXELS = 44,
-    PATH_SIZE = 1024,
     // Room for the longest server error or client address, so that nothing is cut here.
     INFO_SIZE = 256,
 };
+
+// Where the events are kept: the repository root, set by CMake (see desktop/CMakeLists.txt), so
+// that deleting a build directory never deletes them. There is no fallback, because a guess
+// would silently start a second, empty database.
+#ifndef ZEMAN_DATABASE_PATH
+#error "ZEMAN_DATABASE_PATH must be defined by the build."
+#endif
+static const char DATABASE_PATH[] = ZEMAN_DATABASE_PATH;
+static_assert(sizeof(DATABASE_PATH) > 1, "The database path is not empty.");
 
 typedef enum View {
     VIEW_CALENDAR,
@@ -129,12 +137,7 @@ static void desktop_open(Desktop *desktop, const Options *options) {
                  (unsigned)options->connect_port);
         return;
     }
-    // Beside the executable: the app has no settings or installer, so this is the one place
-    // that is both writable and predictable.
-    char path[PATH_SIZE];
-    int written = snprintf(path, sizeof(path), "%szeman.db", GetApplicationDirectory());
-    assert(written > 0 && written < (int)sizeof(path));
-    desktop->store_open = local_backend_open(&desktop->local, path);
+    desktop->store_open = local_backend_open(&desktop->local, DATABASE_PATH);
     desktop->backend = local_backend(&desktop->local);
     if (!server_start(&desktop->server, &desktop->backend, options->port)) {
         snprintf(desktop->info, sizeof(desktop->info), "Phone access off: %s",
