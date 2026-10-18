@@ -110,7 +110,6 @@ static const char FONT_FILE_MEDIUM[] = "fonts/Rubik-Medium.ttf";
 static const float TASK_FILL_ALPHA = 0.20f;
 static const float TASK_DONE_FILL_ALPHA = 0.08f;
 static const float TASK_DONE_OUTLINE_ALPHA = 0.35f;
-static const float TASK_DONE_TEXT_ALPHA = 0.6f;
 
 typedef enum Form_Field {
     FORM_FIELD_TITLE,
@@ -167,25 +166,60 @@ static_assert((int)EVENT_TITLE_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits 
 static_assert((int)LOCATION_ADDRESS_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
 static_assert((int)LOCATION_CITY_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
 
-// Dark enough for white text. Picked by event id, so an event keeps its color in every view.
+// Mid-tones: dark enough for white text on a bar, yet bright enough to stand out from the dark
+// surfaces. Picked by event id, so an event keeps its color in every view.
 static const Color event_colors[] = {
-    { 31, 119, 180, 255 },   // Blue
-    { 214, 39, 40, 255 },    // Red
-    { 44, 140, 44, 255 },    // Green
-    { 148, 103, 189, 255 },  // Purple
-    { 140, 86, 75, 255 },    // Brown
-    { 23, 128, 140, 255 },   // Teal
-    { 210, 100, 0, 255 },    // Orange
-    { 190, 55, 135, 255 },   // Magenta
+    { 59, 111, 216, 255 },   // Blue
+    { 200, 70, 60, 255 },    // Red
+    { 46, 138, 78, 255 },    // Green
+    { 130, 80, 200, 255 },   // Purple
+    { 140, 90, 60, 255 },    // Brown
+    { 24, 128, 140, 255 },   // Teal
+    { 192, 90, 16, 255 },    // Orange
+    { 180, 60, 140, 255 },   // Magenta
 };
 enum { EVENT_COLOR_COUNT = sizeof(event_colors) / sizeof(event_colors[0]) };
 
-static const Color error_color = { 190, 30, 30, 255 };
+// An event color is used as text on a dark card only brightened by this factor (raylib's
+// ColorBrightness), because the mid-tones above are too dark to read on their own there.
+static const float EVENT_TEXT_BRIGHTNESS = 0.4f;
+
+// Light, because error text is drawn on the dark surfaces, not on a bar.
+static const Color error_color = { 248, 113, 113, 255 };
 // Every problem has this color, darker than any event color, so that problems read as problems
 // at a glance rather than as one more event.
-static const Color problem_color = { 130, 20, 20, 255 };
+static const Color problem_color = { 160, 36, 48, 255 };
 // A done problem turns green, the usual color for "resolved", dark enough for white text.
-static const Color problem_done_color = { 34, 130, 60, 255 };
+static const Color problem_done_color = { 40, 140, 76, 255 };
+
+// One color of the theme: a raygui DEFAULT property and its value, as 0xRRGGBBAA.
+typedef struct Theme_Color {
+    uint32_t rgba;
+    int32_t property;
+} Theme_Color;
+
+// The dark theme, shared by the desktop and Android apps. Every control, and every surface the
+// apps draw themselves, reads its colors from raygui's style table, so this table is the whole
+// theme. Near-black surfaces with a slight blue cast, borders just above the surfaces so that
+// the grid recedes behind the entries, and one blue accent for what is selected or today.
+static const Theme_Color theme_colors[] = {
+    { 0x0E1014FF, BACKGROUND_COLOR },       // Window, panel, days outside the month
+    { 0x262A33FF, LINE_COLOR },             // Panel outline
+    { 0x171A20FF, BASE_COLOR_NORMAL },      // Day cells, cards, buttons, navigation
+    { 0x272C35FF, BORDER_COLOR_NORMAL },
+    { 0xE4E7ECFF, TEXT_COLOR_NORMAL },
+    { 0x1F232BFF, BASE_COLOR_FOCUSED },     // Hovered
+    { 0x3A414DFF, BORDER_COLOR_FOCUSED },
+    { 0xFFFFFFFFu, TEXT_COLOR_FOCUSED },
+    { 0x1D2A45FF, BASE_COLOR_PRESSED },     // Accent tint: active toggle, edited text box
+    { 0x7AA2F7FF, BORDER_COLOR_PRESSED },   // The accent: selection, focus, today
+    { 0xDCE6FFFF, TEXT_COLOR_PRESSED },
+    { 0x20242BFF, BORDER_COLOR_DISABLED },
+    { 0x13161BFF, BASE_COLOR_DISABLED },
+    // Secondary text as well, so it keeps a contrast of about 5:1 on the cells and cards.
+    { 0x828A96FF, TEXT_COLOR_DISABLED },
+};
+enum { THEME_COLOR_COUNT = sizeof(theme_colors) / sizeof(theme_colors[0]) };
 
 // How many days the calendar shows at once. Every range uses the same day cells; a week is one
 // row of seven, and a day one cell the width of the calendar, so that whole titles show.
@@ -421,6 +455,7 @@ static void text_copy_trimmed(char *buffer, size_t buffer_size, const char *text
 static void event_format_lead(const Event *event, char *buffer, size_t buffer_size);
 static void format_date_time_short(Date date, int32_t minute_of_day, char *buffer,
                                    size_t buffer_size);
+static void theme_apply(void);
 static Color style_color(int32_t property);
 static void draw_text(const Text_Style *style, const char *text, float x, float y, Color color);
 static float draw_text_round(float position, float scale);
@@ -441,6 +476,7 @@ App *app_create(Backend *backend, const App_Config *config) {
     app.touch = config->touch;
     app.input_enabled = true;
 
+    theme_apply();
     fonts_load(&app.fonts, config->font_directory, config->scale);
     GuiSetFont(app.fonts.ui.font);
     GuiSetStyle(DEFAULT, TEXT_SIZE, TEXT_SIZE_PIXELS);
@@ -1359,8 +1395,10 @@ static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date,
     if (date_equal(date, app->today)) {
         Vector2 size = measure_text(&app->fonts.ui, number);
         Vector2 center = { position.x + size.x / 2, position.y + size.y / 2 };
-        DrawCircleV(center, size.y * 0.85f, style_color(BASE_COLOR_PRESSED));
-        color = style_color(TEXT_COLOR_PRESSED);
+        // A solid accent circle with the number in the background color, so that today is the
+        // brightest spot in the grid.
+        DrawCircleV(center, size.y * 0.85f, style_color(BORDER_COLOR_PRESSED));
+        color = style_color(BACKGROUND_COLOR);
     }
     draw_text(&app->fonts.ui, number, position.x, position.y, color);
 }
@@ -1496,8 +1534,9 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
         Rectangle box = { bar.x + 4, bar.y + 4, 11, 11 };
         draw_check_mark(box, done, color);
         text_x = box.x + box.width + 4;
-        // The task's own color, faded when done: grey would vanish on the grey cells.
-        text_color = done ? Fade(color, TASK_DONE_TEXT_ALPHA) : color;
+        // The theme's text colors rather than the task's own, which is too dark to read on the
+        // dark cells; the outline and checkbox already carry the task's color.
+        text_color = style_color(done ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
     }
     // Centered vertically in the bar.
     draw_text(style, label, text_x, bar.y + (bar.height - style->size_pixels) / 2, text_color);
@@ -1761,8 +1800,9 @@ static void draw_scrollbar(Rectangle list, float content_height, float offset_pi
     float x = list.x + list.width + SCROLLBAR_GAP_PIXELS - SCROLLBAR_WIDTH_PIXELS;
     DrawRectangleRec((Rectangle){ x, list.y, SCROLLBAR_WIDTH_PIXELS, list.height },
                      style_color(BASE_COLOR_NORMAL));
+    // The focused border color, because the normal one is too close to the track to see.
     DrawRectangleRec((Rectangle){ x, thumb_y, SCROLLBAR_WIDTH_PIXELS, thumb_height },
-                     style_color(BORDER_COLOR_NORMAL));
+                     style_color(BORDER_COLOR_FOCUSED));
 }
 
 // Returns true when the card itself was clicked, not one of its buttons. Deleting asks first, on
@@ -1887,7 +1927,7 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
     if (event->kind != EVENT_KIND_PROBLEM) {
         y += line;
         event_format_lead(event, text, sizeof(text));
-        draw_text(style, text, x, y, event_color(event));
+        draw_text(style, text, x, y, ColorBrightness(event_color(event), EVENT_TEXT_BRIGHTNESS));
     }
     scissor_end(fonts);
 }
@@ -2688,6 +2728,26 @@ static void format_date_time_short(Date date, int32_t minute_of_day, char *buffe
     time_format(minute_of_day, time, sizeof(time));
     snprintf(buffer, buffer_size, "%" PRId32 " %s %s", date.day, month_short_name(date.month),
              time);
+}
+
+// Loads theme_colors into raygui. DEFAULT's base properties reach every control, so that
+// buttons, text boxes and toggles match the surfaces the apps draw themselves.
+static void theme_apply(void) {
+    for (int32_t i = 0; i < THEME_COLOR_COUNT; i++) {
+        const Theme_Color *color = &theme_colors[i];
+        // A color property: raygui's base properties start with the colors, and
+        // BACKGROUND_COLOR is the last of DEFAULT's extended ones.
+        assert(color->property >= BORDER_COLOR_NORMAL);
+        assert(color->property <= BACKGROUND_COLOR);
+        // Opaque, because surfaces are drawn over one another and must hide what is below.
+        assert((color->rgba & 0xFFu) == 0xFFu);
+        // raygui stores colors as int; values above INT32_MAX wrap, and GetColor reads them
+        // back as unsigned, as raygui's own styles do.
+        GuiSetStyle(DEFAULT, color->property, (int)color->rgba);
+    }
+    assert(GuiGetStyle(BUTTON, BASE_COLOR_NORMAL) == GuiGetStyle(DEFAULT, BASE_COLOR_NORMAL));
+    assert(GuiGetStyle(TEXTBOX, BORDER_COLOR_PRESSED) ==
+           GuiGetStyle(DEFAULT, BORDER_COLOR_PRESSED));
 }
 
 static Color style_color(int32_t property) {

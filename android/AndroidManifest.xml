@@ -19,7 +19,10 @@
         android:icon="@mipmap/ic_launcher"
         android:hasCode="false"
         android:usesCleartextTraffic="true"
-        android:allowBackup="false">
+        android:allowBackup="false"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+        <!-- A dark system theme, so that the window shown before the first frame, the status
+             bar and the navigation bar match the app's dark theme instead of flashing white. -->
         <activity
             android:name="android.app.NativeActivity"
             android:exported="true"
