@@ -75,7 +75,7 @@ bool discovery_poll(Discovery *discovery) {
     return discovery->found;
 }
 
-// "CALENDAR-SERVER 1 47800": the reply prefix, then a port of digits only.
+// "ZEMAN-SERVER 1 47800": the reply prefix, then a port of digits only.
 static bool discovery_parse_answer(const char *answer, uint16_t *port) {
     const size_t prefix_length = strlen(PROTOCOL_DISCOVERY_REPLY);
     if (strncmp(answer, PROTOCOL_DISCOVERY_REPLY, prefix_length) != 0) {

@@ -46,7 +46,7 @@ void devices_view_draw(const Devices_View *view, const Server *server, const App
         app_draw_text(app, APP_TEXT_NORMAL, text, x, y);
         return;
     }
-    app_draw_text(app, APP_TEXT_NORMAL, "Scan this code with the Calendar app on your phone:",
+    app_draw_text(app, APP_TEXT_NORMAL, "Scan this code with the Zeman app on your phone:",
                   x, y);
     y += LINE_PIXELS + 8;
     float qr_size = devices_view_draw_qr(view, x, y);

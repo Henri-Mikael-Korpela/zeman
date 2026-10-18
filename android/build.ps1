@@ -1,4 +1,4 @@
-# Builds the Android app into android\build\calendar.apk, ready to copy to a phone.
+# Builds the Android app into android\build\zeman.apk, ready to copy to a phone.
 #
 # Nothing is installed system-wide: a JDK, the Android SDK and the NDK are downloaded into
 # android\tools on the first run (about 1.5 GB) and reused after that. No Gradle: the app is one
@@ -37,9 +37,9 @@ $Abi = 'arm64-v8a'
 $ClangTarget = "aarch64-linux-android$MinSdkVersion"
 # A key made once for this project and kept, because Android only installs an update of an app
 # signed with the same key as the installed one.
-$KeystorePath = Join-Path $AndroidDir 'keystore\calendar.keystore'
+$KeystorePath = Join-Path $AndroidDir 'keystore\zeman.keystore'
 $KeystorePassword = 'android'
-$KeyAlias = 'calendar'
+$KeyAlias = 'zeman'
 
 function Invoke-Tool([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
@@ -205,14 +205,14 @@ function Build-Library([string]$Clang, [string]$RaylibLibrary) {
 }
 
 # Draws the launcher icon, one PNG per screen density, from the same artwork as the desktop app
-# (assets\calendar-app.png), so that there is one picture to change. Android's launcher sizes:
+# (assets\zeman-app.png), so that there is one picture to change. Android's launcher sizes:
 # 48 dp at 1x (mdpi) up to 4x (xxxhdpi). Returns the folder that aapt2 compiles resources from.
 function New-LauncherIcons() {
     Add-Type -AssemblyName System.Drawing
     $resources = Join-Path $BuildDir 'apk\res'
     if (Test-Path $resources) { Remove-Item -Recurse -Force $resources }
     $densities = [ordered]@{ mdpi = 48; hdpi = 72; xhdpi = 96; xxhdpi = 144; xxxhdpi = 192 }
-    $source = [Drawing.Image]::FromFile((Join-Path $RootDir 'assets\calendar-app.png'))
+    $source = [Drawing.Image]::FromFile((Join-Path $RootDir 'assets\zeman-app.png'))
     try {
         foreach ($density in $densities.Keys) {
             $size = $densities[$density]
@@ -246,9 +246,9 @@ function Build-Apk([string]$NativeLibrary) {
     New-Item -ItemType Directory -Force $assets | Out-Null
     Copy-Item (Join-Path $ExternalDir 'fonts\*') $assets -Force
 
-    $unaligned = Join-Path $BuildDir 'calendar.unaligned.apk'
-    $aligned = Join-Path $BuildDir 'calendar.aligned.apk'
-    $final = Join-Path $BuildDir 'calendar.apk'
+    $unaligned = Join-Path $BuildDir 'zeman.unaligned.apk'
+    $aligned = Join-Path $BuildDir 'zeman.aligned.apk'
+    $final = Join-Path $BuildDir 'zeman.apk'
     foreach ($file in @($unaligned, $aligned, $final)) {
         if (Test-Path $file) { Remove-Item -Force $file }
     }
@@ -283,7 +283,7 @@ function Build-Apk([string]$NativeLibrary) {
             '-genkeypair', '-keystore', $KeystorePath, '-alias', $KeyAlias,
             '-keyalg', 'RSA', '-keysize', '2048', '-validity', '10000',
             '-storepass', $KeystorePassword, '-keypass', $KeystorePassword,
-            '-dname', 'CN=Calendar'
+            '-dname', 'CN=Zeman'
         )
     }
     $apkSigner = Join-Path $buildTools 'apksigner.bat'

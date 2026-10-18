@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(calendar C)
+project(zeman C)
 # The icon is a Windows resource, which needs the resource compiler (windres with MinGW).
 if(WIN32)
     enable_language(RC)
@@ -43,7 +43,7 @@ endif()
 # Nayuki's QR code generator, for the code that phones scan to connect.
 set(QRCODEGEN_DIR "${EXTERNAL_DIR}/qrcodegen/c")
 
-add_executable(calendar
+add_executable(zeman
     src/main.c
     src/devices_view.c
     src/event_store.c
@@ -60,27 +60,27 @@ add_executable(calendar
     "${SHARED_DIR}/protocol.c"
     "${QRCODEGEN_DIR}/qrcodegen.c"
 )
-target_include_directories(calendar PRIVATE src "${SHARED_DIR}" "${QRCODEGEN_DIR}")
+target_include_directories(zeman PRIVATE src "${SHARED_DIR}" "${QRCODEGEN_DIR}")
 
-# The application icon, shared with the Android app's launcher icon (assets/calendar-app.png).
+# The application icon, shared with the Android app's launcher icon (assets/zeman-app.png).
 if(WIN32)
-    set(APP_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../assets/calendar-app.ico")
+    set(APP_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../assets/zeman-app.ico")
     cmake_path(NORMAL_PATH APP_ICON_FILE)
     configure_file(app.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app.rc" @ONLY)
-    target_sources(calendar PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
+    target_sources(zeman PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
     # Rebuild the resource when the icon changes, which CMake does not see inside the .rc file.
     set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/app.rc"
                                 PROPERTIES OBJECT_DEPENDS "${APP_ICON_FILE}")
 endif()
-target_link_libraries(calendar PRIVATE raylib raygui sqlite3)
+target_link_libraries(zeman PRIVATE raylib raygui sqlite3)
 if(WIN32)
-    target_link_libraries(calendar PRIVATE ws2_32)
+    target_link_libraries(zeman PRIVATE ws2_32)
 endif()
 
 # The app loads its fonts from a fonts folder beside the executable, so that it runs offline.
-add_custom_command(TARGET calendar POST_BUILD
+add_custom_command(TARGET zeman POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${FONTS_DIR}"
-            "$<TARGET_FILE_DIR:calendar>/fonts"
+            "$<TARGET_FILE_DIR:zeman>/fonts"
     COMMENT "Copying fonts next to the executable")
 
 # Third-party implementation: don't report its warnings as ours.
@@ -92,10 +92,10 @@ endif()
 # Assertions stay on in every build type, as in TIGER_STYLE: they catch bugs in use, not only
 # in development. CMake's Release flags define NDEBUG; undefine it for our own code only.
 if(MSVC)
-    target_compile_options(calendar PRIVATE /W4 /WX /UNDEBUG)
+    target_compile_options(zeman PRIVATE /W4 /WX /UNDEBUG)
     # Use main() as the entry point without opening a console window in Release.
-    set_target_properties(calendar PROPERTIES
+    set_target_properties(zeman PROPERTIES
         LINK_FLAGS_RELEASE "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
 else()
-    target_compile_options(calendar PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    target_compile_options(zeman PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 endif()

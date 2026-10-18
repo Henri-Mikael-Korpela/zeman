@@ -39,12 +39,12 @@ enum {
 
 // Discovery: a phone broadcasts PROTOCOL_DISCOVERY_PROBE to PROTOCOL_DISCOVERY_PORT; each desktop
 // app on the network answers the sender with PROTOCOL_DISCOVERY_REPLY followed by its TCP port
-// in decimal, for example "CALENDAR-SERVER 1 47800". The "1" is PROTOCOL_VERSION.
-#define PROTOCOL_DISCOVERY_PROBE "CALENDAR-DISCOVER 1"
-#define PROTOCOL_DISCOVERY_REPLY "CALENDAR-SERVER 1 "
+// in decimal, for example "ZEMAN-SERVER 1 47800". The "1" is PROTOCOL_VERSION.
+#define PROTOCOL_DISCOVERY_PROBE "ZEMAN-DISCOVER 1"
+#define PROTOCOL_DISCOVERY_REPLY "ZEMAN-SERVER 1 "
 
-// What the desktop's QR code holds: where to connect, as "calendar://192.168.1.20:47800".
-#define PROTOCOL_LINK_PREFIX "calendar://"
+// What the desktop's QR code holds: where to connect, as "zeman://192.168.1.20:47800".
+#define PROTOCOL_LINK_PREFIX "zeman://"
 enum {
     // The prefix, "255.255.255.255:65535" and the terminator, rounded up.
     PROTOCOL_LINK_SIZE = 48,

@@ -3,7 +3,7 @@
      (hasCode="false"). Portrait only, because the phone layout is built for it. Cleartext
      traffic is allowed because the app talks plain TCP to the desktop on the local network. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.calendar.mobile"
+    package="com.zeman.mobile"
     android:versionCode="2"
     android:versionName="1.1">
 
@@ -15,7 +15,7 @@
     <uses-feature android:glEsVersion="0x00020000" android:required="true" />
 
     <application
-        android:label="Calendar"
+        android:label="Zeman"
         android:icon="@mipmap/ic_launcher"
         android:hasCode="false"
         android:usesCleartextTraffic="true"

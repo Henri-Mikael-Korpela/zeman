@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
     // Full screen, at the display's own resolution.
-    InitWindow(0, 0, "Calendar");
+    InitWindow(0, 0, "Zeman");
     SetTargetFPS(60);
     static Phone phone;
     android_input_install(&phone.input);

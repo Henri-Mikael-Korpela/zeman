@@ -1,11 +1,11 @@
-# Calendar
+# Zeman
 
 ## Project structure
 
 - `desktop/` - the desktop app (Windows). It keeps the calendar in an SQLite database and serves it to phones on the same local network.
 - `android/` - the Android app. It shows and edits the desktop app's calendar over the network; it keeps no data of its own.
 - `shared/` - code both apps compile: the user interface, dates, events, and the network protocol and client.
-- `assets/` - the application icon: `calendar-app.ico` goes into the desktop executable (window, taskbar and file icon), and the Android build draws its launcher icons from `calendar-app.png`. Replace both files to change the icon.
+- `assets/` - the application icon: `zeman-app.ico` goes into the desktop executable (window, taskbar and file icon), and the Android build draws its launcher icons from `zeman-app.png`. Replace both files to change the icon.
 - `cmake/dependencies.cmake` - downloads raylib 5.5, raygui 4.0, SQLite 3.51.0, the [Rubik](https://fonts.google.com/specimen/Rubik) font (with its SIL Open Font License), Nayuki's [QR code generator](https://github.com/nayuki/QR-Code-generator) 1.8.0 and the [quirc](https://github.com/dlbeer/quirc) 1.2 QR decoder into `external/`, once; after that both builds are offline.
 
 ## Desktop app
@@ -23,14 +23,14 @@ cmake --preset mingw-release
 cmake --build --preset mingw-release
 ```
 
-The executable is written to `desktop/build/calendar.exe`, with the fonts it needs in `desktop/build/fonts`. Use the `mingw-debug` preset for a debug build in `desktop/build-debug/`. Without presets, pass the generator explicitly, otherwise CMake on Windows falls back to NMake:
+The executable is written to `desktop/build/zeman.exe`, with the fonts it needs in `desktop/build/fonts`. Use the `mingw-debug` preset for a debug build in `desktop/build-debug/`. Without presets, pass the generator explicitly, otherwise CMake on Windows falls back to NMake:
 
 ```sh
 cmake -S desktop -B desktop/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build desktop/build
 ```
 
-`calendar.exe --port PORT` serves phones on another port than 47800, for example when something else uses it; the QR code and the address shown carry the port. `calendar.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
+`zeman.exe --port PORT` serves phones on another port than 47800, for example when something else uses it; the QR code and the address shown carry the port. `zeman.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
 
 The navigation on the left switches between **Calendar**, **Problems** and **Connected Devices**. Problems shows every problem in four columns, from the least to the most complete: No planned tasks, Planned, Partly completed and Completed, each with how many problems it holds. Connected Devices shows the QR code that phones scan to connect, the address to type instead, and the phones connected now.
 
@@ -46,7 +46,7 @@ build.bat
 
 The first run downloads a JDK, the Android SDK and the NDK into `android/tools` (about 1.5 GB) and asks you to accept the Android SDK licenses (`build.bat -AcceptLicenses` accepts them without asking). Nothing is installed system-wide; CMake, which the desktop build needs anyway, is the only outside tool. Later builds take seconds.
 
-The result is `android/build/calendar.apk`, for 64-bit ARM phones running Android 7.0 or newer. Copy it to the phone and open it there; Android asks to allow installing apps from that source. The APK is signed with a key made on the first build and kept in `android/keystore/` (not committed); keep it, because Android installs an update only when it is signed with the same key.
+The result is `android/build/zeman.apk`, for 64-bit ARM phones running Android 7.0 or newer. Copy it to the phone and open it there; Android asks to allow installing apps from that source. The APK is signed with a key made on the first build and kept in `android/keystore/` (not committed); keep it, because Android installs an update only when it is signed with the same key.
 
 ### Connecting
 
@@ -90,4 +90,4 @@ The **Month**, **Week** and **Day** buttons at the top choose how many days the 
 
 Keys: arrows move by a day or a week, Page Up/Page Down move to the previous or next month, week or day, M, W and D switch between month, week and day, Home jumps to today, Tab moves between form fields, and Escape cancels the form. In a form field being typed into, Ctrl+V pastes at the cursor (line breaks become spaces), and Ctrl+C and Ctrl+X copy or cut the whole field, because the text boxes have no selection.
 
-Events are stored in `calendar.db`, an SQLite database next to the desktop executable (`desktop/build/calendar.db`). Deleting the build directory deletes the events. Databases from earlier versions are upgraded automatically when opened.
+Events are stored in `zeman.db`, an SQLite database next to the desktop executable (`desktop/build/zeman.db`). Deleting the build directory deletes the events. Databases from earlier versions are upgraded automatically when opened.

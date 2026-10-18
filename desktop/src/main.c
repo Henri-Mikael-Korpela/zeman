@@ -80,12 +80,12 @@ int main(int argc, char **argv) {
     Options options = { .connect_host = "", .connect_port = PROTOCOL_PORT_DEFAULT,
                         .port = PROTOCOL_PORT_DEFAULT };
     if (!options_parse(argc, argv, &options)) {
-        fprintf(stderr, "Usage: calendar [--port PORT | --connect ADDRESS[:PORT]]\n");
+        fprintf(stderr, "Usage: zeman [--port PORT | --connect ADDRESS[:PORT]]\n");
         return 1;
     }
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
     InitWindow(WINDOW_WIDTH_PIXELS, WINDOW_HEIGHT_PIXELS,
-               options.connect_host[0] != '\0' ? "Calendar (client)" : "Calendar");
+               options.connect_host[0] != '\0' ? "Zeman (client)" : "Zeman");
     SetWindowMinSize(WINDOW_WIDTH_PIXELS_MIN, WINDOW_HEIGHT_PIXELS_MIN);
     SetTargetFPS(60);
     // Escape cancels the event form; closing the window stays with the window controls.
@@ -132,7 +132,7 @@ static void desktop_open(Desktop *desktop, const Options *options) {
     // Beside the executable: the app has no settings or installer, so this is the one place
     // that is both writable and predictable.
     char path[PATH_SIZE];
-    int written = snprintf(path, sizeof(path), "%scalendar.db", GetApplicationDirectory());
+    int written = snprintf(path, sizeof(path), "%szeman.db", GetApplicationDirectory());
     assert(written > 0 && written < (int)sizeof(path));
     desktop->store_open = local_backend_open(&desktop->local, path);
     desktop->backend = local_backend(&desktop->local);
