@@ -48,6 +48,7 @@ add_executable(calendar
     src/devices_view.c
     src/event_store.c
     src/local_backend.c
+    src/problems_view.c
     src/server.c
     src/raygui_impl.c
     "${SHARED_DIR}/app.c"

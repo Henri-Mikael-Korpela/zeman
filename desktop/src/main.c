@@ -13,6 +13,7 @@
 #include "client.h"
 #include "devices_view.h"
 #include "local_backend.h"
+#include "problems_view.h"
 #include "protocol.h"
 #include "server.h"
 
@@ -33,12 +34,14 @@ enum {
 
 typedef enum View {
     VIEW_CALENDAR,
+    VIEW_PROBLEMS,
     VIEW_DEVICES,
     VIEW_COUNT,
 } View;
 
 // Navigation items, top to bottom, indexed by View.
-static const char *const view_names[VIEW_COUNT] = { "Calendar", "Connected Devices" };
+static const char *const view_names[VIEW_COUNT] = { "Calendar", "Problems",
+                                                    "Connected Devices" };
 
 typedef struct Options {
     char connect_host[CLIENT_HOST_SIZE];  // Empty unless --connect was given
@@ -53,6 +56,7 @@ typedef struct Desktop {
     Server server;
     Client client;
     Devices_View devices;
+    Problems_View problems;
     Backend backend;
     View view;
     bool client_mode;  // Without a database, server or navigation; see main
@@ -116,6 +120,7 @@ static void desktop_open(Desktop *desktop, const Options *options) {
     desktop->store_open = true;
     desktop->view = VIEW_CALENDAR;
     desktop->info[0] = '\0';
+    problems_view_init(&desktop->problems);
     if (desktop->client_mode) {
         client_init(&desktop->client);
         client_set_server(&desktop->client, options->connect_host, options->connect_port);
@@ -168,6 +173,9 @@ static void desktop_frame(Desktop *desktop, App *app) {
     switch (desktop->view) {
     case VIEW_CALENDAR:
         app_frame(app, content);
+        break;
+    case VIEW_PROBLEMS:
+        problems_view_draw(&desktop->problems, &desktop->backend, app, content);
         break;
     case VIEW_DEVICES:
         devices_view_draw(&desktop->devices, &desktop->server, app, content);

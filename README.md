@@ -32,7 +32,7 @@ cmake --build desktop/build
 
 `calendar.exe --port PORT` serves phones on another port than 47800, for example when something else uses it; the QR code and the address shown carry the port. `calendar.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
 
-The navigation on the left switches between **Calendar** and **Connected Devices**. Connected Devices shows the QR code that phones scan to connect, the address to type instead, and the phones connected now.
+The navigation on the left switches between **Calendar**, **Problems** and **Connected Devices**. Problems shows every problem in four columns, from the least to the most complete: No planned tasks, Planned, Partly completed and Completed, each with how many problems it holds. Connected Devices shows the QR code that phones scan to connect, the address to type instead, and the phones connected now.
 
 ## Android app
 

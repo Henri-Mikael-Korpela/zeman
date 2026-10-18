@@ -56,8 +56,8 @@ enum {
     DESCRIPTION_LINES_MAX = 3,
     // Day number and creation markers share the top line of a cell; bars start below it.
     CELL_TOP_LINE_PIXELS = 32,
-    EVENT_BAR_HEIGHT_PIXELS = 19,
-    EVENT_BAR_GAP_PIXELS = 2,
+    EVENT_BAR_HEIGHT_PIXELS = APP_BAR_HEIGHT_PIXELS,
+    EVENT_BAR_GAP_PIXELS = APP_BAR_GAP_PIXELS,
     // Four small lines, with 8 pixels above and below.
     EVENT_CARD_HEIGHT_PIXELS = 8 + 4 * TEXT_LINE_HEIGHT_PIXELS_SMALL + 8,
     EVENT_CARD_GAP_PIXELS = 8,
@@ -1463,6 +1463,11 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
     float left = bar_slot.x + (starts_here ? 4.0f : 0.0f);
     float right = bar_slot.x + bar_slot.width - (ends_here ? 4.0f : 0.0f);
     Rectangle bar = { left, bar_slot.y, right - left, bar_slot.height };
+    // A problem is one day long, so it is always labelled; the problems view draws it alike.
+    if (event->kind == EVENT_KIND_PROBLEM) {
+        app_draw_problem_bar(app, event->title, event->problem_done, bar);
+        return;
+    }
     if (task) {
         DrawRectangleRec(bar, Fade(color, done ? TASK_DONE_FILL_ALPHA : TASK_FILL_ALPHA));
         draw_bar_outline(bar, starts_here, ends_here,
@@ -1481,20 +1486,12 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
         time_format(event->start_minute, time, sizeof(time));
         snprintf(label, sizeof(label), "%s %s", time, event->title);
     } else {
-        // A problem has no time; its "!" marks it even where its color is hard to tell apart.
-        // A done problem has a tick drawn instead, below.
-        const bool open_problem = event->kind == EVENT_KIND_PROBLEM && !event->problem_done;
-        snprintf(label, sizeof(label), "%s%s", open_problem ? "! " : "", event->title);
+        snprintf(label, sizeof(label), "%s", event->title);
     }
 
     float text_x = bar.x + 4;
     Color text_color = WHITE;
     scissor_begin(&app->fonts, bar.x, bar.y, bar.width, bar.height);
-    if (event->problem_done) {
-        Rectangle tick = { bar.x + 4, bar.y + 4, 11, 11 };
-        draw_tick(tick, 2.0f, WHITE);
-        text_x = tick.x + tick.width + 4;
-    }
     if (task) {
         Rectangle box = { bar.x + 4, bar.y + 4, 11, 11 };
         draw_check_mark(box, done, color);
@@ -1510,6 +1507,27 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
         DrawLineEx((Vector2){ text_x, middle_y }, (Vector2){ text_x + width, middle_y }, 1.5f,
                    text_color);
     }
+    scissor_end(&app->fonts);
+}
+
+// A problem has no time; its "!" marks it even where its color is hard to tell apart, and a
+// done problem has a tick instead.
+void app_draw_problem_bar(const App *app, const char *title, bool done, Rectangle bar) {
+    assert(bar.width > 0.0f);
+    assert(bar.height > 0.0f);
+    const Text_Style *style = &app->fonts.small;
+    DrawRectangleRec(bar, done ? problem_done_color : problem_color);
+    char label[TEXT_LINE_SIZE];
+    snprintf(label, sizeof(label), "%s%s", done ? "" : "! ", title);
+    float text_x = bar.x + 4;
+    scissor_begin(&app->fonts, bar.x, bar.y, bar.width, bar.height);
+    if (done) {
+        Rectangle tick = { bar.x + 4, bar.y + 4, 11, 11 };
+        draw_tick(tick, 2.0f, WHITE);
+        text_x = tick.x + tick.width + 4;
+    }
+    // Centered vertically in the bar.
+    draw_text(style, label, text_x, bar.y + (bar.height - style->size_pixels) / 2, WHITE);
     scissor_end(&app->fonts);
 }
 

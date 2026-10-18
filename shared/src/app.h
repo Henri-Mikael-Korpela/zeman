@@ -23,6 +23,12 @@ typedef struct App_Config {
 
 typedef struct App App;
 
+enum {
+    // One entry in the calendar's day cells, and in other views that list entries the same way.
+    APP_BAR_HEIGHT_PIXELS = 19,
+    APP_BAR_GAP_PIXELS = 2,
+};
+
 // Text styles for screens drawn outside the calendar, such as the desktop's navigation, so that
 // they look the same as the calendar.
 typedef enum App_Text {
@@ -43,6 +49,9 @@ void app_frame(App *app, Rectangle area);
 // scale (layout pixels), outside app_frame.
 void app_draw_text(const App *app, App_Text style, const char *text, float x, float y);
 float app_measure_text(const App *app, App_Text style, const char *text);
+// Draws a problem as the calendar does in its day cells, in layout pixels outside app_frame:
+// red with a "!" while open, green with a check mark once done.
+void app_draw_problem_bar(const App *app, const char *title, bool done, Rectangle bar);
 // Shown first in the status bar for as long as the app runs, for example where phones connect.
 void app_set_info(App *app, const char *info);
 // Shown in the status bar until the user moves to another day.
