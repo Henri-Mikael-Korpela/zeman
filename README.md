@@ -86,7 +86,7 @@ To delete an event, press **Delete** on its card and confirm; deleting a repeati
 Each event records when it was created:
 
 - A colored dot in a day cell marks the day an event was created.
-- The dot of the selected event or task is ringed, and its card shows how long before its start it was created (for a repeating event, before the occurrence on the selected day).
+- The dot of the selected event or task is ringed, and its card shows when it was created and how long ago, such as `Created 18 Oct 2026, 20:47 (yesterday)`: minutes and hours for the first hours, then "today", "yesterday", days, "last week", weeks, "last month", months, "last year" and years.
 
 The **Month**, **Week** and **Day** buttons at the top choose how many days the calendar shows (on a phone, in a row under the header). The arrow buttons, Page Up/Page Down, the mouse wheel over the calendar and sideways swipes on a phone move by that range.
 

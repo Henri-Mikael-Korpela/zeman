@@ -15,6 +15,8 @@ enum {
     MINUTES_PER_DAY = 24 * 60,
     // Minute of day for a date that has no time of day.
     TIME_NONE = -1,
+    // The longest age text, "11 months ago" or "59 minutes ago", plus the terminator, with room.
+    DATE_TIME_AGE_SIZE = 24,
 };
 
 // A date in the proleptic Gregorian calendar, in local time.
@@ -24,7 +26,20 @@ typedef struct Date {
     int32_t day;    // 1 ... days_in_month(year, month)
 } Date;
 
+// A moment in local time, to the minute.
+typedef struct Date_Time {
+    Date date;
+    int32_t minute_of_day;  // 0 ... MINUTES_PER_DAY - 1
+} Date_Time;
+
 Date date_today(void);
+// The date and the time of day from one reading of the clock, so that they never straddle
+// midnight the way two separate calls could.
+Date_Time date_time_now(void);
+// How long ago created was, as of now, in words: "just now", "5 minutes ago", "2 hours ago",
+// "today", "yesterday", "3 days ago", "last week", "2 weeks ago", "last month", "5 months ago",
+// "last year", "3 years ago". A moment in the future, from clocks that disagree, is "just now".
+void date_time_format_age(Date_Time created, Date_Time now, char *buffer, size_t buffer_size);
 bool date_is_valid(Date date);
 bool date_equal(Date a, Date b);
 int32_t days_in_month(int32_t year, int32_t month);

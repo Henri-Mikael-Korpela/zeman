@@ -52,8 +52,10 @@ enum {
     CELL_TOP_LINE_PIXELS = 32,
     EVENT_BAR_HEIGHT_PIXELS = APP_BAR_HEIGHT_PIXELS,
     EVENT_BAR_GAP_PIXELS = APP_BAR_GAP_PIXELS,
-    // Four small lines, with 8 pixels above and below.
-    EVENT_CARD_HEIGHT_PIXELS = 8 + 4 * TEXT_LINE_HEIGHT_PIXELS_SMALL + 8,
+    // Three small lines (title, dates, creation), with 8 pixels above and below.
+    EVENT_CARD_HEIGHT_PIXELS = 8 + 3 * TEXT_LINE_HEIGHT_PIXELS_SMALL + 8,
+    // While asking to confirm a delete, a card shows its title, the question and the buttons.
+    EVENT_CARD_CONFIRM_HEIGHT_PIXELS = 8 + 2 * TEXT_LINE_HEIGHT_PIXELS_SMALL + 32 + 8,
     EVENT_CARD_GAP_PIXELS = 8,
     CREATION_MARKER_RADIUS_PIXELS = 5,
     // Room kept free for the day number, and today's circle around it, left of the creation
@@ -173,10 +175,6 @@ static const Color event_colors[] = {
     { 180, 60, 140, 255 },   // Magenta
 };
 enum { EVENT_COLOR_COUNT = sizeof(event_colors) / sizeof(event_colors[0]) };
-
-// An event color is used as text on a dark card only brightened by this factor (raylib's
-// ColorBrightness), because the mid-tones above are too dark to read on their own there.
-static const float EVENT_TEXT_BRIGHTNESS = 0.4f;
 
 // Light, because error text is drawn on the dark surfaces, not on a bar.
 static const Color error_color = { 248, 113, 113, 255 };
@@ -307,6 +305,7 @@ typedef struct App {
     int64_t event_focused_id;       // Selected item on the panel, ringed in the grid, or 0
     int64_t event_delete_id;        // Event waiting for the user to confirm deleting, or 0
     Date today;
+    int32_t now_minute;  // Minute of day, read from the clock together with today
     Date selected;
     Date events_month;              // First day of the month that events[] was loaded for
     // First day shown, set by app_sync. The six weeks loaded for a month contain every week and
@@ -407,7 +406,7 @@ static void draw_panel_events_list(App *app, Rectangle list);
 static void scroll_update(Scroll *scroll, Rectangle list, float content_height);
 static void draw_scrollbar(Rectangle list, float content_height, float offset_pixels);
 static bool draw_panel_event_card(App *app, const Event *event, Rectangle card);
-static void draw_panel_event_card_details(const Fonts *fonts, const Event *event,
+static void draw_panel_event_card_details(const Fonts *fonts, const Event *event, Date_Time now,
                                           Rectangle card);
 static void draw_panel_legend(const Fonts *fonts, Rectangle area);
 static void draw_panel_form(App *app, Rectangle body);
@@ -428,7 +427,8 @@ static void form_open_edit(Form *form, const Event *event);
 static void form_close(Form *form);
 static int32_t form_field_next(const Form *form, bool backwards);
 static bool form_field_visible(const Form *form, int32_t field);
-static float event_card_height(const Fonts *fonts, const Event *event, float card_width);
+static float event_card_height(const Fonts *fonts, const Event *event, bool confirming,
+                               float card_width);
 static Text_Lines text_wrap(const Text_Style *style, const char *text, float width_pixels);
 static bool text_line_fits(const Text_Style *style, const char *text, int32_t length,
                            float width_pixels);
@@ -442,10 +442,10 @@ static bool event_created_on_day(const Event *event, int32_t day_number);
 static Color event_color(const Event *event);
 static void event_format_range(const Event *event, char *buffer, size_t buffer_size);
 static void event_format_range_dates(const Event *event, char *buffer, size_t buffer_size);
-static void event_format_created(const Event *event, char *buffer, size_t buffer_size);
+static void event_format_created(const Event *event, Date_Time now, char *buffer,
+                                 size_t buffer_size);
 static void event_format_location(const Event *event, char *buffer, size_t buffer_size);
 static void text_copy_trimmed(char *buffer, size_t buffer_size, const char *text);
-static void event_format_lead(const Event *event, char *buffer, size_t buffer_size);
 static void format_date_time_short(Date date, int32_t minute_of_day, char *buffer,
                                    size_t buffer_size);
 static void theme_apply(void);
@@ -479,7 +479,9 @@ App *app_create(Backend *backend, const App_Config *config) {
         snprintf(app.status, sizeof(app.status), "Rubik font not found: using the default.");
     }
 
-    app.today = date_today();
+    const Date_Time now = date_time_now();
+    app.today = now.date;
+    app.now_minute = now.minute_of_day;
     app.selected = app.today;
     app.events_month = (Date){ app.today.year, app.today.month, 1 };
     app.events_stale = true;
@@ -724,10 +726,12 @@ static void app_select(App *app, Date date) {
     app->status[0] = '\0';
 }
 
-// Brings derived state up to date before drawing: today's date, the loaded events and the
+// Brings derived state up to date before drawing: the date and time, the loaded events and the
 // focused event, which is always one of the events on the selected date.
 static void app_sync(App *app) {
-    app->today = date_today();
+    const Date_Time now = date_time_now();
+    app->today = now.date;
+    app->now_minute = now.minute_of_day;
     Date month = { app->selected.year, app->selected.month, 1 };
     // A new revision means a change from anywhere: this app, the desktop, or another phone.
     uint64_t revision = backend_revision(app->backend);
@@ -867,7 +871,7 @@ static void app_form_submit(App *app) {
     }
 
     form_close(&app->form);
-    // Show the event at once, focused, so that its lead time is visible. An edited event that
+    // Show the event at once, focused, so that its card is visible. An edited event that
     // still occurs on the selected day stays there, rather than jumping to its first start.
     int32_t start_day = 0;
     if (!event_occurrence_on_day(&event, date_to_day_number(app->selected), &start_day)) {
@@ -1679,7 +1683,8 @@ static float draw_panel_events_height(const App *app, float card_width) {
         if (height > 0.0f) {
             height += EVENT_CARD_GAP_PIXELS;
         }
-        height += event_card_height(&app->fonts, &app->events[i], card_width);
+        height += event_card_height(&app->fonts, &app->events[i],
+                                    app->events[i].id == app->event_delete_id, card_width);
     }
     assert(height >= 0.0f);
     return height;
@@ -1755,14 +1760,15 @@ static void draw_panel_events_list(App *app, Rectangle list) {
         if (!event_occurrence_on_day(event, selected_day, &start_day)) {
             continue;
         }
-        float card_height = event_card_height(&app->fonts, event, list.width);
+        float card_height = event_card_height(&app->fonts, event,
+                                              event->id == app->event_delete_id, list.width);
         Rectangle card = { list.x, y, list.width, card_height };
         y += card_height + EVENT_CARD_GAP_PIXELS;
         // Cards scrolled wholly out of the list can be neither seen nor clicked.
         if (!CheckCollisionRecs(card, list)) {
             continue;
         }
-        // The card shows this day's occurrence, so its dates and lead time are for this day.
+        // The card shows this day's occurrence, so its dates are for this day.
         Event occurrence = event_occurrence_at(event, start_day);
         bool clicked = draw_panel_event_card(app, &occurrence, card);
         // Only a press that began in the list opens a card, not one dragged in from elsewhere.
@@ -1806,7 +1812,7 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     const Rectangle delete_button = { card.x + card.width - 82, card.y + 6, 72, 24 };
     const Rectangle checkbox = { x, card.y + 8, 16, 16 };
     const Text_Style *title_style = &app->fonts.small_strong;
-    const Rectangle confirm_button = { x, card.y + card.height - 44, 110, 32 };
+    const Rectangle confirm_button = { x, card.y + card.height - 40, 110, 32 };
     const Rectangle cancel_button = { x + 122, confirm_button.y, 110, 32 };
     const bool task = event->kind == EVENT_KIND_TASK;
     const int32_t start_day = date_to_day_number(event->start_date);
@@ -1855,7 +1861,8 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
         return false;
     }
 
-    draw_panel_event_card_details(&app->fonts, event, card);
+    draw_panel_event_card_details(&app->fonts, event, (Date_Time){ app->today, app->now_minute },
+                                  card);
     if (task) {
         bool checked = done;
         GuiCheckBox(checkbox, NULL, &checked);
@@ -1872,9 +1879,9 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     return hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && !on_button;
 }
 
-// The lines below the title: dates and repeat, location, description, repeat end, creation,
-// and lead time. A problem shows only its kind, description and creation.
-static void draw_panel_event_card_details(const Fonts *fonts, const Event *event,
+// The lines below the title: dates and repeat, location, description, repeat end, and creation,
+// with how long ago that was. A problem shows only its kind, description and creation.
+static void draw_panel_event_card_details(const Fonts *fonts, const Event *event, Date_Time now,
                                           Rectangle card) {
     const float x = card.x + 16;
     const float line = (float)TEXT_LINE_HEIGHT_PIXELS_SMALL;
@@ -1914,14 +1921,8 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
         draw_text(style, text, x, y, style_color(TEXT_COLOR_NORMAL));
     }
     y += line;
-    event_format_created(event, text, sizeof(text));
+    event_format_created(event, now, text, sizeof(text));
     draw_text(style, text, x, y, style_color(TEXT_COLOR_DISABLED));
-    // A problem falls on the day it was created, so it has no lead time to show.
-    if (event->kind != EVENT_KIND_PROBLEM) {
-        y += line;
-        event_format_lead(event, text, sizeof(text));
-        draw_text(style, text, x, y, ColorBrightness(event_color(event), EVENT_TEXT_BRIGHTNESS));
-    }
     scissor_end(fonts);
 }
 
@@ -2513,15 +2514,19 @@ static bool event_created_on_day(const Event *event, int32_t day_number) {
 
 // One more line for a location, one for a repeating event that ends, to say when, and one per
 // line of description.
-static float event_card_height(const Fonts *fonts, const Event *event, float card_width) {
+static float event_card_height(const Fonts *fonts, const Event *event, bool confirming,
+                               float card_width) {
     int32_t extra_lines = (event->location.id != 0 ? 1 : 0) + (event->repeat_has_end ? 1 : 0);
-    // A problem has no lead time line.
-    extra_lines -= event->kind == EVENT_KIND_PROBLEM ? 1 : 0;
     if (event->description[0] != '\0') {
         float width = card_width - (float)CARD_TEXT_MARGIN_PIXELS;
         extra_lines += text_wrap(&fonts->small, event->description, width).count;
     }
-    return (float)(EVENT_CARD_HEIGHT_PIXELS + extra_lines * TEXT_LINE_HEIGHT_PIXELS_SMALL);
+    float height = (float)(EVENT_CARD_HEIGHT_PIXELS + extra_lines * TEXT_LINE_HEIGHT_PIXELS_SMALL);
+    // A confirming card hides its details, but needs room for the question and the buttons.
+    if (confirming && height < (float)EVENT_CARD_CONFIRM_HEIGHT_PIXELS) {
+        height = (float)EVENT_CARD_CONFIRM_HEIGHT_PIXELS;
+    }
+    return height;
 }
 
 // Breaks text at spaces into at most DESCRIPTION_LINES_MAX lines that fit width_pixels, and
@@ -2667,43 +2672,17 @@ static void text_copy_trimmed(char *buffer, size_t buffer_size, const char *text
     buffer[length] = '\0';
 }
 
-static void event_format_created(const Event *event, char *buffer, size_t buffer_size) {
+// "Created 18 Oct 2026, 20:47 (yesterday)": the exact moment, and how long ago it was.
+static void event_format_created(const Event *event, Date_Time now, char *buffer,
+                                 size_t buffer_size) {
     char time[TIME_TEXT_SIZE];
     time_format(event->created_minute, time, sizeof(time));
-    snprintf(buffer, buffer_size, "Created %" PRId32 " %s %" PRId32 ", %s",
+    char age[DATE_TIME_AGE_SIZE];
+    date_time_format_age((Date_Time){ event->created_date, event->created_minute }, now, age,
+                         sizeof(age));
+    snprintf(buffer, buffer_size, "Created %" PRId32 " %s %" PRId32 ", %s (%s)",
              event->created_date.day, month_short_name(event->created_date.month),
-             event->created_date.year, time);
-}
-
-// Days between creation and start. On the start day itself, hours and minutes when the
-// start has a time, because "0 days" says nothing. A repeating event is measured to the
-// occurrence shown, which "this date" says, because "start" would suggest the first one.
-static void event_format_lead(const Event *event, char *buffer, size_t buffer_size) {
-    const char *target = event->repeat_unit == REPEAT_NONE ? "start" : "this date";
-    int32_t lead_days = date_to_day_number(event->start_date) -
-                        date_to_day_number(event->created_date);
-    if (lead_days > 0) {
-        snprintf(buffer, buffer_size, "%" PRId32 " day%s before %s", lead_days,
-                 lead_days == 1 ? "" : "s", target);
-        return;
-    }
-    if (lead_days < 0) {
-        snprintf(buffer, buffer_size, "Added %" PRId32 " day%s after %s", -lead_days,
-                 lead_days == -1 ? "" : "s", target);
-        return;
-    }
-    if (event->start_minute == TIME_NONE) {
-        snprintf(buffer, buffer_size, "%s",
-                 event->repeat_unit == REPEAT_NONE ? "Created on the start day"
-                                                   : "Created on this date");
-        return;
-    }
-
-    int32_t lead_minutes = event->start_minute - event->created_minute;
-    int32_t magnitude = lead_minutes < 0 ? -lead_minutes : lead_minutes;
-    const char *direction = lead_minutes < 0 ? "after" : "before";
-    snprintf(buffer, buffer_size, "%" PRId32 " h %02" PRId32 " min %s %s", magnitude / 60,
-             magnitude % 60, direction, target);
+             event->created_date.year, time, age);
 }
 
 // "15 Oct" or "15 Oct 09:00".

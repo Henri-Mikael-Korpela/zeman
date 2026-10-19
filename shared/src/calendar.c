@@ -36,14 +36,82 @@ static bool is_leap_year(int32_t year);
 static bool parse_digits(const char *text, int32_t digit_count, int32_t *number);
 
 Date date_today(void) {
+    return date_time_now().date;
+}
+
+Date_Time date_time_now(void) {
     time_t now = time(NULL);
     assert(now != (time_t)-1);
     const struct tm *local = localtime(&now);
     assert(local != NULL);
 
-    Date today = { local->tm_year + 1900, local->tm_mon + 1, local->tm_mday };
-    assert(date_is_valid(today));
-    return today;
+    Date_Time moment = {
+        .date = { local->tm_year + 1900, local->tm_mon + 1, local->tm_mday },
+        .minute_of_day = local->tm_hour * 60 + local->tm_min,
+    };
+    assert(date_is_valid(moment.date));
+    assert(moment.minute_of_day >= 0);
+    assert(moment.minute_of_day < MINUTES_PER_DAY);
+    return moment;
+}
+
+// "1 hour ago", "2 hours ago".
+static void format_age_count(char *buffer, size_t buffer_size, int64_t count, const char *unit) {
+    assert(count >= 1);
+    snprintf(buffer, buffer_size, "%" PRId64 " %s%s ago", count, unit, count == 1 ? "" : "s");
+}
+
+// Whole months from earlier to later: the day of the month counts, so 31 Jan to 28 Feb is not
+// yet a month.
+static int32_t months_between(Date earlier, Date later) {
+    int32_t months = (later.year - earlier.year) * 12 + (later.month - earlier.month);
+    return later.day < earlier.day ? months - 1 : months;
+}
+
+// Minutes and hours while the time of day matters, up to a quarter of a day; after that days,
+// weeks, months and years by the calendar, because "yesterday" is what people look for, and
+// "20 hours ago" would not tell them which day.
+void date_time_format_age(Date_Time created, Date_Time now, char *buffer, size_t buffer_size) {
+    assert(date_is_valid(created.date));
+    assert(date_is_valid(now.date));
+    assert(created.minute_of_day >= 0 && created.minute_of_day < MINUTES_PER_DAY);
+    assert(now.minute_of_day >= 0 && now.minute_of_day < MINUTES_PER_DAY);
+    assert(buffer_size >= DATE_TIME_AGE_SIZE);
+
+    const int64_t days = (int64_t)date_to_day_number(now.date) -
+                         date_to_day_number(created.date);
+    const int64_t minutes = days * MINUTES_PER_DAY + now.minute_of_day - created.minute_of_day;
+    if (minutes < 1) {
+        snprintf(buffer, buffer_size, "just now");
+    } else if (minutes < 60) {
+        format_age_count(buffer, buffer_size, minutes, "minute");
+    } else if (minutes < 6 * 60) {
+        format_age_count(buffer, buffer_size, minutes / 60, "hour");
+    } else if (days == 0) {
+        snprintf(buffer, buffer_size, "today");
+    } else if (days == 1) {
+        snprintf(buffer, buffer_size, "yesterday");
+    } else if (days < 7) {
+        format_age_count(buffer, buffer_size, days, "day");
+    } else if (days < 14) {
+        snprintf(buffer, buffer_size, "last week");
+    } else if (days < 30) {
+        format_age_count(buffer, buffer_size, days / 7, "week");
+    } else {
+        // At least 30 days is a month for the text, even when the day of the month says 29 days
+        // and some hours: 1 Mar to 31 Mar.
+        int32_t months = months_between(created.date, now.date);
+        months = months < 1 ? 1 : months;
+        if (months == 1) {
+            snprintf(buffer, buffer_size, "last month");
+        } else if (months < 12) {
+            format_age_count(buffer, buffer_size, months, "month");
+        } else if (months < 24) {
+            snprintf(buffer, buffer_size, "last year");
+        } else {
+            format_age_count(buffer, buffer_size, months / 12, "year");
+        }
+    }
 }
 
 bool date_is_valid(Date date) {
