@@ -109,6 +109,45 @@ static const char *const migrations_sql[] = {
     "    PRIMARY KEY (problem_id, task_id)"
     ");"
     "CREATE INDEX problem_tasks_by_task ON problem_tasks (task_id);",
+    // Opportunities, which tasks are linked to as they are to problems. The table is rebuilt as
+    // for problems, to allow 'opportunity' in kind; an opportunity happens once, so it cannot
+    // repeat. The links table is renamed for both kinds of link target, which it now holds.
+    "CREATE TABLE events_new ("
+    "    id INTEGER PRIMARY KEY,"
+    "    title TEXT NOT NULL CHECK (length(title) > 0),"
+    "    start_date TEXT NOT NULL,"
+    "    start_time TEXT,"
+    "    end_date TEXT NOT NULL,"
+    "    end_time TEXT,"
+    "    created_at TEXT NOT NULL"
+    "        DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime')),"
+    "    repeat_unit TEXT CHECK (repeat_unit IN ('day', 'week', 'month', 'year')),"
+    "    repeat_interval INTEGER NOT NULL DEFAULT 1 CHECK (repeat_interval >= 1),"
+    "    repeat_end_date TEXT"
+    "        CHECK (repeat_end_date IS NULL OR repeat_end_date >= start_date),"
+    "    kind TEXT NOT NULL DEFAULT 'event'"
+    "        CHECK (kind IN ('event', 'task', 'problem', 'opportunity')),"
+    "    location_id INTEGER REFERENCES locations (id) ON DELETE SET NULL,"
+    "    description TEXT NOT NULL DEFAULT '',"
+    "    CHECK (end_date >= start_date),"
+    "    CHECK (kind <> 'problem' OR (start_date = substr(created_at, 1, 10)"
+    "        AND end_date = start_date AND start_time IS NULL AND end_time IS NULL"
+    "        AND repeat_unit IS NULL AND location_id IS NULL)),"
+    "    CHECK (kind <> 'opportunity' OR repeat_unit IS NULL)"
+    ");"
+    "INSERT INTO events_new (id, title, start_date, start_time, end_date, end_time,"
+    "    created_at, repeat_unit, repeat_interval, repeat_end_date, kind, location_id,"
+    "    description)"
+    " SELECT id, title, start_date, start_time, end_date, end_time, created_at, repeat_unit,"
+    "    repeat_interval, repeat_end_date, kind, location_id, description FROM events;"
+    "DROP TABLE events;"
+    "ALTER TABLE events_new RENAME TO events;"
+    "CREATE INDEX events_by_start_date ON events (start_date);"
+    "CREATE INDEX events_by_created_at ON events (created_at);"
+    "ALTER TABLE problem_tasks RENAME TO task_links;"
+    "ALTER TABLE task_links RENAME COLUMN problem_id TO target_id;"
+    "DROP INDEX problem_tasks_by_task;"
+    "CREATE INDEX task_links_by_task ON task_links (task_id);",
 };
 enum { SCHEMA_VERSION = sizeof(migrations_sql) / sizeof(migrations_sql[0]) };
 
@@ -118,7 +157,8 @@ static const char *const repeat_unit_names[REPEAT_UNIT_COUNT] = {
 };
 
 // Text stored in kind, indexed by Event_Kind.
-static const char *const event_kind_names[EVENT_KIND_COUNT] = { "event", "task", "problem" };
+static const char *const event_kind_names[EVENT_KIND_COUNT] = { "event", "task", "problem",
+                                                                 "opportunity" };
 
 typedef enum Statement {
     STATEMENT_INSERT,
@@ -131,8 +171,8 @@ typedef enum Statement {
     STATEMENT_LOCATION_UPSERT,
     STATEMENT_LINK_DELETE,
     STATEMENT_LINK_INSERT,
-    STATEMENT_PROBLEM_TASKS,
-    STATEMENT_TASK_PROBLEMS,
+    STATEMENT_TARGET_TASKS,
+    STATEMENT_TASK_TARGETS,
     STATEMENT_COUNT,
 } Statement;
 
@@ -157,17 +197,17 @@ static const char *const statements_sql[STATEMENT_COUNT] = {
     // A repeating event with an end is visible until its last occurrence ends: the end date
     // plus one occurrence's length.
     // The location comes with each event through a join, so that no second query is needed.
-    // The last column is Event.problem_done: a problem with linked tasks, none of them without
-    // a checked-off occurrence (see Problem_Task). It runs only for problems, which are few.
+    // The last column is Event.tasks_done: a link target with linked tasks, none of them without
+    // a checked-off occurrence (see Linked_Task). It runs only for targets, which are few.
     [STATEMENT_SELECT_RANGE] =
         "SELECT e.id, e.title, e.start_date, e.start_time, e.end_date, e.end_time,"
         "       e.created_at, e.repeat_unit, e.repeat_interval, e.repeat_end_date, e.kind,"
         "       l.id, l.address, l.city, e.description,"
-        "       e.kind = 'problem'"
-        "       AND EXISTS (SELECT 1 FROM problem_tasks pt JOIN events t ON t.id = pt.task_id"
-        "                   WHERE pt.problem_id = e.id AND t.kind = 'task')"
-        "       AND NOT EXISTS (SELECT 1 FROM problem_tasks pt JOIN events t ON t.id = pt.task_id"
-        "                       WHERE pt.problem_id = e.id AND t.kind = 'task'"
+        "       e.kind IN ('problem', 'opportunity')"
+        "       AND EXISTS (SELECT 1 FROM task_links tl JOIN events t ON t.id = tl.task_id"
+        "                   WHERE tl.target_id = e.id AND t.kind = 'task')"
+        "       AND NOT EXISTS (SELECT 1 FROM task_links tl JOIN events t ON t.id = tl.task_id"
+        "                       WHERE tl.target_id = e.id AND t.kind = 'task'"
         "                         AND NOT EXISTS (SELECT 1 FROM task_completions c"
         "                                         WHERE c.event_id = t.id))"
         " FROM events e LEFT JOIN locations l ON l.id = e.location_id"
@@ -189,33 +229,37 @@ static const char *const statements_sql[STATEMENT_COUNT] = {
     [STATEMENT_LOCATION_UPSERT] =
         "INSERT INTO locations (address, city) VALUES (?1, ?2)"
         " ON CONFLICT (address, city) DO UPDATE SET city = excluded.city RETURNING id;",
-    [STATEMENT_LINK_DELETE] = "DELETE FROM problem_tasks WHERE task_id = ?1;",
-    // Inserts nothing unless ?1 is a problem and ?2 a task, so that the caller sees a link to
-    // something deleted, or of the wrong kind, as no row changed.
+    [STATEMENT_LINK_DELETE] = "DELETE FROM task_links WHERE task_id = ?1;",
+    // Inserts nothing unless ?1 is a link target and ?2 a task, so that the caller sees a link
+    // to something deleted, or of the wrong kind, as no row changed.
     [STATEMENT_LINK_INSERT] =
-        "INSERT INTO problem_tasks (problem_id, task_id)"
+        "INSERT INTO task_links (target_id, task_id)"
         " SELECT p.id, t.id FROM events p, events t"
-        " WHERE p.id = ?1 AND p.kind = 'problem' AND t.id = ?2 AND t.kind = 'task';",
+        " WHERE p.id = ?1 AND p.kind IN ('problem', 'opportunity')"
+        "   AND t.id = ?2 AND t.kind = 'task';",
     // Links to an entry that is no longer a task are left out, as if they were not there; the
-    // app removes them when it saves the entry (see Backend_Ops.set_task_problems).
-    [STATEMENT_PROBLEM_TASKS] =
+    // app removes them when it saves the entry (see Backend_Ops.set_task_targets).
+    [STATEMENT_TARGET_TASKS] =
         "SELECT t.id, t.title,"
         "       EXISTS (SELECT 1 FROM task_completions c WHERE c.event_id = t.id)"
-        " FROM problem_tasks l JOIN events t ON t.id = l.task_id"
-        " WHERE l.problem_id = ?1 AND t.kind = 'task'"
+        " FROM task_links l JOIN events t ON t.id = l.task_id"
+        " WHERE l.target_id = ?1 AND t.kind = 'task'"
         " ORDER BY t.start_date, t.id LIMIT ?2;",
-    // Every problem is scanned, which is fine for the thousands of entries a personal calendar
-    // holds. Linked problems come first, so that the LIMIT never cuts one off.
-    [STATEMENT_TASK_PROBLEMS] =
+    // Every target is scanned, which is fine for the thousands of entries a personal calendar
+    // holds. Linked targets come first, so that the LIMIT never cuts one off. ?3 is 1 for
+    // problems only. The deadline comes last, so that an opportunity can show as missed.
+    [STATEMENT_TASK_TARGETS] =
         "SELECT p.id, p.title,"
-        "       EXISTS (SELECT 1 FROM problem_tasks l"
-        "               WHERE l.problem_id = p.id AND l.task_id = ?1) AS linked,"
-        "       (SELECT count(*) FROM problem_tasks l JOIN events t ON t.id = l.task_id"
-        "        WHERE l.problem_id = p.id AND t.kind = 'task'),"
-        "       (SELECT count(*) FROM problem_tasks l JOIN events t ON t.id = l.task_id"
-        "        WHERE l.problem_id = p.id AND t.kind = 'task'"
-        "          AND EXISTS (SELECT 1 FROM task_completions c WHERE c.event_id = t.id))"
-        " FROM events p WHERE p.kind = 'problem'"
+        "       EXISTS (SELECT 1 FROM task_links l"
+        "               WHERE l.target_id = p.id AND l.task_id = ?1) AS linked,"
+        "       (SELECT count(*) FROM task_links l JOIN events t ON t.id = l.task_id"
+        "        WHERE l.target_id = p.id AND t.kind = 'task'),"
+        "       (SELECT count(*) FROM task_links l JOIN events t ON t.id = l.task_id"
+        "        WHERE l.target_id = p.id AND t.kind = 'task'"
+        "          AND EXISTS (SELECT 1 FROM task_completions c WHERE c.event_id = t.id)),"
+        "       p.kind, p.end_date, p.end_time"
+        " FROM events p"
+        " WHERE p.kind = 'problem' OR (p.kind = 'opportunity' AND ?3 = 0)"
         " ORDER BY linked DESC, p.created_at DESC, p.id DESC LIMIT ?2;",
 };
 
@@ -235,16 +279,27 @@ enum {
     COLUMN_LOCATION_ADDRESS,
     COLUMN_LOCATION_CITY,
     COLUMN_DESCRIPTION,
-    COLUMN_PROBLEM_DONE,
+    COLUMN_TASKS_DONE,
+};
+
+// Columns of STATEMENT_TASK_TARGETS.
+enum {
+    TARGET_COLUMN_ID,
+    TARGET_COLUMN_TITLE,
+    TARGET_COLUMN_LINKED,
+    TARGET_COLUMN_TASK_COUNT,
+    TARGET_COLUMN_TASK_DONE_COUNT,
+    TARGET_COLUMN_KIND,
+    TARGET_COLUMN_END_DATE,
+    TARGET_COLUMN_END_TIME,
 };
 
 static bool event_store_fail(Event_Store *store, const char *context);
 static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_count_max);
-static bool event_store_load_problem_tasks_row(sqlite3_stmt *statement, Problem_Task *task);
-static bool event_store_load_task_problems_row(sqlite3_stmt *statement, Task_Problem *problem);
-static bool event_store_set_task_problems_rows(Event_Store *store, int64_t task_id,
-                                               const int64_t *problem_ids,
-                                               int32_t problem_count);
+static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Task *task);
+static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Target *target);
+static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_id,
+                                              const int64_t *target_ids, int32_t target_count);
 static bool event_store_migrate(Event_Store *store);
 static bool event_store_check_foreign_keys(Event_Store *store);
 static bool event_store_migrate_step(Event_Store *store, int32_t version);
@@ -258,8 +313,8 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event);
 static bool column_parse_date(sqlite3_stmt *statement, int column, Date *date);
 static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minute_of_day);
 static bool column_parse_repeat(sqlite3_stmt *statement, Event *event);
-static bool column_parse_kind(sqlite3_stmt *statement, Event *event);
-static bool column_parse_problem(sqlite3_stmt *statement, Event *event);
+static bool column_parse_kind(sqlite3_stmt *statement, int column, int32_t *kind);
+static bool column_parse_target(sqlite3_stmt *statement, Event *event);
 static bool column_parse_location(sqlite3_stmt *statement, Event *event);
 
 bool event_store_open(Event_Store *store, const char *path) {
@@ -488,12 +543,12 @@ int32_t event_store_load_completions(Event_Store *store, Date first, Date last,
     return completion_count;
 }
 
-int32_t event_store_load_problem_tasks(Event_Store *store, int64_t problem_id, Problem_Task *tasks,
+int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Linked_Task *tasks,
                                       int32_t task_count_max, bool *truncated) {
-    assert(problem_id > 0);
+    assert(target_id > 0);
     assert(task_count_max > 0);
-    sqlite3_stmt *statement = store->statements[STATEMENT_PROBLEM_TASKS];
-    int result = bind_id_and_limit(statement, problem_id, task_count_max);
+    sqlite3_stmt *statement = store->statements[STATEMENT_TARGET_TASKS];
+    int result = bind_id_and_limit(statement, target_id, task_count_max);
     int32_t task_count = 0;
     *truncated = false;
     // Bounded by the LIMIT: at most task_count_max + 1 rows come back.
@@ -510,7 +565,7 @@ int32_t event_store_load_problem_tasks(Event_Store *store, int64_t problem_id, P
             *truncated = true;
             break;
         }
-        if (!event_store_load_problem_tasks_row(statement, &tasks[task_count])) {
+        if (!event_store_load_target_tasks_row(statement, &tasks[task_count])) {
             result = SQLITE_MISMATCH;
             break;
         }
@@ -519,25 +574,29 @@ int32_t event_store_load_problem_tasks(Event_Store *store, int64_t problem_id, P
     sqlite3_reset(statement);
     sqlite3_clear_bindings(statement);
     if (result != SQLITE_OK) {
-        event_store_fail(store, "Cannot load the problem's tasks");
+        event_store_fail(store, "Cannot load the linked tasks");
         return -1;
     }
     assert(task_count <= task_count_max);
     return task_count;
 }
 
-int32_t event_store_load_task_problems(Event_Store *store, int64_t task_id, Task_Problem *problems,
-                                       int32_t problem_count_max, bool *truncated) {
+int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool problems_only,
+                                      Link_Target *targets, int32_t target_count_max,
+                                      bool *truncated) {
     assert(task_id >= 0);
-    assert(problem_count_max > 0);
-    sqlite3_stmt *statement = store->statements[STATEMENT_TASK_PROBLEMS];
-    // A task not stored yet has id 0, which no link has, so that no problem comes back linked.
-    int result = bind_id_and_limit(statement, task_id, problem_count_max);
-    int32_t problem_count = 0;
+    assert(target_count_max > 0);
+    sqlite3_stmt *statement = store->statements[STATEMENT_TASK_TARGETS];
+    // A task not stored yet has id 0, which no link has, so that no target comes back linked.
+    int result = bind_id_and_limit(statement, task_id, target_count_max);
+    if (result == SQLITE_OK) {
+        result = sqlite3_bind_int(statement, 3, problems_only ? 1 : 0);
+    }
+    int32_t target_count = 0;
     *truncated = false;
-    // Bounded by the LIMIT: at most problem_count_max + 1 rows come back.
+    // Bounded by the LIMIT: at most target_count_max + 1 rows come back.
     for (int32_t row_index = 0;
-         result == SQLITE_OK && row_index <= problem_count_max; row_index++) {
+         result == SQLITE_OK && row_index <= target_count_max; row_index++) {
         int step = sqlite3_step(statement);
         if (step == SQLITE_DONE) {
             break;
@@ -546,40 +605,41 @@ int32_t event_store_load_task_problems(Event_Store *store, int64_t task_id, Task
             result = step;
             break;
         }
-        if (row_index == problem_count_max) {
+        if (row_index == target_count_max) {
             *truncated = true;
             break;
         }
-        if (!event_store_load_task_problems_row(statement, &problems[problem_count])) {
+        if (!event_store_load_task_targets_row(statement, &targets[target_count])) {
             result = SQLITE_MISMATCH;
             break;
         }
-        problem_count++;
+        assert(!problems_only || targets[target_count].kind == EVENT_KIND_PROBLEM);
+        target_count++;
     }
     sqlite3_reset(statement);
     sqlite3_clear_bindings(statement);
     if (result != SQLITE_OK) {
-        event_store_fail(store, "Cannot load problems");
+        event_store_fail(store, "Cannot load problems and opportunities");
         return -1;
     }
-    assert(problem_count <= problem_count_max);
-    return problem_count;
+    assert(target_count <= target_count_max);
+    return target_count;
 }
 
 // One transaction, so that a link that cannot be made leaves the task's earlier links as they
 // were rather than half replaced.
-bool event_store_set_task_problems(Event_Store *store, int64_t task_id, const int64_t *problem_ids,
-                                   int32_t problem_count) {
+bool event_store_set_task_targets(Event_Store *store, int64_t task_id, const int64_t *target_ids,
+                                  int32_t target_count) {
     assert(task_id > 0);
-    assert(problem_count >= 0);
-    assert(problem_count <= PROBLEM_LINK_COUNT_MAX);
+    assert(target_count >= 0);
+    assert(target_count <= LINK_COUNT_MAX);
     if (sqlite3_exec(store->database, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
-        return event_store_fail(store, "Cannot save the task's problems");
+        return event_store_fail(store, "Cannot save the task's links");
     }
-    bool ok = event_store_set_task_problems_rows(store, task_id, problem_ids, problem_count);
+    bool ok = event_store_set_task_targets_rows(store, task_id, target_ids, target_count);
     if (ok) {
         if (sqlite3_exec(store->database, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
-            ok = event_store_fail(store, "Cannot save the task's problems");
+            ok = event_store_fail(store, "Cannot save the task's links");
         }
     }
     if (!ok) {
@@ -590,32 +650,32 @@ bool event_store_set_task_problems(Event_Store *store, int64_t task_id, const in
 }
 
 // Deletes the task's links, then inserts the new ones, inside the caller's transaction.
-static bool event_store_set_task_problems_rows(Event_Store *store, int64_t task_id,
-                                               const int64_t *problem_ids,
-                                               int32_t problem_count) {
+static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_id,
+                                              const int64_t *target_ids, int32_t target_count) {
     sqlite3_stmt *statement = store->statements[STATEMENT_LINK_DELETE];
     int result = sqlite3_bind_int64(statement, 1, task_id);
     // No row check: a task may have had no links.
-    if (!event_store_write(store, statement, result, "Cannot save the task's problems", false)) {
+    if (!event_store_write(store, statement, result, "Cannot save the task's links", false)) {
         return false;
     }
     statement = store->statements[STATEMENT_LINK_INSERT];
-    for (int32_t i = 0; i < problem_count; i++) {
-        assert(problem_ids[i] > 0);
+    for (int32_t i = 0; i < target_count; i++) {
+        assert(target_ids[i] > 0);
         for (int32_t j = 0; j < i; j++) {
-            assert(problem_ids[j] != problem_ids[i]); // The caller sends each problem once.
+            assert(target_ids[j] != target_ids[i]); // The caller sends each target once.
         }
-        result = sqlite3_bind_int64(statement, 1, problem_ids[i]);
+        result = sqlite3_bind_int64(statement, 1, target_ids[i]);
         if (result == SQLITE_OK) {
             result = sqlite3_bind_int64(statement, 2, task_id);
         }
-        if (!event_store_write(store, statement, result, "Cannot link the problem", false)) {
+        if (!event_store_write(store, statement, result, "Cannot link the task", false)) {
             return false;
         }
-        // No row means the problem or the task is gone, or not of its kind (see the statement).
+        // No row means the target or the task is gone, or not of its kind (see the statement).
         if (sqlite3_changes(store->database) != 1) {
             snprintf(store->error, sizeof(store->error),
-                     "A chosen problem or the task was deleted, or changed kind, meanwhile.");
+                     "A chosen problem or opportunity, or the task, was deleted or changed kind "
+                     "meanwhile.");
             return false;
         }
     }
@@ -665,12 +725,12 @@ static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_co
 }
 
 // Longer titles from outside this program are cut to fit, as in event_store_load_range_row.
-static bool event_store_load_problem_tasks_row(sqlite3_stmt *statement, Problem_Task *task) {
+static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Task *task) {
     const char *title = (const char *)sqlite3_column_text(statement, 1);
     if (title == NULL || title[0] == '\0') {
         return false;
     }
-    *task = (Problem_Task){
+    *task = (Linked_Task){
         .task_id = sqlite3_column_int64(statement, 0),
         .done = sqlite3_column_int(statement, 2) != 0,
     };
@@ -678,25 +738,34 @@ static bool event_store_load_problem_tasks_row(sqlite3_stmt *statement, Problem_
     return task->task_id > 0;
 }
 
-static bool event_store_load_task_problems_row(sqlite3_stmt *statement, Task_Problem *problem) {
-    const char *title = (const char *)sqlite3_column_text(statement, 1);
+static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Target *target) {
+    const char *title = (const char *)sqlite3_column_text(statement, TARGET_COLUMN_TITLE);
     if (title == NULL || title[0] == '\0') {
         return false;
     }
-    int64_t task_count = sqlite3_column_int64(statement, 3);
-    int64_t task_done_count = sqlite3_column_int64(statement, 4);
-    // Counts that problem_status would reject, which only a hand-edited database could hold.
+    int64_t task_count = sqlite3_column_int64(statement, TARGET_COLUMN_TASK_COUNT);
+    int64_t task_done_count = sqlite3_column_int64(statement, TARGET_COLUMN_TASK_DONE_COUNT);
+    // Counts that target_status would reject, which only a hand-edited database could hold.
     if (task_done_count < 0 || task_done_count > task_count || task_count > INT32_MAX) {
         return false;
     }
-    *problem = (Task_Problem){
-        .problem_id = sqlite3_column_int64(statement, 0),
+    *target = (Link_Target){
+        .target_id = sqlite3_column_int64(statement, TARGET_COLUMN_ID),
         .task_count = (int32_t)task_count,
         .task_done_count = (int32_t)task_done_count,
-        .linked = sqlite3_column_int(statement, 2) != 0,
+        .linked = sqlite3_column_int(statement, TARGET_COLUMN_LINKED) != 0,
     };
-    snprintf(problem->title, sizeof(problem->title), "%s", title);
-    return problem->problem_id > 0;
+    snprintf(target->title, sizeof(target->title), "%s", title);
+    if (!column_parse_kind(statement, TARGET_COLUMN_KIND, &target->kind)) {
+        return false;
+    }
+    if (!column_parse_date(statement, TARGET_COLUMN_END_DATE, &target->end_date)) {
+        return false;
+    }
+    if (!column_parse_time(statement, TARGET_COLUMN_END_TIME, &target->end_minute)) {
+        return false;
+    }
+    return target->target_id > 0 && event_kind_is_target(target->kind);
 }
 
 // Binds ?1 and ?2 to the dates and ?3 to one row more than wanted, so that the caller can tell
@@ -824,13 +893,13 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     if (!column_parse_repeat(statement, event)) {
         return false;
     }
-    if (!column_parse_kind(statement, event)) {
+    if (!column_parse_kind(statement, COLUMN_KIND, &event->kind)) {
         return false;
     }
     if (!column_parse_location(statement, event)) {
         return false;
     }
-    if (!column_parse_problem(statement, event)) {
+    if (!column_parse_target(statement, event)) {
         return false;
     }
     // Longer text from outside this program is cut to fit, as titles are.
@@ -842,11 +911,14 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     return event->id > 0;
 }
 
-// A problem's rules, which the database enforces as well, checked again because drawing relies
-// on them; and whether it is done, which the query computes for problems only.
-static bool column_parse_problem(sqlite3_stmt *statement, Event *event) {
-    event->problem_done = sqlite3_column_int(statement, COLUMN_PROBLEM_DONE) != 0;
-    assert(!event->problem_done || event->kind == EVENT_KIND_PROBLEM);
+// A link target's rules, which the database enforces as well, checked again because drawing
+// relies on them; and whether its tasks are done, which the query computes for targets only.
+static bool column_parse_target(sqlite3_stmt *statement, Event *event) {
+    event->tasks_done = sqlite3_column_int(statement, COLUMN_TASKS_DONE) != 0;
+    assert(!event->tasks_done || event_kind_is_target(event->kind));
+    if (event->kind == EVENT_KIND_OPPORTUNITY) {
+        return event->repeat_unit == REPEAT_NONE;
+    }
     if (event->kind != EVENT_KIND_PROBLEM) {
         return true;
     }
@@ -931,14 +1003,14 @@ static bool column_parse_repeat(sqlite3_stmt *statement, Event *event) {
     return event_duration_days(event) < event_repeat_gap_days_min(event);
 }
 
-static bool column_parse_kind(sqlite3_stmt *statement, Event *event) {
-    const char *kind = (const char *)sqlite3_column_text(statement, COLUMN_KIND);
-    if (kind == NULL) {
+static bool column_parse_kind(sqlite3_stmt *statement, int column, int32_t *kind) {
+    const char *text = (const char *)sqlite3_column_text(statement, column);
+    if (text == NULL) {
         return false;
     }
     for (int32_t i = 0; i < EVENT_KIND_COUNT; i++) {
-        if (strcmp(kind, event_kind_names[i]) == 0) {
-            event->kind = i;
+        if (strcmp(text, event_kind_names[i]) == 0) {
+            *kind = i;
             return true;
         }
     }

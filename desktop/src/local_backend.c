@@ -16,12 +16,13 @@ static bool local_update(void *context, const Event *event);
 static bool local_remove(void *context, int64_t id);
 static bool local_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
 static int64_t local_location(void *context, const char *address, const char *city);
-static int32_t local_load_problem_tasks(void *context, int64_t problem_id, Problem_Task *tasks,
-                                        int32_t task_count_max, bool *truncated);
-static int32_t local_load_task_problems(void *context, int64_t task_id, Task_Problem *problems,
-                                        int32_t problem_count_max, bool *truncated);
-static bool local_set_task_problems(void *context, int64_t task_id, const int64_t *problem_ids,
-                                    int32_t problem_count);
+static int32_t local_load_target_tasks(void *context, int64_t target_id, Linked_Task *tasks,
+                                       int32_t task_count_max, bool *truncated);
+static int32_t local_load_task_targets(void *context, int64_t task_id, bool problems_only,
+                                       Link_Target *targets, int32_t target_count_max,
+                                       bool *truncated);
+static bool local_set_task_targets(void *context, int64_t task_id, const int64_t *target_ids,
+                                   int32_t target_count);
 static uint64_t local_revision(void *context);
 static const char *local_error(const void *context);
 
@@ -33,9 +34,9 @@ static const Backend_Ops local_ops = {
     .remove = local_remove,
     .set_task_done = local_set_task_done,
     .location_find_or_create = local_location,
-    .load_problem_tasks = local_load_problem_tasks,
-    .load_task_problems = local_load_task_problems,
-    .set_task_problems = local_set_task_problems,
+    .load_target_tasks = local_load_target_tasks,
+    .load_task_targets = local_load_task_targets,
+    .set_task_targets = local_set_task_targets,
     .revision = local_revision,
     .error = local_error,
 };
@@ -175,45 +176,46 @@ static int64_t local_location(void *context, const char *address, const char *ci
     return id;
 }
 
-static int32_t local_load_problem_tasks(void *context, int64_t problem_id, Problem_Task *tasks,
-                                        int32_t task_count_max, bool *truncated) {
+static int32_t local_load_target_tasks(void *context, int64_t target_id, Linked_Task *tasks,
+                                       int32_t task_count_max, bool *truncated) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
-    int32_t count = event_store_load_problem_tasks(&local->store, problem_id, tasks,
-                                                   task_count_max, truncated);
+    int32_t count = event_store_load_target_tasks(&local->store, target_id, tasks,
+                                                  task_count_max, truncated);
     if (count < 0) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
     }
     return count;
 }
 
-static int32_t local_load_task_problems(void *context, int64_t task_id, Task_Problem *problems,
-                                        int32_t problem_count_max, bool *truncated) {
+static int32_t local_load_task_targets(void *context, int64_t task_id, bool problems_only,
+                                       Link_Target *targets, int32_t target_count_max,
+                                       bool *truncated) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
-    int32_t count = event_store_load_task_problems(&local->store, task_id, problems,
-                                                   problem_count_max, truncated);
+    int32_t count = event_store_load_task_targets(&local->store, task_id, problems_only,
+                                                  targets, target_count_max, truncated);
     if (count < 0) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
     }
     return count;
 }
 
-static bool local_set_task_problems(void *context, int64_t task_id, const int64_t *problem_ids,
-                                    int32_t problem_count) {
+static bool local_set_task_targets(void *context, int64_t task_id, const int64_t *target_ids,
+                                   int32_t target_count) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return false;
     }
-    if (!event_store_set_task_problems(&local->store, task_id, problem_ids, problem_count)) {
+    if (!event_store_set_task_targets(&local->store, task_id, target_ids, target_count)) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
         return false;
     }
-    // A problem's status shows wherever its links are loaded, so phones reload too.
+    // A target's status shows wherever its links are loaded, so phones reload too.
     local_changed(local);
     return true;
 }

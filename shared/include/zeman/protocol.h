@@ -19,9 +19,9 @@
 
 enum {
     // Raised whenever a message changes shape, so that old apps say so instead of misreading.
-    // 2 added the links between problems and the tasks that solve them, and 3 whether a
-    // problem is done to each event.
-    PROTOCOL_VERSION = 3,
+    // 2 added the links between problems and the tasks that solve them, 3 whether a problem is
+    // done to each event, and 4 opportunities as link targets beside problems.
+    PROTOCOL_VERSION = 4,
     PROTOCOL_PORT_DEFAULT = 47800,
     // UDP port where the desktop app answers phones looking for it on the local network.
     PROTOCOL_DISCOVERY_PORT = 47801,
@@ -59,9 +59,10 @@ typedef enum Protocol_Operation {
     PROTOCOL_DELETE,             // id ->
     PROTOCOL_SET_TASK_DONE,      // id, occurrence start, done ->
     PROTOCOL_LOCATION,           // address, city -> id
-    PROTOCOL_LOAD_PROBLEM_TASKS, // problem id, count_max -> truncated, count, tasks
-    PROTOCOL_LOAD_TASK_PROBLEMS, // task id, count_max -> truncated, count, problems
-    PROTOCOL_SET_TASK_PROBLEMS,  // task id, count, problem ids ->
+    PROTOCOL_LOAD_TARGET_TASKS,  // target id, count_max -> truncated, count, tasks
+    // task id, problems only, count_max -> truncated, count, targets
+    PROTOCOL_LOAD_TASK_TARGETS,
+    PROTOCOL_SET_TASK_TARGETS,   // task id, count, target ids ->
     PROTOCOL_OPERATION_END,
 } Protocol_Operation;
 
@@ -98,8 +99,8 @@ void writer_text(Writer *writer, const char *text);
 void writer_date(Writer *writer, Date date);
 void writer_event(Writer *writer, const Event *event);
 void writer_completion(Writer *writer, const Task_Completion *completion);
-void writer_problem_task(Writer *writer, const Problem_Task *task);
-void writer_task_problem(Writer *writer, const Task_Problem *problem);
+void writer_linked_task(Writer *writer, const Linked_Task *task);
+void writer_link_target(Writer *writer, const Link_Target *target);
 
 Reader reader_make(const uint8_t *buffer, size_t length);
 uint8_t reader_u8(Reader *reader);
@@ -114,9 +115,10 @@ Date reader_date(Reader *reader);
 // An event that breaks event_is_valid fails the reader.
 Event reader_event(Reader *reader);
 Task_Completion reader_completion(Reader *reader);
-// Links with no id or title, or counts that do not add up, fail the reader.
-Problem_Task reader_problem_task(Reader *reader);
-Task_Problem reader_task_problem(Reader *reader);
+// Links with no id or title, counts that do not add up, or a target of another kind than a
+// problem or an opportunity, fail the reader.
+Linked_Task reader_linked_task(Reader *reader);
+Link_Target reader_link_target(Reader *reader);
 // True when the whole message was read and nothing failed.
 bool reader_done(const Reader *reader);
 

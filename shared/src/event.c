@@ -214,7 +214,11 @@ bool event_is_valid(const Event *event) {
             return false;
         }
     }
-    if (event->problem_done && event->kind != EVENT_KIND_PROBLEM) {
+    if (event->tasks_done && !event_kind_is_target(event->kind)) {
+        return false;
+    }
+    // A deadline happens once, so an opportunity cannot repeat.
+    if (event->kind == EVENT_KIND_OPPORTUNITY && event->repeat_unit != REPEAT_NONE) {
         return false;
     }
     if (event->kind == EVENT_KIND_PROBLEM) {
@@ -231,36 +235,60 @@ bool event_is_valid(const Event *event) {
     return event_duration_days(event) < event_repeat_gap_days_min(event);
 }
 
-Problem_Status problem_status(int32_t task_count, int32_t task_done_count) {
+bool event_kind_is_target(int32_t kind) {
+    assert(kind >= 0);
+    assert(kind < EVENT_KIND_COUNT);
+    return kind == EVENT_KIND_PROBLEM || kind == EVENT_KIND_OPPORTUNITY;
+}
+
+// Compares the deadline and now as minutes since 1970, so that the date and the time of day are
+// one comparison; a deadline without a time is the last minute of its day.
+bool opportunity_is_missed(Date end_date, int32_t end_minute, bool tasks_done, Date_Time now) {
+    assert(date_is_valid(end_date));
+    assert(date_is_valid(now.date));
+    assert(end_minute == TIME_NONE || minute_is_valid(end_minute));
+    if (tasks_done) {
+        return false;
+    }
+    const int32_t deadline_minute = end_minute == TIME_NONE ? MINUTES_PER_DAY - 1 : end_minute;
+    // int64_t, because minutes since 1970 pass INT32_MAX in the year 6053.
+    const int64_t deadline = (int64_t)date_to_day_number(end_date) * MINUTES_PER_DAY +
+                             deadline_minute;
+    const int64_t current = (int64_t)date_to_day_number(now.date) * MINUTES_PER_DAY +
+                            now.minute_of_day;
+    return current > deadline;
+}
+
+Target_Status target_status(int32_t task_count, int32_t task_done_count) {
     assert(task_count >= 0);
     assert(task_done_count >= 0);
     assert(task_done_count <= task_count);
     if (task_count == 0) {
-        return PROBLEM_STATUS_NO_TASKS;
+        return TARGET_STATUS_NO_TASKS;
     }
     if (task_done_count == 0) {
-        return PROBLEM_STATUS_PLANNED;
+        return TARGET_STATUS_PLANNED;
     }
     if (task_done_count < task_count) {
-        return PROBLEM_STATUS_PARTLY_DONE;
+        return TARGET_STATUS_PARTLY_DONE;
     }
-    return PROBLEM_STATUS_DONE;
+    return TARGET_STATUS_DONE;
 }
 
-const char *problem_status_name(Problem_Status status) {
+const char *target_status_name(Target_Status status) {
     switch (status) {
-    case PROBLEM_STATUS_NO_TASKS:
+    case TARGET_STATUS_NO_TASKS:
         return "No planned tasks";
-    case PROBLEM_STATUS_PLANNED:
+    case TARGET_STATUS_PLANNED:
         return "Planned";
-    case PROBLEM_STATUS_PARTLY_DONE:
+    case TARGET_STATUS_PARTLY_DONE:
         return "Partly completed";
-    case PROBLEM_STATUS_DONE:
+    case TARGET_STATUS_DONE:
         return "Completed";
-    case PROBLEM_STATUS_COUNT:
+    case TARGET_STATUS_COUNT:
         break;
     }
-    assert(false); // Not a Problem_Status.
+    assert(false); // Not a Target_Status.
     return "";
 }
 

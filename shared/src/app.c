@@ -90,10 +90,14 @@ enum {
     // A press that moves this far scrolls a list instead of clicking, because a finger wobbles
     // by a few pixels during a tap.
     LIST_DRAG_THRESHOLD_PIXELS = 8,
-    // One problem in a task's checklist: tall enough to tap with a finger.
-    PROBLEM_ROW_HEIGHT_PIXELS = 36,
-    // Room kept at the right of a checklist row for the problem's status.
-    PROBLEM_STATUS_WIDTH_PIXELS = 120,
+    // One problem or opportunity in a task's checklist: tall enough to tap with a finger.
+    TARGET_ROW_HEIGHT_PIXELS = 36,
+    // Room kept at the right of a checklist row for the target's status.
+    TARGET_STATUS_WIDTH_PIXELS = 120,
+    // Room around the label of each toggle of the form's kind selector, which is sized to its
+    // label so that "Opportunity" fits beside the shorter names.
+    KIND_TOGGLE_PADDING_PIXELS = 20,
+    KIND_TOGGLE_GAP_PIXELS = 2,
     // The bar showing the list's scroll position, and the room kept free for it beside the cards.
     SCROLLBAR_WIDTH_PIXELS = 4,
     SCROLLBAR_GAP_PIXELS = 10,
@@ -209,8 +213,13 @@ static const Color error_color = { 248, 113, 113, 255 };
 // Every problem has this color, darker than any event color, so that problems read as problems
 // at a glance rather than as one more event.
 static const Color problem_color = { 160, 36, 48, 255 };
-// A done problem turns green, the usual color for "resolved", dark enough for white text.
-static const Color problem_done_color = { 40, 140, 76, 255 };
+// A solved problem or used opportunity turns green, the usual color for "resolved", dark enough
+// for white text.
+static const Color target_done_color = { 40, 140, 76, 255 };
+// Every opportunity is gold, unlike any event color, so that a chance stands out as one. A
+// missed one turns gray, so that it recedes like anything past.
+static const Color opportunity_color = { 168, 124, 16, 255 };
+static const Color opportunity_missed_color = { 92, 98, 110, 255 };
 
 // One color of the theme: a raygui DEFAULT property and its value, as 0xRRGGBBAA.
 typedef struct Theme_Color {
@@ -280,21 +289,21 @@ typedef struct Scroll {
 } Scroll;
 
 typedef struct Form {
-    // Links between problems and the tasks that solve them, loaded when the form opens: an
-    // existing problem's tasks, or else the problems a task can solve, with the user's choices
-    // in their linked flags until the form is saved.
-    Problem_Task tasks[PROBLEM_LINK_COUNT_MAX];
-    Task_Problem problems[PROBLEM_LINK_COUNT_MAX];
-    Scroll problems_scroll;
+    // Links between link targets and the tasks linked to them, loaded when the form opens: an
+    // existing target's tasks, or else the targets a task can be linked to, with the user's
+    // choices in their linked flags until the form is saved.
+    Linked_Task tasks[LINK_COUNT_MAX];
+    Link_Target targets[LINK_COUNT_MAX];
+    Scroll targets_scroll;
     int64_t editing_id;    // Event being edited, or 0 for a new event
     int32_t field_active;  // Form_Field being edited, or FORM_FIELD_NONE
     int32_t task_count;
-    int32_t problem_count;
+    int32_t target_count;
     int repeat_option;     // Repeat_Option; int because raygui's combo box writes it
-    int kind;              // Event_Kind; int because raygui's toggle group writes it
+    int32_t kind;          // Event_Kind
     bool open;
     bool links_loaded;       // False after a failed load, so that saving keeps the stored links
-    bool links_truncated;    // More links or problems exist than were loaded
+    bool links_truncated;    // More links or targets exist than were loaded
     char text[FORM_FIELD_COUNT][EVENT_DESCRIPTION_SIZE];
     char error[FORM_ERROR_SIZE];  // Why the last save failed, or empty
 } Form;
@@ -419,6 +428,7 @@ static void app_form_submit(App *app);
 static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserted);
 static void app_event_delete(App *app, int64_t id);
 static bool app_task_done(const App *app, int64_t id, int32_t start_day);
+static Date_Time app_now(const App *app);
 static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done);
 static Layout layout_compute(float width, float height, bool form_open, int32_t range,
                              int32_t untimed_count);
@@ -480,15 +490,17 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
                                           Rectangle card);
 static void draw_panel_legend(const Fonts *fonts, Rectangle area);
 static void draw_panel_form(App *app, Rectangle body);
+static void draw_panel_form_kinds(App *app, Rectangle body, bool editing);
 static void draw_panel_form_buttons(App *app, Rectangle body, float y);
 static float draw_panel_form_rows_end(float y);
 static float draw_panel_form_fields(App *app, Rectangle body, float y);
 static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, float end_y);
-static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float y, float end_y);
-static void draw_panel_form_problems(App *app, Rectangle body, float y, float end_y);
-static bool draw_panel_form_problems_row(const App *app, const Task_Problem *problem,
-                                         Rectangle row, bool clickable);
-static int32_t form_problems_linked_count(const Form *form);
+static void draw_panel_form_target_tasks(const App *app, Rectangle body, float y, float end_y);
+static void draw_panel_form_targets(App *app, Rectangle body, float y, float end_y);
+static bool draw_panel_form_targets_row(const App *app, const Link_Target *target,
+                                        Rectangle row, bool clickable);
+static int32_t form_targets_linked_count(const Form *form);
+static bool form_deadline_is_missed(const Form *form, Date_Time now, bool tasks_done);
 static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
                                   const char *label, Rectangle box);
 static void draw_status(App *app, Rectangle status);
@@ -497,6 +509,7 @@ static void form_open_edit(Form *form, const Event *event);
 static void form_close(Form *form);
 static int32_t form_field_next(const Form *form, bool backwards);
 static bool form_field_visible(const Form *form, int32_t field);
+static int32_t form_repeat_option(const Form *form);
 static float event_card_height(const Fonts *fonts, const Event *event, bool confirming,
                                float card_width);
 static Text_Lines text_wrap(const Text_Style *style, const char *text, float width_pixels);
@@ -511,8 +524,12 @@ static bool event_occurs_on_day(const Event *event, int32_t day_number);
 static bool event_created_on_day(const Event *event, int32_t day_number);
 static bool event_is_timed(const Event *event);
 static bool event_in_day_cell(const Event *event, int32_t range);
-static Color event_color(const Event *event);
-static void event_format_range(const Event *event, char *buffer, size_t buffer_size);
+static bool event_is_missed(const Event *event, Date_Time now);
+static Color event_color(const Event *event, Date_Time now);
+static void event_format_label(const Event *event, bool with_time, Date_Time now, char *buffer,
+                               size_t buffer_size);
+static void event_format_range(const Event *event, Date_Time now, char *buffer,
+                               size_t buffer_size);
 static void event_format_range_dates(const Event *event, char *buffer, size_t buffer_size);
 static void event_format_created(const Event *event, Date_Time now, char *buffer,
                                  size_t buffer_size);
@@ -878,6 +895,13 @@ static bool app_task_done(const App *app, int64_t id, int32_t start_day) {
     return false;
 }
 
+// The moment app_sync last read from the clock, so that a frame draws one time throughout.
+static Date_Time app_now(const App *app) {
+    assert(date_is_valid(app->today));
+    assert(app->now_minute >= 0);
+    return (Date_Time){ app->today, app->now_minute };
+}
+
 static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done) {
     assert(event->kind == EVENT_KIND_TASK);
     assert(app_task_done(app, event->id, start_day) != done);
@@ -1071,8 +1095,8 @@ static int32_t utf8_sequence_size(const char *text) {
     return size;
 }
 
-// Opens the form for a new entry. The problems a task can solve are loaded whatever the kind,
-// because the kind can still be switched to task.
+// Opens the form for a new entry. The targets a task can be linked to are loaded whatever the
+// kind, because the kind can still be switched to task.
 static void app_form_open(App *app, Date date, int32_t kind) {
     app->event_delete_id = 0;
     form_open(&app->form, date, kind);
@@ -1085,41 +1109,41 @@ static void app_form_open_edit(App *app, const Event *event) {
     app_form_load_links(app);
 }
 
-// An existing problem's form lists its tasks; every other form offers the problems a task can
-// solve. A failure shows in the form and leaves links_loaded false, so that saving cannot erase
-// links that were never shown.
+// An existing link target's form lists its tasks; every other form offers the targets a task
+// can be linked to. A failure shows in the form and leaves links_loaded false, so that saving
+// cannot erase links that were never shown.
 static void app_form_load_links(App *app) {
     Form *form = &app->form;
     assert(form->open);
     form->links_loaded = false;
     form->links_truncated = false;
     form->task_count = 0;
-    form->problem_count = 0;
+    form->target_count = 0;
     int32_t count = 0;
-    if (form->kind == EVENT_KIND_PROBLEM && form->editing_id != 0) {
-        count = backend_load_problem_tasks(app->backend, form->editing_id, form->tasks,
-                                           PROBLEM_LINK_COUNT_MAX, &form->links_truncated);
+    if (event_kind_is_target(form->kind) && form->editing_id != 0) {
+        count = backend_load_target_tasks(app->backend, form->editing_id, form->tasks,
+                                          LINK_COUNT_MAX, &form->links_truncated);
         form->task_count = count < 0 ? 0 : count;
     } else {
-        count = backend_load_task_problems(app->backend, form->editing_id, form->problems,
-                                           PROBLEM_LINK_COUNT_MAX, &form->links_truncated);
-        form->problem_count = count < 0 ? 0 : count;
+        count = backend_load_task_targets(app->backend, form->editing_id, false, form->targets,
+                                          LINK_COUNT_MAX, &form->links_truncated);
+        form->target_count = count < 0 ? 0 : count;
     }
     if (count < 0) {
         snprintf(form->error, sizeof(form->error), "%s", backend_error(app->backend));
         return;
     }
-    assert(count <= PROBLEM_LINK_COUNT_MAX);
+    assert(count <= LINK_COUNT_MAX);
     form->links_loaded = true;
 }
 
-// Saves the problems checked in a task's form. An entry saved as an event loses its links, as
+// Saves the targets checked in a task's form. An entry saved as an event loses its links, as
 // it may have been a task until now. Returns false, with the form's error set, on failure.
 static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserted) {
     const Form *form = &app->form;
     assert(id > 0);
-    // A problem's links are made from its tasks' forms, and a new event has none.
-    if (kind == EVENT_KIND_PROBLEM) {
+    // A target's links are made from its tasks' forms, and a new event has none.
+    if (event_kind_is_target(kind)) {
         return true;
     }
     if (kind == EVENT_KIND_EVENT && inserted) {
@@ -1129,16 +1153,16 @@ static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserte
     if (kind == EVENT_KIND_TASK && !form->links_loaded) {
         return true;
     }
-    int64_t problem_ids[PROBLEM_LINK_COUNT_MAX];
-    int32_t problem_count = 0;
-    for (int32_t i = 0; kind == EVENT_KIND_TASK && i < form->problem_count; i++) {
-        if (form->problems[i].linked) {
-            problem_ids[problem_count] = form->problems[i].problem_id;
-            problem_count++;
+    int64_t target_ids[LINK_COUNT_MAX];
+    int32_t target_count = 0;
+    for (int32_t i = 0; kind == EVENT_KIND_TASK && i < form->target_count; i++) {
+        if (form->targets[i].linked) {
+            target_ids[target_count] = form->targets[i].target_id;
+            target_count++;
         }
     }
-    assert(problem_count == (kind == EVENT_KIND_TASK ? form_problems_linked_count(form) : 0));
-    if (!backend_set_task_problems(app->backend, id, problem_ids, problem_count)) {
+    assert(target_count == (kind == EVENT_KIND_TASK ? form_targets_linked_count(form) : 0));
+    if (!backend_set_task_targets(app->backend, id, target_ids, target_count)) {
         snprintf(app->form.error, sizeof(app->form.error), "%s", backend_error(app->backend));
         return false;
     }
@@ -1629,7 +1653,7 @@ static void draw_timeline_item(const App *app, const Event *event, Rectangle blo
     // A one-day item's occurrence starts on the day it is drawn on.
     const bool task = event->kind == EVENT_KIND_TASK;
     const bool done = task && app_task_done(app, event->id, day_number);
-    const Color color = event_color(event);
+    const Color color = event_color(event, app_now(app));
     if (task) {
         DrawRectangleRec(block, Fade(color, done ? TASK_DONE_FILL_ALPHA : TASK_FILL_ALPHA));
         DrawRectangleLinesEx(block, 1, Fade(color, done ? TASK_DONE_OUTLINE_ALPHA : 1.0f));
@@ -1637,16 +1661,8 @@ static void draw_timeline_item(const App *app, const Event *event, Rectangle blo
         DrawRectangleRec(block, color);
     }
 
-    char time[TIME_TEXT_SIZE];
     char label[TEXT_LINE_SIZE];
-    if (event->start_minute != TIME_NONE) {
-        time_format(event->start_minute, time, sizeof(time));
-        snprintf(label, sizeof(label), "%s %s", time, event->title);
-    } else {
-        // Said, because the block is drawn in the hour before the end, not from a start.
-        time_format(event->end_minute, time, sizeof(time));
-        snprintf(label, sizeof(label), "Until %s %s", time, event->title);
-    }
+    event_format_label(event, true, app_now(app), label, sizeof(label));
     draw_event_label(app, event, label, block, done);
 }
 
@@ -1879,7 +1895,7 @@ static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int3
         if (event == focused) {
             DrawCircleV(center, radius + 3, style_color(BORDER_COLOR_PRESSED));
         }
-        DrawCircleV(center, radius, event_color(event));
+        DrawCircleV(center, radius, event_color(event, app_now(app)));
         center.x -= spacing;
         marker_count++;
     }
@@ -1941,7 +1957,7 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
     assert(start_day <= day_number);
     const bool task = event->kind == EVENT_KIND_TASK;
     const bool done = task && app_task_done(app, event->id, start_day);
-    const Color color = event_color(event);
+    const Color color = event_color(event, app_now(app));
     bool starts_here = day_number == start_day;
     bool ends_here = day_number == start_day + event_duration_days(event);
     // Multi-day events run edge to edge between days, so that they read as one bar.
@@ -1950,7 +1966,7 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
     Rectangle bar = { left, bar_slot.y, right - left, bar_slot.height };
     // A problem is one day long, so it is always labelled; the problems view draws it alike.
     if (event->kind == EVENT_KIND_PROBLEM) {
-        app_draw_problem_bar(app, event->title, event->problem_done, bar);
+        app_draw_problem_bar(app, event->title, event->tasks_done, bar);
         return;
     }
     if (task) {
@@ -1966,19 +1982,14 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
         return;
     }
     char label[TEXT_LINE_SIZE];
-    if (starts_here && event->start_minute != TIME_NONE) {
-        char time[TIME_TEXT_SIZE];
-        time_format(event->start_minute, time, sizeof(time));
-        snprintf(label, sizeof(label), "%s %s", time, event->title);
-    } else {
-        snprintf(label, sizeof(label), "%s", event->title);
-    }
+    // The time only where the occurrence starts; later days' bars continue it.
+    event_format_label(event, starts_here, app_now(app), label, sizeof(label));
     draw_event_label(app, event, label, bar, done);
 }
 
 // An item's label on a bar-high line at the top of area, clipped to area: after a checkbox for
-// a task, and struck through for a done one. Shared by the day cells' bars and the timeline's
-// blocks, so that an item reads the same in both.
+// a task, or a tick for a used opportunity, and struck through for a done task. Shared by the
+// day cells' bars and the timeline's blocks, so that an item reads the same in both.
 static void draw_event_label(const App *app, const Event *event, const char *label,
                              Rectangle area, bool done) {
     assert(area.height > 0.0f);
@@ -1991,11 +2002,16 @@ static void draw_event_label(const App *app, const Event *event, const char *lab
     scissor_begin(&app->fonts, area.x, area.y, area.width, area.height);
     if (task) {
         Rectangle box = { area.x + 4, area.y + 4, 11, 11 };
-        draw_check_mark(box, done, event_color(event));
+        draw_check_mark(box, done, event_color(event, app_now(app)));
         text_x = box.x + box.width + 4;
         // The theme's text colors rather than the task's own, which is too dark to read on the
         // dark cells; the outline and checkbox already carry the task's color.
         text_color = style_color(done ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
+    } else if (event->tasks_done) {
+        // As on a done problem's bar (see app_draw_problem_bar).
+        Rectangle tick = { area.x + 4, area.y + 4, 11, 11 };
+        draw_tick(tick, 2.0f, WHITE);
+        text_x = tick.x + tick.width + 4;
     }
     // Centered vertically in the line.
     draw_text(style, label, text_x, area.y + (line_height - style->size_pixels) / 2, text_color);
@@ -2014,7 +2030,7 @@ void app_draw_problem_bar(const App *app, const char *title, bool done, Rectangl
     assert(bar.width > 0.0f);
     assert(bar.height > 0.0f);
     const Text_Style *style = &app->fonts.small;
-    DrawRectangleRec(bar, done ? problem_done_color : problem_color);
+    DrawRectangleRec(bar, done ? target_done_color : problem_color);
     char label[TEXT_LINE_SIZE];
     snprintf(label, sizeof(label), "%s%s", done ? "" : "! ", title);
     float text_x = bar.x + 4;
@@ -2086,14 +2102,16 @@ static void draw_panel(App *app, Rectangle panel) {
     }
 }
 
+// Two rows of two buttons, because "New opportunity" does not fit in a quarter of the panel.
 static void draw_panel_events(App *app, Rectangle body) {
     const float gap = 8;
-    const float button_width = (body.width - 2 * gap) / 3;
+    const float button_width = (body.width - gap) / 2;
+    const float right_x = body.x + button_width + gap;
+    const float second_y = body.y + BUTTON_HEIGHT_PIXELS + gap;
     Rectangle event_button = { body.x, body.y, button_width, BUTTON_HEIGHT_PIXELS };
-    Rectangle task_button = { body.x + button_width + gap, body.y, button_width,
-                              BUTTON_HEIGHT_PIXELS };
-    Rectangle problem_button = { body.x + 2 * (button_width + gap), body.y, button_width,
-                                 BUTTON_HEIGHT_PIXELS };
+    Rectangle task_button = { right_x, body.y, button_width, BUTTON_HEIGHT_PIXELS };
+    Rectangle problem_button = { body.x, second_y, button_width, BUTTON_HEIGHT_PIXELS };
+    Rectangle opportunity_button = { right_x, second_y, button_width, BUTTON_HEIGHT_PIXELS };
     if (GuiButton(event_button, "New event")) {
         app_form_open(app, app->selected, EVENT_KIND_EVENT);
     }
@@ -2104,9 +2122,12 @@ static void draw_panel_events(App *app, Rectangle body) {
     if (GuiButton(problem_button, "New problem")) {
         app_form_open(app, app->today, EVENT_KIND_PROBLEM);
     }
+    if (GuiButton(opportunity_button, "New opportunity")) {
+        app_form_open(app, app->selected, EVENT_KIND_OPPORTUNITY);
+    }
 
     // The list ends above the legend; it scrolls when its cards do not fit.
-    float list_top = body.y + BUTTON_HEIGHT_PIXELS + PADDING_PIXELS;
+    float list_top = second_y + BUTTON_HEIGHT_PIXELS + PADDING_PIXELS;
     float list_bottom = body.y + body.height - LEGEND_HEIGHT_PIXELS - PADDING_PIXELS;
     Rectangle list = { body.x, list_top, body.width, list_bottom - list_top };
     float content_height = draw_panel_events_height(app, list.width);
@@ -2285,17 +2306,20 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     bool hovered = CheckCollisionPointRec(mouse, card);
 
     DrawRectangleRec(card, style_color(hovered ? BASE_COLOR_FOCUSED : BASE_COLOR_NORMAL));
-    DrawRectangleRec((Rectangle){ card.x, card.y, 6, card.height }, event_color(event));
+    DrawRectangleRec((Rectangle){ card.x, card.y, 6, card.height },
+                     event_color(event, app_now(app)));
     DrawRectangleLinesEx(card, focused || confirming ? 2.0f : 1.0f,
                          style_color(focused ? BORDER_COLOR_PRESSED : BORDER_COLOR_NORMAL));
 
-    // Clip the title short of the delete button. A done task's title is dimmed and struck out;
-    // a done problem's has a tick before it, in the green of its stripe.
-    const float title_x = task || event->problem_done ? x + 24 : x;
-    const Color title_color = style_color(done ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
+    // Clip the title short of the delete button. A done task's title is dimmed and struck out,
+    // and a missed opportunity's dimmed; a done target's has a tick before it, in the green of
+    // its stripe.
+    const bool dimmed = done || event_is_missed(event, app_now(app));
+    const float title_x = task || event->tasks_done ? x + 24 : x;
+    const Color title_color = style_color(dimmed ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
     scissor_begin(&app->fonts, card.x, card.y, card.width - 90, card.height);
-    if (event->problem_done) {
-        draw_tick((Rectangle){ x + 1, card.y + 9, 14, 13 }, 2.5f, problem_done_color);
+    if (event->tasks_done) {
+        draw_tick((Rectangle){ x + 1, card.y + 9, 14, 13 }, 2.5f, target_done_color);
     }
     draw_text(title_style, event->title, title_x, card.y + 8, title_color);
     if (done) {
@@ -2307,10 +2331,12 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
     scissor_end(&app->fonts);
 
     if (confirming) {
-        const char *question = event->repeat_unit != REPEAT_NONE ? "Delete it and all repeats?"
-                               : task                            ? "Delete this task?"
-                               : event->kind == EVENT_KIND_PROBLEM ? "Delete this problem?"
-                                                                 : "Delete this event?";
+        const char *question =
+            event->repeat_unit != REPEAT_NONE       ? "Delete it and all repeats?"
+            : task                                  ? "Delete this task?"
+            : event->kind == EVENT_KIND_PROBLEM     ? "Delete this problem?"
+            : event->kind == EVENT_KIND_OPPORTUNITY ? "Delete this opportunity?"
+                                                    : "Delete this event?";
         draw_text(&app->fonts.small, question, x, card.y + 8 + TEXT_LINE_HEIGHT_PIXELS_SMALL,
                   error_color);
         if (GuiButton(confirm_button, "Delete")) {
@@ -2323,8 +2349,7 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
         return false;
     }
 
-    draw_panel_event_card_details(&app->fonts, event, (Date_Time){ app->today, app->now_minute },
-                                  card);
+    draw_panel_event_card_details(&app->fonts, event, app_now(app), card);
     if (task) {
         bool checked = done;
         GuiCheckBox(checkbox, NULL, &checked);
@@ -2351,7 +2376,7 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
     char text[TEXT_LINE_SIZE];
     scissor_begin(fonts, card.x, card.y, card.width - 4, card.height);
     float y = card.y + 8 + line;
-    event_format_range(event, text, sizeof(text));
+    event_format_range(event, now, text, sizeof(text));
     draw_text(style, text, x, y, style_color(TEXT_COLOR_NORMAL));
     if (event->location.id != 0) {
         y += line;
@@ -2405,25 +2430,19 @@ static void draw_panel_legend(const Fonts *fonts, Rectangle area) {
 
 static void draw_panel_form(App *app, Rectangle body) {
     Form *form = &app->form;
-    static const char *const headings[EVENT_KIND_COUNT][2] = {
-        { "New event", "Edit event" },
-        { "New task", "Edit task" },
-        { "New problem", "Edit problem" },
+    static const char *const headings[EVENT_KIND_COUNT] = {
+        "Edit event", "Edit task", "Edit problem", "Edit opportunity",
     };
     const bool editing = form->editing_id != 0;
-    draw_text(&app->fonts.ui, headings[form->kind][editing ? 1 : 0], body.x, body.y,
-              style_color(TEXT_COLOR_NORMAL));
-    // A new entry can be any kind. An existing problem keeps its kind, and an existing event or
-    // task cannot become a problem, because a problem must be on the day it was created.
-    const bool problem = form->kind == EVENT_KIND_PROBLEM;
-    const int32_t toggle_count = !editing ? 3 : problem ? 0 : 2;
-    // raygui lays the toggles out side by side, each the size of these bounds, 2 pixels apart.
-    const float toggle_width = 76;
-    const float toggles_width = (float)toggle_count * (toggle_width + 2) - 2;
-    if (toggle_count > 0) {
-        GuiToggleGroup((Rectangle){ body.x + body.width - toggles_width, body.y - 4,
-                                    toggle_width, 28 },
-                       toggle_count == 3 ? "Event;Task;Problem" : "Event;Task", &form->kind);
+    // A new entry has no heading: the kind selector in its place says what it is.
+    if (editing) {
+        draw_text(&app->fonts.ui, headings[form->kind], body.x, body.y,
+                  style_color(TEXT_COLOR_NORMAL));
+    }
+    // An existing link target keeps its kind: a problem must stay on the day it was created,
+    // and the tasks linked to an opportunity would mean nothing to an event.
+    if (!editing || !event_kind_is_target(form->kind)) {
+        draw_panel_form_kinds(app, body, editing);
     }
 
     // The first field's label sits below the heading and its box below the label.
@@ -2442,13 +2461,48 @@ static void draw_panel_form(App *app, Rectangle body) {
     y += TEXT_LINE_HEIGHT_PIXELS + 4;
 
     // The buttons sit at the bottom of the panel, so that they stay in place whatever the kind,
-    // and a task's problem checklist fills the room between the fields and them.
+    // and a task's checklist of targets, or an opportunity's tasks, fill the room between the
+    // fields and them.
     const float buttons_y = body.y + body.height - BUTTON_HEIGHT_PIXELS;
     if (form->kind == EVENT_KIND_TASK) {
-        draw_panel_form_problems(app, body, y + FORM_LABEL_HEIGHT_PIXELS,
-                                 buttons_y - FORM_ROW_GAP_PIXELS);
+        draw_panel_form_targets(app, body, y + FORM_LABEL_HEIGHT_PIXELS,
+                                buttons_y - FORM_ROW_GAP_PIXELS);
+    }
+    if (form->kind == EVENT_KIND_OPPORTUNITY) {
+        draw_panel_form_target_tasks(app, body, y + FORM_LABEL_HEIGHT_PIXELS,
+                                     buttons_y - FORM_ROW_GAP_PIXELS);
     }
     draw_panel_form_buttons(app, body, buttons_y);
+}
+
+// The kind selector: a new entry can be any kind, from the left where the heading would be; an
+// existing event or task can switch between the two, right of its heading. Each toggle is as
+// wide as its label, because "Opportunity" needs more room than an even share leaves it.
+static void draw_panel_form_kinds(App *app, Rectangle body, bool editing) {
+    static const char *const names[EVENT_KIND_COUNT] = { "Event", "Task", "Problem",
+                                                         "Opportunity" };
+    static_assert(EVENT_KIND_EVENT == 0, "Event and task are the first kinds.");
+    static_assert(EVENT_KIND_TASK == 1, "Event and task are the first kinds.");
+    Form *form = &app->form;
+    assert(!editing || !event_kind_is_target(form->kind));
+    const int32_t count = editing ? 2 : EVENT_KIND_COUNT;
+    float widths[EVENT_KIND_COUNT] = { 0 };
+    float total_width = (float)((count - 1) * KIND_TOGGLE_GAP_PIXELS);
+    for (int32_t kind = 0; kind < count; kind++) {
+        widths[kind] = measure_text(&app->fonts.ui, names[kind]).x + KIND_TOGGLE_PADDING_PIXELS;
+        total_width += widths[kind];
+    }
+    float x = editing ? body.x + body.width - total_width : body.x;
+    for (int32_t kind = 0; kind < count; kind++) {
+        bool active = form->kind == kind;
+        GuiToggle((Rectangle){ x, body.y - 4, widths[kind], 28 }, names[kind], &active);
+        // A click on the active toggle turns it off in raygui; one kind is always chosen, so
+        // only turning another one on counts.
+        if (active && form->kind != kind) {
+            form->kind = kind;
+        }
+        x += widths[kind] + KIND_TOGGLE_GAP_PIXELS;
+    }
 }
 
 static void draw_panel_form_buttons(App *app, Rectangle body, float y) {
@@ -2497,7 +2551,9 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     draw_panel_form_field(fonts, form, FORM_FIELD_START_TIME, "Time",
                           (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
     y += row_height;
-    draw_panel_form_field(fonts, form, FORM_FIELD_END_DATE, "End date",
+    // An opportunity's end is the last moment it can be used.
+    const bool opportunity = form->kind == EVENT_KIND_OPPORTUNITY;
+    draw_panel_form_field(fonts, form, FORM_FIELD_END_DATE, opportunity ? "Deadline" : "End date",
                           (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
     draw_panel_form_field(fonts, form, FORM_FIELD_END_TIME, "Time",
                           (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
@@ -2510,6 +2566,11 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     draw_panel_form_field(fonts, form, FORM_FIELD_DESCRIPTION, "Description (optional)",
                           (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
     y += row_height;
+    // An opportunity cannot repeat, so its rows end here, and its tasks get the repeat rows'
+    // room below.
+    if (opportunity) {
+        return y - FORM_LABEL_HEIGHT_PIXELS;
+    }
     draw_text(&fonts->ui, "Repeat", body.x, y - FORM_LABEL_HEIGHT_PIXELS,
               style_color(TEXT_COLOR_NORMAL));
     GuiComboBox((Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS }, repeat_option_labels,
@@ -2556,15 +2617,15 @@ static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, fl
               style_color(TEXT_COLOR_NORMAL));
     draw_text(&fonts->small, "A problem is always on the day it is created.", body.x, y + 4,
               style_color(TEXT_COLOR_DISABLED));
-    draw_panel_form_problem_tasks(app, body, y + row_height, end_y);
+    draw_panel_form_target_tasks(app, body, y + row_height, end_y);
 }
 
 // The status on the label line above y, then one line per linked task, with whether it is
 // done, down to end_y. Tasks that do not fit are counted on the last line.
-static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float y, float end_y) {
+static void draw_panel_form_target_tasks(const App *app, Rectangle body, float y, float end_y) {
     const Form *form = &app->form;
     const Fonts *fonts = &app->fonts;
-    assert(form->task_count <= PROBLEM_LINK_COUNT_MAX);
+    assert(form->task_count <= LINK_COUNT_MAX);
     assert(y < end_y);
     const Color normal = style_color(TEXT_COLOR_NORMAL);
     const Color dim = style_color(TEXT_COLOR_DISABLED);
@@ -2577,31 +2638,40 @@ static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float 
         done_count += form->tasks[i].done ? 1 : 0;
     }
     // With more tasks than were loaded, the counts are of the loaded ones; that many tasks for
-    // one problem is far beyond any real use (see PROBLEM_LINK_COUNT_MAX).
-    Problem_Status status = problem_status(form->task_count, done_count);
+    // one target is far beyond any real use (see LINK_COUNT_MAX).
+    Target_Status status = target_status(form->task_count, done_count);
+    // An opportunity's deadline as the form has it now, so that changing it shows at once.
+    const bool missed = form->kind == EVENT_KIND_OPPORTUNITY &&
+                        form_deadline_is_missed(form, app_now(app),
+                                                status == TARGET_STATUS_DONE);
+    const char *name = missed ? "Missed" : target_status_name(status);
     char text[TEXT_LINE_SIZE];
-    snprintf(text, sizeof(text), "Status: %s", problem_status_name(status));
-    if (status == PROBLEM_STATUS_PLANNED || status == PROBLEM_STATUS_PARTLY_DONE) {
-        snprintf(text, sizeof(text), "Status: %s, %" PRId32 " of %" PRId32 " tasks done",
-                 problem_status_name(status), done_count, form->task_count);
+    snprintf(text, sizeof(text), "Status: %s", name);
+    if (status == TARGET_STATUS_PLANNED || status == TARGET_STATUS_PARTLY_DONE) {
+        snprintf(text, sizeof(text), "Status: %s, %" PRId32 " of %" PRId32 " tasks done", name,
+                 done_count, form->task_count);
     }
-    draw_text(&fonts->ui, text, body.x, y - FORM_LABEL_HEIGHT_PIXELS, normal);
+    draw_text(&fonts->ui, text, body.x, y - FORM_LABEL_HEIGHT_PIXELS,
+              missed ? error_color : normal);
     if (form->task_count == 0) {
-        draw_text(&fonts->small, "Link tasks to it in a task's form, under Problems.", body.x,
-                  y + 4, dim);
+        draw_text(&fonts->small, "Link tasks to it in a task's form.", body.x, y + 4, dim);
         return;
     }
 
     const float line = TEXT_LINE_HEIGHT_PIXELS_SMALL;
     const int32_t line_count = (int32_t)((end_y - y) / line);
-    assert(line_count > 1);
+    // A phone too short for a task and the count of the rest shows only the status.
+    if (line_count < 2) {
+        return;
+    }
     const bool all_fit = form->task_count <= line_count && !form->links_truncated;
     const int32_t shown = all_fit ? form->task_count : line_count - 1;
     for (int32_t i = 0; i < shown; i++) {
-        const Problem_Task *task = &form->tasks[i];
+        const Linked_Task *task = &form->tasks[i];
         const float line_y = y + 4 + (float)i * line;
         // In the task's own color, as on the calendar, so that it is easy to find there.
-        Color color = event_color(&(Event){ .id = task->task_id, .kind = EVENT_KIND_TASK });
+        Color color = event_color(&(Event){ .id = task->task_id, .kind = EVENT_KIND_TASK },
+                                  app_now(app));
         draw_check_mark((Rectangle){ body.x, line_y + 3, 12, 12 }, task->done, color);
         scissor_begin(fonts, body.x + 20, line_y, body.width - 20, line);
         draw_text(&fonts->small, task->title, body.x + 20, line_y, task->done ? dim : normal);
@@ -2614,23 +2684,24 @@ static void draw_panel_form_problem_tasks(const App *app, Rectangle body, float 
     }
 }
 
-// The problems a task can solve, each with a check box, below the task's fields: the heading
-// on the label line above y, the rows from y down to end_y. Checking one links the task to it
-// when the form is saved. Each problem's status is as stored, without the choices not saved
-// yet. Rows scroll when they do not fit, which at the smallest window is after about one.
-static void draw_panel_form_problems(App *app, Rectangle body, float y, float end_y) {
+// The problems a task can solve and the opportunities it can help use, each with a check box,
+// below the task's fields: the heading on the label line above y, the rows from y down to
+// end_y. Checking one links the task to it when the form is saved. Each target's status is as
+// stored, without the choices not saved yet. Rows scroll when they do not fit, which at the
+// smallest window is after about one.
+static void draw_panel_form_targets(App *app, Rectangle body, float y, float end_y) {
     Form *form = &app->form;
     char heading[TEXT_LINE_SIZE];
-    snprintf(heading, sizeof(heading), "Problems this task solves (%" PRId32 ")%s",
-             form_problems_linked_count(form), form->links_truncated ? ", newest only" : "");
+    snprintf(heading, sizeof(heading), "Problems and opportunities (%" PRId32 ")%s",
+             form_targets_linked_count(form), form->links_truncated ? ", newest only" : "");
     scissor_begin(&app->fonts, body.x, y - FORM_LABEL_HEIGHT_PIXELS, body.width,
                   FORM_LABEL_HEIGHT_PIXELS);
     draw_text(&app->fonts.ui, heading, body.x, y - FORM_LABEL_HEIGHT_PIXELS,
               style_color(TEXT_COLOR_NORMAL));
     scissor_end(&app->fonts);
-    if (!form->links_loaded || form->problem_count == 0) {
-        const char *text = form->links_loaded ? "No problems recorded yet."
-                                              : "Problems could not be loaded.";
+    if (!form->links_loaded || form->target_count == 0) {
+        const char *text = form->links_loaded ? "No problems or opportunities yet."
+                                              : "Problems and opportunities could not be loaded.";
         draw_text(&app->fonts.small, text, body.x, y + 4, style_color(TEXT_COLOR_DISABLED));
         return;
     }
@@ -2641,28 +2712,28 @@ static void draw_panel_form_problems(App *app, Rectangle body, float y, float en
     }
 
     Rectangle list = { body.x, y, body.width, end_y - y };
-    const float content_height = (float)form->problem_count * PROBLEM_ROW_HEIGHT_PIXELS;
+    const float content_height = (float)form->target_count * TARGET_ROW_HEIGHT_PIXELS;
     if (content_height > list.height) {
         list.width -= SCROLLBAR_GAP_PIXELS;
     }
-    scroll_update(&form->problems_scroll, list, content_height);
-    const Scroll *scroll = &form->problems_scroll;
+    scroll_update(&form->targets_scroll, list, content_height);
+    const Scroll *scroll = &form->targets_scroll;
     // A release opens nothing unless the press began here and stayed a tap.
     const bool clickable = scroll->pressed && !scroll->dragging &&
                            CheckCollisionPointRec(GetMousePosition(), list);
     app->fonts.clip = list;
     app->fonts.clipping = true;
     scissor_begin(&app->fonts, list.x, list.y, list.width, list.height);
-    for (int32_t i = 0; i < form->problem_count; i++) {
+    for (int32_t i = 0; i < form->target_count; i++) {
         Rectangle row = { list.x,
-                          list.y - scroll->offset_pixels + (float)i * PROBLEM_ROW_HEIGHT_PIXELS,
-                          list.width, PROBLEM_ROW_HEIGHT_PIXELS };
+                          list.y - scroll->offset_pixels + (float)i * TARGET_ROW_HEIGHT_PIXELS,
+                          list.width, TARGET_ROW_HEIGHT_PIXELS };
         // Rows scrolled wholly out of the list can be neither seen nor clicked.
         if (!CheckCollisionRecs(row, list)) {
             continue;
         }
-        if (draw_panel_form_problems_row(app, &form->problems[i], row, clickable)) {
-            form->problems[i].linked = !form->problems[i].linked;
+        if (draw_panel_form_targets_row(app, &form->targets[i], row, clickable)) {
+            form->targets[i].linked = !form->targets[i].linked;
         }
     }
     app->fonts.clipping = false;
@@ -2670,9 +2741,11 @@ static void draw_panel_form_problems(App *app, Rectangle body, float y, float en
     draw_scrollbar(list, content_height, scroll->offset_pixels);
 }
 
-// Returns true when the row was tapped or clicked, which toggles its check box.
-static bool draw_panel_form_problems_row(const App *app, const Task_Problem *problem,
-                                         Rectangle row, bool clickable) {
+// Returns true when the row was tapped or clicked, which toggles its check box. The box has the
+// target's color, so that problems and opportunities tell apart as on the calendar.
+static bool draw_panel_form_targets_row(const App *app, const Link_Target *target,
+                                        Rectangle row, bool clickable) {
+    assert(event_kind_is_target(target->kind));
     const Fonts *fonts = &app->fonts;
     const bool hovered = CheckCollisionPointRec(GetMousePosition(), row);
     if (hovered) {
@@ -2680,31 +2753,53 @@ static bool draw_panel_form_problems_row(const App *app, const Task_Problem *pro
     }
     DrawRectangleRec((Rectangle){ row.x, row.y + row.height - 1, row.width, 1 },
                      style_color(BORDER_COLOR_NORMAL));
+    const Target_Status status = target_status(target->task_count, target->task_done_count);
+    const bool done = status == TARGET_STATUS_DONE;
+    const bool missed = target->kind == EVENT_KIND_OPPORTUNITY &&
+                        opportunity_is_missed(target->end_date, target->end_minute, done,
+                                              app_now(app));
+    const Color color = target->kind == EVENT_KIND_PROBLEM ? problem_color
+                        : missed                           ? opportunity_missed_color
+                                                           : opportunity_color;
     const float box_size = 18;
     draw_check_mark((Rectangle){ row.x + 6, row.y + (row.height - box_size) / 2, box_size,
                                  box_size },
-                    problem->linked, problem_color);
+                    target->linked, color);
 
     const float title_x = row.x + 34;
-    const float status_x = row.x + row.width - PROBLEM_STATUS_WIDTH_PIXELS;
+    const float status_x = row.x + row.width - TARGET_STATUS_WIDTH_PIXELS;
     const float text_y = row.y + (row.height - TEXT_LINE_HEIGHT_PIXELS) / 2;
     scissor_begin(fonts, title_x, row.y, status_x - title_x - 8, row.height);
-    draw_text(&fonts->ui, problem->title, title_x, text_y, style_color(TEXT_COLOR_NORMAL));
+    draw_text(&fonts->ui, target->title, title_x, text_y, style_color(TEXT_COLOR_NORMAL));
     scissor_end(fonts);
-    Problem_Status status = problem_status(problem->task_count, problem->task_done_count);
-    draw_text(&fonts->small, problem_status_name(status), status_x, text_y + 3,
+    draw_text(&fonts->small, missed ? "Missed" : target_status_name(status), status_x, text_y + 3,
               style_color(TEXT_COLOR_DISABLED));
     return clickable && hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
 }
 
-static int32_t form_problems_linked_count(const Form *form) {
-    assert(form->problem_count >= 0);
-    assert(form->problem_count <= PROBLEM_LINK_COUNT_MAX);
+static int32_t form_targets_linked_count(const Form *form) {
+    assert(form->target_count >= 0);
+    assert(form->target_count <= LINK_COUNT_MAX);
     int32_t count = 0;
-    for (int32_t i = 0; i < form->problem_count; i++) {
-        count += form->problems[i].linked ? 1 : 0;
+    for (int32_t i = 0; i < form->target_count; i++) {
+        count += form->targets[i].linked ? 1 : 0;
     }
     return count;
+}
+
+// Whether the deadline typed in the form has passed. A deadline not typed correctly yet is not
+// missed, because the form says what to fix when it is saved.
+static bool form_deadline_is_missed(const Form *form, Date_Time now, bool tasks_done) {
+    assert(form->kind == EVENT_KIND_OPPORTUNITY);
+    Date end_date = { 0, 0, 0 };
+    if (!date_parse_iso(form->text[FORM_FIELD_END_DATE], &end_date)) {
+        return false;
+    }
+    int32_t end_minute = TIME_NONE;
+    if (!form_parse_time(form->text[FORM_FIELD_END_TIME], &end_minute)) {
+        return false;
+    }
+    return opportunity_is_missed(end_date, end_minute, tasks_done, now);
 }
 
 static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
@@ -2822,12 +2917,23 @@ static bool form_field_visible(const Form *form, int32_t field) {
         return field == FORM_FIELD_TITLE || field == FORM_FIELD_DESCRIPTION;
     }
     if (field == FORM_FIELD_REPEAT_DAYS) {
-        return form->repeat_option == REPEAT_OPTION_DAYS;
+        return form_repeat_option(form) == REPEAT_OPTION_DAYS;
     }
     if (field == FORM_FIELD_REPEAT_END_DATE) {
-        return form->repeat_option != REPEAT_OPTION_NONE;
+        return form_repeat_option(form) != REPEAT_OPTION_NONE;
     }
     return true;
+}
+
+// The repeat chosen, or none for an opportunity, which cannot repeat; the choice stays in the
+// form, hidden, in case the kind is switched back.
+static int32_t form_repeat_option(const Form *form) {
+    assert(form->repeat_option >= 0);
+    assert(form->repeat_option < REPEAT_OPTION_COUNT);
+    if (form->kind == EVENT_KIND_OPPORTUNITY) {
+        return REPEAT_OPTION_NONE;
+    }
+    return form->repeat_option;
 }
 
 // Fills event from the form. Returns NULL on success, or a message saying what to fix.
@@ -2850,11 +2956,13 @@ static const char *form_parse(const Form *form, Date today, Event *event) {
     if (!form_parse_time(form->text[FORM_FIELD_START_TIME], &event->start_minute)) {
         return "Start time must be HH:MM.";
     }
+    // Named as the form labels it.
+    const bool opportunity = form->kind == EVENT_KIND_OPPORTUNITY;
     if (!date_parse_iso(form->text[FORM_FIELD_END_DATE], &event->end_date)) {
-        return "End date must be YYYY-MM-DD.";
+        return opportunity ? "Deadline must be YYYY-MM-DD." : "End date must be YYYY-MM-DD.";
     }
     if (!form_parse_time(form->text[FORM_FIELD_END_TIME], &event->end_minute)) {
-        return "End time must be HH:MM.";
+        return opportunity ? "Deadline time must be HH:MM." : "End time must be HH:MM.";
     }
     // The location id is found or created when saving, from these texts.
     text_copy_trimmed(event->location.address, sizeof(event->location.address),
@@ -2863,14 +2971,13 @@ static const char *form_parse(const Form *form, Date today, Event *event) {
                       form->text[FORM_FIELD_LOCATION_CITY]);
     text_copy_trimmed(event->description, sizeof(event->description),
                       form->text[FORM_FIELD_DESCRIPTION]);
-    assert(form->repeat_option >= 0);
-    assert(form->repeat_option < REPEAT_OPTION_COUNT);
     assert(form->kind >= 0);
     assert(form->kind < EVENT_KIND_COUNT);
+    const int32_t repeat_option = form_repeat_option(form);
     event->kind = form->kind;
-    event->repeat_unit = repeat_option_units[form->repeat_option];
+    event->repeat_unit = repeat_option_units[repeat_option];
     event->repeat_interval = 1;
-    if (form->repeat_option == REPEAT_OPTION_DAYS) {
+    if (repeat_option == REPEAT_OPTION_DAYS) {
         if (!form_parse_repeat_days(form->text[FORM_FIELD_REPEAT_DAYS],
                                     &event->repeat_interval)) {
             return "Days must be 1 to 999.";
@@ -2892,13 +2999,15 @@ static const char *form_parse(const Form *form, Date today, Event *event) {
 static const char *form_parse_order(const Event *event) {
     int32_t start_day = date_to_day_number(event->start_date);
     int32_t end_day = date_to_day_number(event->end_date);
+    // Named as the form labels it.
+    const bool opportunity = event->kind == EVENT_KIND_OPPORTUNITY;
     if (end_day < start_day) {
-        return "End date is before start.";
+        return opportunity ? "Deadline is before start." : "End date is before start.";
     }
     if (end_day == start_day) {
         if (event->start_minute != TIME_NONE && event->end_minute != TIME_NONE) {
             if (event->end_minute < event->start_minute) {
-                return "End time is before start.";
+                return opportunity ? "Deadline is before start." : "End time is before start.";
             }
         }
     }
@@ -3064,20 +3173,67 @@ static bool text_line_fits(const Text_Style *style, const char *text, int32_t le
     return measure_text(style, line).x <= width_pixels;
 }
 
-static Color event_color(const Event *event) {
-    assert(event->id > 0);
-    if (event->kind == EVENT_KIND_PROBLEM) {
-        return event->problem_done ? problem_done_color : problem_color;
+static bool event_is_missed(const Event *event, Date_Time now) {
+    if (event->kind != EVENT_KIND_OPPORTUNITY) {
+        return false;
     }
-    assert(!event->problem_done);
+    return opportunity_is_missed(event->end_date, event->end_minute, event->tasks_done, now);
+}
+
+// now matters only for an opportunity, which turns gray once missed.
+static Color event_color(const Event *event, Date_Time now) {
+    assert(event->id > 0);
+    if (event_kind_is_target(event->kind) && event->tasks_done) {
+        return target_done_color;
+    }
+    if (event->kind == EVENT_KIND_PROBLEM) {
+        return problem_color;
+    }
+    if (event->kind == EVENT_KIND_OPPORTUNITY) {
+        return event_is_missed(event, now) ? opportunity_missed_color : opportunity_color;
+    }
+    assert(!event->tasks_done);
     return event_colors[event->id % EVENT_COLOR_COUNT];
 }
 
+// What a bar or timeline block shows: the title, after the time when with_time, as where an
+// occurrence starts. An item with only an end time says "Until", since its block is drawn in
+// the hour before the end, not from a start; a multi-day item's end is on another day, so it
+// has none. A missed opportunity says so first, because its gray alone could be any item.
+static void event_format_label(const Event *event, bool with_time, Date_Time now, char *buffer,
+                               size_t buffer_size) {
+    assert(buffer_size > 0);
+    const char *missed = event_is_missed(event, now) ? "Missed: " : "";
+    char time[TIME_TEXT_SIZE];
+    if (with_time && event->start_minute != TIME_NONE) {
+        time_format(event->start_minute, time, sizeof(time));
+        snprintf(buffer, buffer_size, "%s%s %s", missed, time, event->title);
+    } else if (with_time && event->end_minute != TIME_NONE && event_duration_days(event) == 0) {
+        time_format(event->end_minute, time, sizeof(time));
+        snprintf(buffer, buffer_size, "%sUntil %s %s", missed, time, event->title);
+    } else {
+        snprintf(buffer, buffer_size, "%s%s", missed, event->title);
+    }
+}
+
 // The dates and times, followed by how the event repeats, if it does.
-static void event_format_range(const Event *event, char *buffer, size_t buffer_size) {
+static void event_format_range(const Event *event, Date_Time now, char *buffer,
+                               size_t buffer_size) {
     // A problem has no range: it is on its one day, which the panel heading shows.
     if (event->kind == EVENT_KIND_PROBLEM) {
-        snprintf(buffer, buffer_size, "%s", event->problem_done ? "Problem, completed" : "Problem");
+        snprintf(buffer, buffer_size, "%s", event->tasks_done ? "Problem, completed" : "Problem");
+        return;
+    }
+    // An opportunity is about its deadline, and whether it was used or missed by then; the
+    // calendar shows when it starts.
+    if (event->kind == EVENT_KIND_OPPORTUNITY) {
+        // "31 Dec 23:59", with room for any int32_t day as far as the compiler can tell.
+        char deadline[32];
+        format_date_time_short(event->end_date, event->end_minute, deadline, sizeof(deadline));
+        const char *state = event->tasks_done          ? "Used opportunity"
+                            : event_is_missed(event, now) ? "Missed opportunity"
+                                                          : "Opportunity";
+        snprintf(buffer, buffer_size, "%s, deadline %s", state, deadline);
         return;
     }
     event_format_range_dates(event, buffer, buffer_size);

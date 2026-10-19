@@ -13,10 +13,10 @@ enum {
     PROBLEMS_VIEW_ERROR_SIZE = 192,
 };
 
-// The Problems view: every problem, in one column per Problem_Status from the least to the most
+// The Problems view: every problem, in one column per Target_Status from the least to the most
 // complete, drawn as the calendar's week view draws its days.
 typedef struct Problems_View {
-    Task_Problem problems[PROBLEMS_VIEW_COUNT_MAX];
+    Link_Target problems[PROBLEMS_VIEW_COUNT_MAX];
     uint64_t revision;      // Backend revision that problems[] was loaded at
     int32_t problem_count;
     bool loaded;            // False until the first load, and after a failed one

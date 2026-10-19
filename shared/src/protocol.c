@@ -70,7 +70,7 @@ void writer_event(Writer *writer, const Event *event) {
     writer_i32(writer, event->repeat_interval);
     writer_i32(writer, event->kind);
     writer_u8(writer, event->repeat_has_end ? 1 : 0);
-    writer_u8(writer, event->problem_done ? 1 : 0);
+    writer_u8(writer, event->tasks_done ? 1 : 0);
     writer_text(writer, event->title);
     writer_text(writer, event->description);
 }
@@ -80,18 +80,22 @@ void writer_completion(Writer *writer, const Task_Completion *completion) {
     writer_i32(writer, completion->occurrence_start_day);
 }
 
-void writer_problem_task(Writer *writer, const Problem_Task *task) {
+void writer_linked_task(Writer *writer, const Linked_Task *task) {
     writer_i64(writer, task->task_id);
     writer_u8(writer, task->done ? 1 : 0);
     writer_text(writer, task->title);
 }
 
-void writer_task_problem(Writer *writer, const Task_Problem *problem) {
-    writer_i64(writer, problem->problem_id);
-    writer_i32(writer, problem->task_count);
-    writer_i32(writer, problem->task_done_count);
-    writer_u8(writer, problem->linked ? 1 : 0);
-    writer_text(writer, problem->title);
+// Every field, in declaration order; reader_link_target reads them back in the same order.
+void writer_link_target(Writer *writer, const Link_Target *target) {
+    writer_i64(writer, target->target_id);
+    writer_date(writer, target->end_date);
+    writer_i32(writer, target->end_minute);
+    writer_i32(writer, target->task_count);
+    writer_i32(writer, target->task_done_count);
+    writer_i32(writer, target->kind);
+    writer_u8(writer, target->linked ? 1 : 0);
+    writer_text(writer, target->title);
 }
 
 Reader reader_make(const uint8_t *buffer, size_t length) {
@@ -176,8 +180,8 @@ Event reader_event(Reader *reader) {
     event.repeat_interval = reader_i32(reader);
     event.kind = reader_i32(reader);
     event.repeat_has_end = reader_u8(reader) != 0;
-    // event_is_valid below refuses it on anything but a problem.
-    event.problem_done = reader_u8(reader) != 0;
+    // event_is_valid below refuses it on anything but a link target.
+    event.tasks_done = reader_u8(reader) != 0;
     reader_text(reader, event.title, sizeof(event.title));
     reader_text(reader, event.description, sizeof(event.description));
 
@@ -205,8 +209,8 @@ Task_Completion reader_completion(Reader *reader) {
     return completion;
 }
 
-Problem_Task reader_problem_task(Reader *reader) {
-    Problem_Task task = { 0 };
+Linked_Task reader_linked_task(Reader *reader) {
+    Linked_Task task = { 0 };
     task.task_id = reader_i64(reader);
     uint8_t done = reader_u8(reader);
     reader_text(reader, task.title, sizeof(task.title));
@@ -215,30 +219,41 @@ Problem_Task reader_problem_task(Reader *reader) {
         reader->failed = true;
     }
     if (reader->failed) {
-        return (Problem_Task){ 0 };
+        return (Linked_Task){ 0 };
     }
     return task;
 }
 
-// The counts are checked as problem_status asserts them, because they come from the network.
-Task_Problem reader_task_problem(Reader *reader) {
-    Task_Problem problem = { 0 };
-    problem.problem_id = reader_i64(reader);
-    problem.task_count = reader_i32(reader);
-    problem.task_done_count = reader_i32(reader);
+// The counts, kind and deadline are checked as target_status, event_kind_is_target and
+// opportunity_is_missed assert them, because they come from the network.
+Link_Target reader_link_target(Reader *reader) {
+    Link_Target target = { 0 };
+    target.target_id = reader_i64(reader);
+    target.end_date = reader_date(reader);
+    target.end_minute = reader_i32(reader);
+    target.task_count = reader_i32(reader);
+    target.task_done_count = reader_i32(reader);
+    target.kind = reader_i32(reader);
     uint8_t linked = reader_u8(reader);
-    reader_text(reader, problem.title, sizeof(problem.title));
-    problem.linked = linked == 1;
-    if (problem.problem_id <= 0 || linked > 1 || problem.title[0] == '\0') {
+    reader_text(reader, target.title, sizeof(target.title));
+    target.linked = linked == 1;
+    if (target.target_id <= 0 || linked > 1 || target.title[0] == '\0') {
         reader->failed = true;
     }
-    if (problem.task_done_count < 0 || problem.task_done_count > problem.task_count) {
+    if (target.task_done_count < 0 || target.task_done_count > target.task_count) {
+        reader->failed = true;
+    }
+    if (target.kind != EVENT_KIND_PROBLEM && target.kind != EVENT_KIND_OPPORTUNITY) {
+        reader->failed = true;
+    }
+    bool minute_valid = target.end_minute >= 0 && target.end_minute < MINUTES_PER_DAY;
+    if (target.end_minute != TIME_NONE && !minute_valid) {
         reader->failed = true;
     }
     if (reader->failed) {
-        return (Task_Problem){ 0 };
+        return (Link_Target){ 0 };
     }
-    return problem;
+    return target;
 }
 
 bool reader_done(const Reader *reader) {

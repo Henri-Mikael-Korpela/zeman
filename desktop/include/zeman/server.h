@@ -37,8 +37,8 @@ typedef struct Server {
     Server_Client clients[SERVER_CLIENT_COUNT_MAX];
     Event events[PROTOCOL_EVENT_COUNT_MAX];
     Task_Completion completions[PROTOCOL_COMPLETION_COUNT_MAX];
-    Problem_Task problem_tasks[PROBLEM_LINK_COUNT_MAX];
-    Task_Problem task_problems[PROBLEM_LINK_COUNT_MAX];
+    Linked_Task linked_tasks[LINK_COUNT_MAX];
+    Link_Target link_targets[LINK_COUNT_MAX];
     Backend *backend;
     Net_Socket listener;
     Net_Socket discovery;  // UDP, or NET_SOCKET_INVALID when the port was taken

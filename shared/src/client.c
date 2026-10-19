@@ -30,12 +30,13 @@ static bool client_update(void *context, const Event *event);
 static bool client_remove(void *context, int64_t id);
 static bool client_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
 static int64_t client_location(void *context, const char *address, const char *city);
-static int32_t client_load_problem_tasks(void *context, int64_t problem_id, Problem_Task *tasks,
-                                         int32_t task_count_max, bool *truncated);
-static int32_t client_load_task_problems(void *context, int64_t task_id, Task_Problem *problems,
-                                         int32_t problem_count_max, bool *truncated);
-static bool client_set_task_problems(void *context, int64_t task_id, const int64_t *problem_ids,
-                                     int32_t problem_count);
+static int32_t client_load_target_tasks(void *context, int64_t target_id, Linked_Task *tasks,
+                                        int32_t task_count_max, bool *truncated);
+static int32_t client_load_task_targets(void *context, int64_t task_id, bool problems_only,
+                                        Link_Target *targets, int32_t target_count_max,
+                                        bool *truncated);
+static bool client_set_task_targets(void *context, int64_t task_id, const int64_t *target_ids,
+                                    int32_t target_count);
 static uint64_t client_revision(void *context);
 static const char *client_error(const void *context);
 
@@ -47,9 +48,9 @@ static const Backend_Ops client_ops = {
     .remove = client_remove,
     .set_task_done = client_set_task_done,
     .location_find_or_create = client_location,
-    .load_problem_tasks = client_load_problem_tasks,
-    .load_task_problems = client_load_task_problems,
-    .set_task_problems = client_set_task_problems,
+    .load_target_tasks = client_load_target_tasks,
+    .load_task_targets = client_load_task_targets,
+    .set_task_targets = client_set_task_targets,
     .revision = client_revision,
     .error = client_error,
 };
@@ -188,13 +189,13 @@ static int64_t client_location(void *context, const char *address, const char *c
     return client_response_done(client, &response) && id > 0 ? id : 0;
 }
 
-static int32_t client_load_problem_tasks(void *context, int64_t problem_id, Problem_Task *tasks,
-                                         int32_t task_count_max, bool *truncated) {
+static int32_t client_load_target_tasks(void *context, int64_t target_id, Linked_Task *tasks,
+                                        int32_t task_count_max, bool *truncated) {
     Client *client = context;
-    assert(problem_id > 0);
+    assert(target_id > 0);
     assert(task_count_max > 0);
-    Writer request = client_request_begin(client, PROTOCOL_LOAD_PROBLEM_TASKS);
-    writer_i64(&request, problem_id);
+    Writer request = client_request_begin(client, PROTOCOL_LOAD_TARGET_TASKS);
+    writer_i64(&request, target_id);
     writer_i32(&request, task_count_max);
     Reader response;
     if (!client_call(client, &request, &response)) {
@@ -207,46 +208,52 @@ static int32_t client_load_problem_tasks(void *context, int64_t problem_id, Prob
         return -1;
     }
     for (int32_t i = 0; i < count; i++) {
-        tasks[i] = reader_problem_task(&response);
+        tasks[i] = reader_linked_task(&response);
     }
     return client_response_done(client, &response) ? count : -1;
 }
 
-static int32_t client_load_task_problems(void *context, int64_t task_id, Task_Problem *problems,
-                                         int32_t problem_count_max, bool *truncated) {
+static int32_t client_load_task_targets(void *context, int64_t task_id, bool problems_only,
+                                        Link_Target *targets, int32_t target_count_max,
+                                        bool *truncated) {
     Client *client = context;
     assert(task_id >= 0);
-    assert(problem_count_max > 0);
-    Writer request = client_request_begin(client, PROTOCOL_LOAD_TASK_PROBLEMS);
+    assert(target_count_max > 0);
+    Writer request = client_request_begin(client, PROTOCOL_LOAD_TASK_TARGETS);
     writer_i64(&request, task_id);
-    writer_i32(&request, problem_count_max);
+    writer_u8(&request, problems_only ? 1 : 0);
+    writer_i32(&request, target_count_max);
     Reader response;
     if (!client_call(client, &request, &response)) {
         return -1;
     }
     *truncated = reader_u8(&response) != 0;
     int32_t count = reader_i32(&response);
-    if (count < 0 || count > problem_count_max) {
+    if (count < 0 || count > target_count_max) {
         client_disconnect(client, "The desktop app sent an invalid answer.");
         return -1;
     }
     for (int32_t i = 0; i < count; i++) {
-        problems[i] = reader_task_problem(&response);
+        targets[i] = reader_link_target(&response);
+        // Asked for problems alone, an opportunity is an answer to another question.
+        if (problems_only && targets[i].kind != EVENT_KIND_PROBLEM) {
+            response.failed = true;
+        }
     }
     return client_response_done(client, &response) ? count : -1;
 }
 
-static bool client_set_task_problems(void *context, int64_t task_id, const int64_t *problem_ids,
-                                     int32_t problem_count) {
+static bool client_set_task_targets(void *context, int64_t task_id, const int64_t *target_ids,
+                                    int32_t target_count) {
     Client *client = context;
     assert(task_id > 0);
-    assert(problem_count >= 0);
-    assert(problem_count <= PROBLEM_LINK_COUNT_MAX);
-    Writer request = client_request_begin(client, PROTOCOL_SET_TASK_PROBLEMS);
+    assert(target_count >= 0);
+    assert(target_count <= LINK_COUNT_MAX);
+    Writer request = client_request_begin(client, PROTOCOL_SET_TASK_TARGETS);
     writer_i64(&request, task_id);
-    writer_i32(&request, problem_count);
-    for (int32_t i = 0; i < problem_count; i++) {
-        writer_i64(&request, problem_ids[i]);
+    writer_i32(&request, target_count);
+    for (int32_t i = 0; i < target_count; i++) {
+        writer_i64(&request, target_ids[i]);
     }
     Reader response;
     return client_call(client, &request, &response) && client_response_done(client, &response);

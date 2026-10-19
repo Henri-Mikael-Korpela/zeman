@@ -62,19 +62,21 @@ int32_t event_store_load_completions(Event_Store *store, Date first, Date last,
                                      Task_Completion *completions, int32_t completion_count_max,
                                      bool *truncated);
 
-// Loads the tasks linked to a problem, in start order, each with whether any occurrence is
+// Loads the tasks linked to a link target, in start order, each with whether any occurrence is
 // done. Returns the number loaded, or -1, and sets *truncated as event_store_load_range does.
-int32_t event_store_load_problem_tasks(Event_Store *store, int64_t problem_id, Problem_Task *tasks,
+int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Linked_Task *tasks,
                                       int32_t task_count_max, bool *truncated);
 
-// Loads every problem with how many of its linked tasks are done, the ones linked to task_id
-// first, then the newest. task_id is 0 for a task not stored yet.
-int32_t event_store_load_task_problems(Event_Store *store, int64_t task_id, Task_Problem *problems,
-                                       int32_t problem_count_max, bool *truncated);
+// Loads every link target, or every problem with problems_only, with how many of its linked
+// tasks are done: the ones linked to task_id first, then the newest. task_id is 0 for a task
+// not stored yet.
+int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool problems_only,
+                                      Link_Target *targets, int32_t target_count_max,
+                                      bool *truncated);
 
-// Replaces the problems linked to the task with problem_ids, each given once. Fails, changing
-// nothing, if one of them is not a problem or the task is not a task.
-bool event_store_set_task_problems(Event_Store *store, int64_t task_id, const int64_t *problem_ids,
-                                   int32_t problem_count);
+// Replaces the targets linked to the task with target_ids, each given once. Fails, changing
+// nothing, if one of them is not a link target or the task is not a task.
+bool event_store_set_task_targets(Event_Store *store, int64_t task_id, const int64_t *target_ids,
+                                  int32_t target_count);
 
 #endif
