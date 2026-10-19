@@ -61,6 +61,29 @@ enum {
     // Room kept free for the day number, and today's circle around it, left of the creation
     // markers. The markers that fit beside it depend on the cell width; past that a "+" is drawn.
     DAY_NUMBER_WIDTH_PIXELS = 44,
+    // Kept free below the last bar of a cell, so that the bar does not touch the cell's border.
+    CELL_BOTTOM_MARGIN_PIXELS = 4,
+    // One hour of the week and day views' timeline: room for two lines of small text, so that
+    // a half-hour item still holds its one-line label (see TIMELINE_ITEM_MINUTES_MIN).
+    TIMELINE_HOUR_HEIGHT_PIXELS = 48,
+    TIMELINE_HEIGHT_PIXELS = MINUTES_PER_DAY / 60 * TIMELINE_HOUR_HEIGHT_PIXELS,
+    // Room left of the days for the hour labels, "00:00" to "23:00", in the small font.
+    TIMELINE_GUTTER_WIDTH_PIXELS = 48,
+    // An item with only a start or only an end time is drawn an hour long, as a meeting
+    // usually is.
+    TIMELINE_ITEM_MINUTES_DEFAULT = 60,
+    // Shorter items are drawn this long, so that their label fits.
+    TIMELINE_ITEM_MINUTES_MIN = 30,
+    // Overlapping items share a day's width in up to this many lanes, so that each lane stays
+    // wide enough to see on a phone's week view. More items share the lane that frees up first.
+    TIMELINE_LANE_COUNT_MAX = 6,
+    // The hour at the top of the timeline when the app opens: the start of a usual day, since
+    // the hours before it are rarely used.
+    TIMELINE_SCROLL_HOUR_START = 7,
+    // In a week or day, the day cells above the timeline hold the items without a time. They
+    // grow with the busiest day shown, up to this share of the grid, so that the hours stay in
+    // sight; past that they say "+N more".
+    UNTIMED_HEIGHT_PERCENT_MAX = 40,
     LEGEND_HEIGHT_PIXELS = 56,
     // A scrolling list moves this far per wheel notch: about three lines of a card.
     LIST_WHEEL_STEP_PIXELS = 48,
@@ -154,6 +177,11 @@ static const int32_t repeat_option_units[REPEAT_OPTION_COUNT] = {
 };
 
 static_assert(REPEAT_INTERVAL_MAX < 1000, "REPEAT_DAYS_TEXT_SIZE holds three digits.");
+static_assert(TIMELINE_ITEM_MINUTES_MIN * TIMELINE_HOUR_HEIGHT_PIXELS / 60 >=
+              EVENT_BAR_HEIGHT_PIXELS, "The shortest timeline item holds a label.");
+static_assert(TIMELINE_ITEM_MINUTES_DEFAULT >= TIMELINE_ITEM_MINUTES_MIN,
+              "The default length is not cut short.");
+static_assert(TIMELINE_SCROLL_HOUR_START < MINUTES_PER_DAY / 60, "The start hour is in a day.");
 
 // Cast because the constants come from different enums.
 static_assert((int)DATE_ISO_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
@@ -214,7 +242,9 @@ static const Theme_Color theme_colors[] = {
 enum { THEME_COLOR_COUNT = sizeof(theme_colors) / sizeof(theme_colors[0]) };
 
 // How many days the calendar shows at once. Every range uses the same day cells; a week is one
-// row of seven, and a day one cell the width of the calendar, so that whole titles show.
+// row of seven, and a day one cell the width of the calendar, so that whole titles show. A week
+// or a day keeps only the items without a time in its cells, and lays out the items with a time
+// on a timeline of the day's hours below them, as most calendar apps do.
 typedef enum Calendar_Range {
     RANGE_MONTH,
     RANGE_WEEK,
@@ -315,6 +345,9 @@ typedef struct App {
     int range;                      // Calendar_Range; int because raygui's toggle group writes it
     int32_t completion_count;
     Scroll panel_scroll;            // The panel's list of cards
+    // The week and day views' hours. Kept when moving between days and ranges, so that the
+    // hours in sight stay put, as on a paper planner.
+    Scroll timeline_scroll;
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
     bool events_truncated;
@@ -334,11 +367,26 @@ typedef struct Text_Lines {
     bool cut;  // The text continues past the last line
 } Text_Lines;
 
+// An item with a time on one day of the timeline: the minutes its block covers, and its place
+// among the items it overlaps.
+typedef struct Timeline_Item {
+    int32_t event_index;    // Into App.events
+    int32_t minute_top;     // 0 ... MINUTES_PER_DAY - TIMELINE_ITEM_MINUTES_MIN
+    int32_t minute_bottom;  // At least TIMELINE_ITEM_MINUTES_MIN after minute_top
+    int32_t lane;           // 0 ... lane_count - 1, from the left
+    // Lanes of the group of items that overlap it, directly or through others, which share the
+    // day's width evenly.
+    int32_t lane_count;
+} Timeline_Item;
+
 typedef struct Layout {
     Rectangle header;
     Rectangle range_bar;  // The Month/Week/Day selector; empty when not shown
     Rectangle weekdays;
-    Rectangle grid;
+    Rectangle grid;       // The day cells; in a week or day, the row above the timeline
+    // The hours of a week or day below the day cells, with the hour labels in a gutter at the
+    // left, so that the days start at grid.x; empty in a month.
+    Rectangle timeline;
     Rectangle panel;
     Rectangle status;
     float cell_width;
@@ -372,10 +420,13 @@ static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserte
 static void app_event_delete(App *app, int64_t id);
 static bool app_task_done(const App *app, int64_t id, int32_t start_day);
 static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done);
-static Layout layout_compute(float width, float height, bool form_open, int32_t range);
+static Layout layout_compute(float width, float height, bool form_open, int32_t range,
+                             int32_t untimed_count);
 static Layout layout_compute_portrait(float width, float height, bool form_open,
-                                      int32_t range);
-static void layout_set_grid(Layout *layout, int32_t range);
+                                      int32_t range, int32_t untimed_count);
+static void layout_set_grid(Layout *layout, int32_t range, int32_t untimed_count);
+static void layout_set_grid_timeline(Layout *layout, int32_t untimed_count);
+static int32_t app_untimed_count_max(const App *app);
 static int32_t range_day_count(int32_t range);
 static Date range_step(Date date, int32_t range, int32_t direction);
 static Date range_first_date(const App *app);
@@ -386,6 +437,23 @@ static Date grid_first_date(Date month);
 static void draw_header(App *app, const Layout *layout);
 static void draw_weekdays(const Fonts *fonts, const Layout *layout, Date first);
 static void draw_grid(App *app, const Layout *layout);
+static void draw_grid_selection(const App *app, const Layout *layout, int32_t first_day);
+static void draw_timeline(App *app, const Layout *layout, int32_t first_day);
+static void draw_timeline_hours(const App *app, const Layout *layout, float top);
+static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered);
+static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_t busy_bottom,
+                                         bool hovered);
+static void draw_timeline_item(const App *app, const Event *event, Rectangle block,
+                               int32_t day_number);
+static int32_t timeline_items_collect(const App *app, int32_t day_number, Timeline_Item *items);
+static Timeline_Item timeline_item_make(const Event *event, int32_t event_index);
+static void timeline_items_sort(Timeline_Item *items, int32_t count);
+static bool timeline_item_is_before(const Timeline_Item *a, const Timeline_Item *b);
+static void timeline_items_assign_lanes(Timeline_Item *items, int32_t count);
+static int32_t timeline_lane_find(const int32_t *lane_bottoms, int32_t lane_count,
+                                  int32_t minute_top);
+static void timeline_items_set_lane_count(Timeline_Item *items, int32_t first_index,
+                                          int32_t end_index, int32_t lane_count);
 static const Event *focused_event_find(const App *app);
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
                            const Event *focused);
@@ -396,6 +464,8 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
                                   int32_t column);
 static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectangle bar_slot,
                                      int32_t day_number, int32_t start_day, int32_t column);
+static void draw_event_label(const App *app, const Event *event, const char *label,
+                             Rectangle area, bool done);
 static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Color color);
 static void draw_check_mark(Rectangle box, bool done, Color color);
 static void draw_tick(Rectangle area, float thickness, Color color);
@@ -439,6 +509,8 @@ static bool form_parse_time(const char *text, int32_t *minute_of_day);
 static bool form_parse_repeat_days(const char *text, int32_t *days);
 static bool event_occurs_on_day(const Event *event, int32_t day_number);
 static bool event_created_on_day(const Event *event, int32_t day_number);
+static bool event_is_timed(const Event *event);
+static bool event_in_day_cell(const Event *event, int32_t range);
 static Color event_color(const Event *event);
 static void event_format_range(const Event *event, char *buffer, size_t buffer_size);
 static void event_format_range_dates(const Event *event, char *buffer, size_t buffer_size);
@@ -484,6 +556,10 @@ App *app_create(Backend *backend, const App_Config *config) {
     app.now_minute = now.minute_of_day;
     app.selected = app.today;
     app.events_month = (Date){ app.today.year, app.today.month, 1 };
+    // Before the first app_sync, because the first frame's layout reads it.
+    app.visible_first = range_first_date(&app);
+    app.timeline_scroll.offset_pixels =
+        (float)(TIMELINE_SCROLL_HOUR_START * TIMELINE_HOUR_HEIGHT_PIXELS);
     app.events_stale = true;
     app.form.field_active = FORM_FIELD_NONE;
     return &app;
@@ -504,7 +580,7 @@ void app_frame(App *app, Rectangle area) {
     app->fonts.origin = (Vector2){ area.x, area.y };
     SetMouseScale(1.0f / scale, 1.0f / scale);
     Layout layout = layout_compute(area.width / scale, area.height / scale, app->form.open,
-                                   app->range);
+                                   app->range, app_untimed_count_max(app));
     if (app->input_enabled) {
         SetMouseOffset(-(int)area.x, -(int)area.y);
         app_handle_keys(app, &layout);
@@ -515,8 +591,10 @@ void app_frame(App *app, Rectangle area) {
         GuiLock();
     }
     app_sync(app);
-    // Again, because a key may have changed the range or opened the form.
-    layout = layout_compute(area.width / scale, area.height / scale, app->form.open, app->range);
+    // Again, because a key may have changed the range or opened the form, and loading may have
+    // changed the items without a time.
+    layout = layout_compute(area.width / scale, area.height / scale, app->form.open, app->range,
+                            app_untimed_count_max(app));
 
     // The fonts were rasterized at this scale, so text stays sharp; on the desktop the scale is
     // 1 and only the offset matters.
@@ -692,15 +770,20 @@ static void app_handle_keys(App *app, const Layout *layout) {
     if (IsKeyPressed(KEY_HOME)) {
         target = app->today;
     }
-    // Over the grid only, so that they mean nothing over the panel: a sideways swipe on a touch
-    // screen, or the wheel, moves by the range.
-    if (CheckCollisionPointRec(GetMousePosition(), layout->grid)) {
+    // Over the calendar only, so that they mean nothing over the panel: a sideways swipe on a
+    // touch screen, or the wheel over the day cells, moves by the range. Over the timeline the
+    // wheel scrolls the hours instead (see draw_timeline).
+    const Vector2 mouse = GetMousePosition();
+    const bool over_grid = CheckCollisionPointRec(mouse, layout->grid);
+    if (over_grid || CheckCollisionPointRec(mouse, layout->timeline)) {
         if (app->touch && IsGestureDetected(GESTURE_SWIPE_LEFT)) {
             target = range_step(target, app->range, 1);
         }
         if (app->touch && IsGestureDetected(GESTURE_SWIPE_RIGHT)) {
             target = range_step(target, app->range, -1);
         }
+    }
+    if (over_grid) {
         float wheel = GetMouseWheelMove();
         if (wheel > 0.0f) {
             target = range_step(target, app->range, -1);
@@ -1085,9 +1168,11 @@ static void app_event_delete(App *app, int64_t id) {
 
 // width and height are in layout pixels. A window taller than wide, such as a phone, gets the
 // portrait layout; otherwise the panel sits to the right of the calendar.
-static Layout layout_compute(float width, float height, bool form_open, int32_t range) {
+// untimed_count is app_untimed_count_max: how many rows of bars a week or day's cells need.
+static Layout layout_compute(float width, float height, bool form_open, int32_t range,
+                             int32_t untimed_count) {
     if (width < height) {
-        return layout_compute_portrait(width, height, form_open, range);
+        return layout_compute_portrait(width, height, form_open, range, untimed_count);
     }
     const float padding = (float)PADDING_PIXELS;
     const float status_height = (float)STATUS_HEIGHT_PIXELS;
@@ -1108,22 +1193,75 @@ static Layout layout_compute(float width, float height, bool form_open, int32_t 
     float grid_y = weekdays_y + WEEKDAY_HEIGHT_PIXELS;
     layout.grid = (Rectangle){ padding, grid_y, calendar_width,
                                height - status_height - padding - grid_y };
-    layout_set_grid(&layout, range);
+    layout_set_grid(&layout, range, untimed_count);
     return layout;
 }
 
-// Rows and columns of day cells for the range, filling the grid rectangle.
-static void layout_set_grid(Layout *layout, int32_t range) {
+// Rows and columns of day cells for the range, filling the grid rectangle; in a week or day,
+// the grid is first split into the day cells and the timeline.
+static void layout_set_grid(Layout *layout, int32_t range, int32_t untimed_count) {
     assert(range >= 0);
     assert(range < RANGE_COUNT);
     layout->columns = range == RANGE_DAY ? 1 : GRID_COLUMN_COUNT;
     layout->rows = range == RANGE_MONTH ? GRID_ROW_COUNT : 1;
     assert(layout->columns * layout->rows == range_day_count(range));
+    if (range != RANGE_MONTH) {
+        layout_set_grid_timeline(layout, untimed_count);
+    }
     layout->cell_width = layout->grid.width / (float)layout->columns;
     layout->cell_height = layout->grid.height / (float)layout->rows;
     // The minimum window size guarantees room for every part.
     assert(layout->cell_width > 0.0f);
     assert(layout->cell_height > 0.0f);
+}
+
+// The day cells keep the top of the grid, as tall as the busiest day's items without a time
+// need, and the timeline takes the rest. The gutter for the hour labels is cut from the left
+// of both, and of the weekday names, so that each day lines up with its hours.
+static void layout_set_grid_timeline(Layout *layout, int32_t untimed_count) {
+    assert(untimed_count >= 0);
+    assert(untimed_count <= EVENT_COUNT_MAX);
+    const float gutter = (float)TIMELINE_GUTTER_WIDTH_PIXELS;
+    const float slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
+    const Rectangle area = layout->grid;
+    float height = (float)(CELL_TOP_LINE_PIXELS + CELL_BOTTOM_MARGIN_PIXELS) +
+                   (float)untimed_count * slot_height;
+    const float height_max = area.height * UNTIMED_HEIGHT_PERCENT_MAX / 100.0f;
+    if (height > height_max) {
+        height = height_max;
+    }
+    layout->grid = (Rectangle){ area.x + gutter, area.y, area.width - gutter, height };
+    layout->timeline = (Rectangle){ area.x, area.y + height, area.width, area.height - height };
+    layout->weekdays.x += gutter;
+    layout->weekdays.width -= gutter;
+    // The minimum window size guarantees room for both.
+    assert(layout->grid.width > 0.0f);
+    assert(layout->timeline.height > 0.0f);
+}
+
+// The most items without a time on any one day shown, which sets how tall a week or day's cells
+// are. A month's cells share the grid evenly, so it needs none.
+static int32_t app_untimed_count_max(const App *app) {
+    if (app->range == RANGE_MONTH) {
+        return 0;
+    }
+    const int32_t first_day = date_to_day_number(app->visible_first);
+    const int32_t day_count = range_day_count(app->range);
+    int32_t count_max = 0;
+    for (int32_t day = 0; day < day_count; day++) {
+        int32_t count = 0;
+        for (int32_t i = 0; i < app->event_count; i++) {
+            const Event *event = &app->events[i];
+            if (!event_is_timed(event) && event_occurs_on_day(event, first_day + day)) {
+                count++;
+            }
+        }
+        if (count > count_max) {
+            count_max = count;
+        }
+    }
+    assert(count_max <= app->event_count);
+    return count_max;
 }
 
 static int32_t range_day_count(int32_t range) {
@@ -1230,7 +1368,7 @@ static int32_t app_visible_item_count(const App *app) {
 // The calendar above and the panel below, each the full width. While the form is open it takes
 // everything below the header, because it needs the height and the grid cannot be used then.
 static Layout layout_compute_portrait(float width, float height, bool form_open,
-                                      int32_t range) {
+                                      int32_t range, int32_t untimed_count) {
     const float padding = (float)PADDING_PIXELS_PORTRAIT;
     const float status_height = (float)STATUS_HEIGHT_PIXELS;
     const float content_width = width - 2 * padding;
@@ -1251,8 +1389,9 @@ static Layout layout_compute_portrait(float width, float height, bool form_open,
                         WEEKDAY_HEIGHT_PIXELS;
     layout.weekdays = (Rectangle){ padding, top, content_width, WEEKDAY_HEIGHT_PIXELS };
     layout.grid = (Rectangle){ padding, top + WEEKDAY_HEIGHT_PIXELS, content_width, grid_height };
-    layout_set_grid(&layout, range);
+    // The panel goes below the whole grid, before it is split into cells and timeline.
     float panel_y = layout.grid.y + layout.grid.height + padding;
+    layout_set_grid(&layout, range, untimed_count);
     layout.panel = (Rectangle){ padding, panel_y, content_width, bottom - panel_y };
     assert(layout.panel.height > 0.0f);
     return layout;
@@ -1340,6 +1479,318 @@ static void draw_grid(App *app, const Layout *layout) {
         int32_t column = cell_index % layout->columns;
         draw_grid_cell(app, cell, first_day + cell_index, column, focused);
     }
+    if (layout->timeline.height > 0.0f) {
+        draw_timeline(app, layout, first_day);
+    }
+    // Last, so that neither the cells nor the timeline cover it.
+    draw_grid_selection(app, layout, first_day);
+}
+
+// An accent outline around the selected day; in a week or day, down through its hours too.
+static void draw_grid_selection(const App *app, const Layout *layout, int32_t first_day) {
+    const int32_t cell_index = date_to_day_number(app->selected) - first_day;
+    // A click this frame may have selected a day outside the range drawn.
+    if (cell_index < 0 || cell_index >= layout->rows * layout->columns) {
+        return;
+    }
+    Rectangle cell = grid_cell_rectangle(layout, cell_index);
+    if (layout->timeline.height > 0.0f) {
+        cell.height = layout->timeline.y + layout->timeline.height - cell.y;
+    }
+    Rectangle inner = { cell.x + 2, cell.y + 2, cell.width - 4, cell.height - 4 };
+    assert(inner.width > 0.0f);
+    assert(inner.height > 0.0f);
+    DrawRectangleLinesEx(inner, 2, style_color(BORDER_COLOR_PRESSED));
+}
+
+// The hours of a week or day, scrolled by the wheel or by dragging, with each day's items that
+// have a time placed at their times. Clicking a day's hours selects the day, as its cell does.
+static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
+    const Rectangle timeline = layout->timeline;
+    assert(timeline.height > 0.0f);
+    assert(layout->rows == 1);
+    scroll_update(&app->timeline_scroll, timeline, (float)TIMELINE_HEIGHT_PIXELS);
+    // Where 00:00 is: above the timeline while it is scrolled down.
+    const float top = timeline.y - app->timeline_scroll.offset_pixels;
+    // Every drawing below, and the scissor rectangles of the labels, stays within the timeline.
+    app->fonts.clip = timeline;
+    app->fonts.clipping = true;
+    scissor_begin(&app->fonts, timeline.x, timeline.y, timeline.width, timeline.height);
+
+    for (int32_t column = 0; column < layout->columns; column++) {
+        Rectangle area = { layout->grid.x + (float)column * layout->cell_width, timeline.y,
+                           layout->cell_width, timeline.height };
+        bool hovered = CheckCollisionPointRec(GetMousePosition(), area);
+        if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            app_select(app, date_from_day_number(first_day + column));
+        }
+        Rectangle day = { area.x, top, area.width, (float)TIMELINE_HEIGHT_PIXELS };
+        draw_timeline_day(app, day, first_day + column, hovered);
+        DrawRectangleLinesEx(area, 1, style_color(BORDER_COLOR_NORMAL));
+    }
+    draw_timeline_hours(app, layout, top);
+
+    app->fonts.clipping = false;
+    EndScissorMode();
+}
+
+// The hour labels in the gutter left of the days; each day draws its own hour lines.
+static void draw_timeline_hours(const App *app, const Layout *layout, float top) {
+    const Rectangle timeline = layout->timeline;
+    const float days_left = layout->grid.x;
+    assert(days_left > timeline.x);
+    assert(days_left < timeline.x + timeline.width);
+    const Text_Style *style = &app->fonts.small;
+    for (int32_t hour = 0; hour < MINUTES_PER_DAY / 60; hour++) {
+        float y = top + (float)(hour * TIMELINE_HOUR_HEIGHT_PIXELS);
+        // Hours scrolled out of sight would be clipped anyway; skipping them saves the text.
+        bool visible = y + TIMELINE_HOUR_HEIGHT_PIXELS > timeline.y &&
+                       y < timeline.y + timeline.height;
+        if (visible) {
+            char label[TIME_TEXT_SIZE];
+            time_format(hour * 60, label, sizeof(label));
+            float width = measure_text(style, label).x;
+            // Below the line rather than across it, so that 00:00 is not cut off at the top.
+            draw_text(style, label, days_left - 6 - width, y + 3, style_color(TEXT_COLOR_DISABLED));
+        }
+    }
+}
+
+// day is the column from 00:00 to 24:00, which may reach outside the timeline that clips it.
+// Items that overlap share the day's width side by side.
+static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered) {
+    assert(day.width > 0.0f);
+    assert(day.height == (float)TIMELINE_HEIGHT_PIXELS);
+    // On the stack, because it is needed only while one day is drawn; about 10 KB.
+    Timeline_Item items[EVENT_COUNT_MAX] = { 0 };
+    const int32_t count = timeline_items_collect(app, day_number, items);
+    timeline_items_sort(items, count);
+    timeline_items_assign_lanes(items, count);
+
+    // The busy part of the day runs from the first item's start to the last one's end; sorted
+    // by start, the first item starts first, but any item may end last.
+    int32_t busy_top = MINUTES_PER_DAY;
+    int32_t busy_bottom = 0;
+    if (count > 0) {
+        busy_top = items[0].minute_top;
+    }
+    for (int32_t i = 0; i < count; i++) {
+        if (items[i].minute_bottom > busy_bottom) {
+            busy_bottom = items[i].minute_bottom;
+        }
+    }
+    draw_timeline_day_background(day, busy_top, busy_bottom, hovered);
+
+    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    // Kept free at the sides of the day, so that items do not touch the day's borders.
+    const float inset = 2.0f;
+    for (int32_t i = 0; i < count; i++) {
+        const Timeline_Item *item = &items[i];
+        assert(item->lane < item->lane_count);
+        float lane_width = (day.width - 2 * inset) / (float)item->lane_count;
+        // One pixel less each way, so that neighbouring blocks of one color stay apart.
+        Rectangle block = { day.x + inset + (float)item->lane * lane_width,
+                            day.y + (float)item->minute_top * pixels_per_minute,
+                            lane_width - 1,
+                            (float)(item->minute_bottom - item->minute_top) * pixels_per_minute -
+                                1 };
+        draw_timeline_item(app, &app->events[item->event_index], block, day_number);
+    }
+}
+
+// The free hours before the day's first item and after its last are darker, so that the busy
+// part of the day stands out at a glance; a day without timed items is dark all through, which
+// busy_top past busy_bottom means. A hovered day is lighter in both parts, as cells are.
+static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_t busy_bottom,
+                                         bool hovered) {
+    assert(busy_top >= 0);
+    assert(busy_bottom <= MINUTES_PER_DAY);
+    // The window's background is the theme's darker surface, as for days outside the month;
+    // hovered, the disabled base lies between it and the normal cells.
+    DrawRectangleRec(day, style_color(hovered ? BASE_COLOR_DISABLED : BACKGROUND_COLOR));
+    if (busy_top < busy_bottom) {
+        const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+        Rectangle busy = { day.x, day.y + (float)busy_top * pixels_per_minute, day.width,
+                           (float)(busy_bottom - busy_top) * pixels_per_minute };
+        DrawRectangleRec(busy, style_color(hovered ? BASE_COLOR_FOCUSED : BASE_COLOR_NORMAL));
+    }
+    for (int32_t hour = 0; hour < MINUTES_PER_DAY / 60; hour++) {
+        float y = day.y + (float)(hour * TIMELINE_HOUR_HEIGHT_PIXELS);
+        DrawRectangleRec((Rectangle){ day.x, y, day.width, 1 }, style_color(BORDER_COLOR_NORMAL));
+    }
+}
+
+// A block from the item's start to its end, with its time and title on the top line.
+static void draw_timeline_item(const App *app, const Event *event, Rectangle block,
+                               int32_t day_number) {
+    assert(event_duration_days(event) == 0);
+    assert(block.width > 0.0f);
+    assert(block.height > 0.0f);
+    // A one-day item's occurrence starts on the day it is drawn on.
+    const bool task = event->kind == EVENT_KIND_TASK;
+    const bool done = task && app_task_done(app, event->id, day_number);
+    const Color color = event_color(event);
+    if (task) {
+        DrawRectangleRec(block, Fade(color, done ? TASK_DONE_FILL_ALPHA : TASK_FILL_ALPHA));
+        DrawRectangleLinesEx(block, 1, Fade(color, done ? TASK_DONE_OUTLINE_ALPHA : 1.0f));
+    } else {
+        DrawRectangleRec(block, color);
+    }
+
+    char time[TIME_TEXT_SIZE];
+    char label[TEXT_LINE_SIZE];
+    if (event->start_minute != TIME_NONE) {
+        time_format(event->start_minute, time, sizeof(time));
+        snprintf(label, sizeof(label), "%s %s", time, event->title);
+    } else {
+        // Said, because the block is drawn in the hour before the end, not from a start.
+        time_format(event->end_minute, time, sizeof(time));
+        snprintf(label, sizeof(label), "Until %s %s", time, event->title);
+    }
+    draw_event_label(app, event, label, block, done);
+}
+
+// The items with a time that occur on day_number, in App.events' order. Returns how many.
+static int32_t timeline_items_collect(const App *app, int32_t day_number, Timeline_Item *items) {
+    assert(app->event_count <= EVENT_COUNT_MAX);
+    int32_t count = 0;
+    for (int32_t i = 0; i < app->event_count; i++) {
+        const Event *event = &app->events[i];
+        if (event_is_timed(event) && event_occurs_on_day(event, day_number)) {
+            items[count] = timeline_item_make(event, i);
+            count++;
+        }
+    }
+    assert(count <= app->event_count);
+    return count;
+}
+
+// The minutes an item's block covers: from its start to its end time, or an hour from the one
+// time it has; at least TIMELINE_ITEM_MINUTES_MIN, and within the day.
+static Timeline_Item timeline_item_make(const Event *event, int32_t event_index) {
+    assert(event_is_timed(event));
+    assert(event_index >= 0);
+    int32_t top = event->start_minute;
+    int32_t bottom = event->end_minute;
+    if (top == TIME_NONE) {
+        top = bottom - TIMELINE_ITEM_MINUTES_DEFAULT;
+    }
+    if (bottom == TIME_NONE) {
+        bottom = top + TIMELINE_ITEM_MINUTES_DEFAULT;
+    }
+    top = top < 0 ? 0 : top;
+    bottom = bottom > MINUTES_PER_DAY ? MINUTES_PER_DAY : bottom;
+    if (bottom - top < TIMELINE_ITEM_MINUTES_MIN) {
+        // Lengthened downwards, or upwards at the end of the day, so that it stays in the day.
+        if (top + TIMELINE_ITEM_MINUTES_MIN <= MINUTES_PER_DAY) {
+            bottom = top + TIMELINE_ITEM_MINUTES_MIN;
+        } else {
+            bottom = MINUTES_PER_DAY;
+            top = MINUTES_PER_DAY - TIMELINE_ITEM_MINUTES_MIN;
+        }
+    }
+    assert(top >= 0);
+    assert(bottom <= MINUTES_PER_DAY);
+    assert(bottom - top >= TIMELINE_ITEM_MINUTES_MIN);
+    return (Timeline_Item){ .event_index = event_index, .minute_top = top,
+                            .minute_bottom = bottom, .lane = 0, .lane_count = 1 };
+}
+
+// Insertion sort, because a day holds few items and they mostly come in order already, by
+// start; a stable sort also keeps App.events' order for items that start together.
+static void timeline_items_sort(Timeline_Item *items, int32_t count) {
+    assert(count >= 0);
+    assert(count <= EVENT_COUNT_MAX);
+    for (int32_t i = 1; i < count; i++) {
+        const Timeline_Item item = items[i];
+        int32_t j = i;
+        // Bounded by i, which j counts down from.
+        while (j > 0 && timeline_item_is_before(&item, &items[j - 1])) {
+            items[j] = items[j - 1];
+            j--;
+        }
+        items[j] = item;
+    }
+}
+
+// Earlier starts first, and of two that start together, the longer first, so that it takes
+// the leftmost lane and the shorter one sits beside it.
+static bool timeline_item_is_before(const Timeline_Item *a, const Timeline_Item *b) {
+    if (a->minute_top != b->minute_top) {
+        return a->minute_top < b->minute_top;
+    }
+    return a->minute_bottom > b->minute_bottom;
+}
+
+// Gives each item, in order of start, the leftmost lane that is free when it starts. A group of
+// items that overlap, directly or through others, shares its lane count, so that the group
+// divides the day's width evenly and its lanes line up.
+static void timeline_items_assign_lanes(Timeline_Item *items, int32_t count) {
+    assert(count >= 0);
+    int32_t lane_bottoms[TIMELINE_LANE_COUNT_MAX] = { 0 };  // Minute each lane is free from
+    int32_t lane_count = 0;
+    int32_t group_first_index = 0;
+    int32_t group_bottom = 0;  // Minute the group's last item ends
+    for (int32_t i = 0; i < count; i++) {
+        Timeline_Item *item = &items[i];
+        assert(i == 0 || !timeline_item_is_before(item, &items[i - 1]));
+        if (item->minute_top >= group_bottom) {
+            // Nothing before overlaps this item, so the group before it is complete.
+            timeline_items_set_lane_count(items, group_first_index, i, lane_count);
+            group_first_index = i;
+            lane_count = 0;
+        }
+        const int32_t lane = timeline_lane_find(lane_bottoms, lane_count, item->minute_top);
+        if (lane == lane_count) {
+            lane_count++;
+        }
+        assert(lane < lane_count);
+        assert(lane_count <= TIMELINE_LANE_COUNT_MAX);
+        // Never earlier than before, since a shared lane is busy until its last item ends. A
+        // free lane, even one left from an earlier group, ends before this item does.
+        if (item->minute_bottom > lane_bottoms[lane]) {
+            lane_bottoms[lane] = item->minute_bottom;
+        }
+        item->lane = lane;
+        if (item->minute_bottom > group_bottom) {
+            group_bottom = item->minute_bottom;
+        }
+    }
+    timeline_items_set_lane_count(items, group_first_index, count, lane_count);
+}
+
+// The leftmost of the first lane_count lanes that is free at minute_top; else a new lane,
+// lane_count, while there may be more; else the lane that frees up first.
+static int32_t timeline_lane_find(const int32_t *lane_bottoms, int32_t lane_count,
+                                  int32_t minute_top) {
+    assert(lane_count >= 0);
+    assert(lane_count <= TIMELINE_LANE_COUNT_MAX);
+    for (int32_t lane = 0; lane < lane_count; lane++) {
+        if (lane_bottoms[lane] <= minute_top) {
+            return lane;
+        }
+    }
+    if (lane_count < TIMELINE_LANE_COUNT_MAX) {
+        return lane_count;
+    }
+    int32_t earliest = 0;
+    for (int32_t lane = 1; lane < lane_count; lane++) {
+        if (lane_bottoms[lane] < lane_bottoms[earliest]) {
+            earliest = lane;
+        }
+    }
+    return earliest;
+}
+
+// Items first_index up to, but not including, end_index form one group.
+static void timeline_items_set_lane_count(Timeline_Item *items, int32_t first_index,
+                                          int32_t end_index, int32_t lane_count) {
+    assert(first_index <= end_index);
+    // A group of items has a lane for each; only the empty group before the first has none.
+    assert((lane_count > 0) == (first_index < end_index));
+    for (int32_t i = first_index; i < end_index; i++) {
+        items[i].lane_count = lane_count;
+    }
 }
 
 // The focused item, if it occurs on the selected day; its creation dot is ringed in the grid.
@@ -1376,11 +1827,6 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
     draw_grid_cell_day_number(app, cell, date, in_month);
     draw_grid_cell_creation_markers(app, cell, day_number, focused);
     draw_grid_cell_events(app, cell, day_number, column);
-
-    if (date_equal(date, app->selected)) {
-        Rectangle inner = { cell.x + 2, cell.y + 2, cell.width - 4, cell.height - 4 };
-        DrawRectangleLinesEx(inner, 2, style_color(BORDER_COLOR_PRESSED));
-    }
 }
 
 static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date, bool in_month) {
@@ -1443,14 +1889,16 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
                                   int32_t column) {
     const float slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
     float top = cell.y + CELL_TOP_LINE_PIXELS;
-    int32_t slot_count = (int32_t)((cell.y + cell.height - 4 - top) / slot_height);
+    int32_t slot_count =
+        (int32_t)((cell.y + cell.height - CELL_BOTTOM_MARGIN_PIXELS - top) / slot_height);
     if (slot_count <= 0) {
         return;
     }
 
     int32_t overlap_count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
-        if (event_occurs_on_day(&app->events[i], day_number)) {
+        const Event *event = &app->events[i];
+        if (event_in_day_cell(event, app->range) && event_occurs_on_day(event, day_number)) {
             overlap_count++;
         }
     }
@@ -1466,6 +1914,9 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
             const Event *event = &app->events[i];
             int32_t start_day = 0;
             if ((event_duration_days(event) > 0) != multi_day_pass) {
+                continue;
+            }
+            if (!event_in_day_cell(event, app->range)) {
                 continue;
             }
             if (event_occurrence_on_day(event, day_number, &start_day)) {
@@ -1490,7 +1941,6 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
     assert(start_day <= day_number);
     const bool task = event->kind == EVENT_KIND_TASK;
     const bool done = task && app_task_done(app, event->id, start_day);
-    const Text_Style *style = &app->fonts.small;
     const Color color = event_color(event);
     bool starts_here = day_number == start_day;
     bool ends_here = day_number == start_day + event_duration_days(event);
@@ -1523,22 +1973,34 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
     } else {
         snprintf(label, sizeof(label), "%s", event->title);
     }
+    draw_event_label(app, event, label, bar, done);
+}
 
-    float text_x = bar.x + 4;
+// An item's label on a bar-high line at the top of area, clipped to area: after a checkbox for
+// a task, and struck through for a done one. Shared by the day cells' bars and the timeline's
+// blocks, so that an item reads the same in both.
+static void draw_event_label(const App *app, const Event *event, const char *label,
+                             Rectangle area, bool done) {
+    assert(area.height > 0.0f);
+    const bool task = event->kind == EVENT_KIND_TASK;
+    assert(task || !done);
+    const Text_Style *style = &app->fonts.small;
+    const float line_height = (float)EVENT_BAR_HEIGHT_PIXELS;
+    float text_x = area.x + 4;
     Color text_color = WHITE;
-    scissor_begin(&app->fonts, bar.x, bar.y, bar.width, bar.height);
+    scissor_begin(&app->fonts, area.x, area.y, area.width, area.height);
     if (task) {
-        Rectangle box = { bar.x + 4, bar.y + 4, 11, 11 };
-        draw_check_mark(box, done, color);
+        Rectangle box = { area.x + 4, area.y + 4, 11, 11 };
+        draw_check_mark(box, done, event_color(event));
         text_x = box.x + box.width + 4;
         // The theme's text colors rather than the task's own, which is too dark to read on the
         // dark cells; the outline and checkbox already carry the task's color.
         text_color = style_color(done ? TEXT_COLOR_DISABLED : TEXT_COLOR_NORMAL);
     }
-    // Centered vertically in the bar.
-    draw_text(style, label, text_x, bar.y + (bar.height - style->size_pixels) / 2, text_color);
+    // Centered vertically in the line.
+    draw_text(style, label, text_x, area.y + (line_height - style->size_pixels) / 2, text_color);
     if (done) {
-        float middle_y = bar.y + bar.height / 2;
+        float middle_y = area.y + line_height / 2;
         float width = measure_text(style, label).x;
         DrawLineEx((Vector2){ text_x, middle_y }, (Vector2){ text_x + width, middle_y }, 1.5f,
                    text_color);
@@ -2510,6 +2972,24 @@ static bool event_occurs_on_day(const Event *event, int32_t day_number) {
 
 static bool event_created_on_day(const Event *event, int32_t day_number) {
     return date_to_day_number(event->created_date) == day_number;
+}
+
+// An item that goes on the week and day views' timeline: one day long, with a start or an end
+// time. A multi-day item stays a bar across the day cells, where it reads as one span.
+static bool event_is_timed(const Event *event) {
+    // A problem has no times, so it is always in the day cells.
+    assert(event->kind != EVENT_KIND_PROBLEM || event->start_minute == TIME_NONE);
+    if (event_duration_days(event) > 0) {
+        return false;
+    }
+    return event->start_minute != TIME_NONE || event->end_minute != TIME_NONE;
+}
+
+// A month shows every item in its cells; a week or day only those that are not on the timeline.
+static bool event_in_day_cell(const Event *event, int32_t range) {
+    assert(range >= 0);
+    assert(range < RANGE_COUNT);
+    return range == RANGE_MONTH || !event_is_timed(event);
 }
 
 // One more line for a location, one for a repeating event that ends, to say when, and one per
