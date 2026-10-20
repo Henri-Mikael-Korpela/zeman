@@ -25,12 +25,23 @@ cmake --preset mingw-release
 cmake --build --preset mingw-release
 ```
 
-The executable is written to `desktop/build/zeman.exe`, with the fonts it needs in `desktop/build/fonts`. Use the `mingw-debug` preset for a debug build in `desktop/build-debug/`. Without presets, pass the generator explicitly, otherwise CMake on Windows falls back to NMake:
+The executable is written to `desktop/build/release-win32/zeman.exe`, with the fonts it needs in `desktop/build/release-win32/fonts`. This Release build has optimizations on (CMake's default Release flags, `-O3` with MinGW) but keeps assertions compiled in, as TIGER_STYLE asks; it opens no console window. Use the `mingw-debug` preset for a debug build in `desktop/build/debug-win32/`, built unoptimized and with a console window attached, so that `printf`/`TraceLog` output and asserts are easy to see while developing. Both of these keep the database (`zeman.db`) at the repository root (see Usage below), so `desktop/build/` can be deleted at any time without losing events. Without presets, pass the generator explicitly, otherwise CMake on Windows falls back to NMake:
 
 ```sh
-cmake -S desktop -B desktop/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-cmake --build desktop/build
+cmake -S desktop -B desktop/build/release-win32 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build desktop/build/release-win32
 ```
+
+#### Building a release folder to distribute
+
+```sh
+cd desktop
+cmake --preset mingw-package
+cmake --build --preset mingw-package
+cmake --install build/package-win32
+```
+
+This writes `desktop/release/zeman.exe` and `desktop/release/fonts/`. Unlike the `mingw-release` preset above, this one turns on `ZEMAN_DATABASE_NEXT_TO_EXECUTABLE`, so `zeman.exe` creates and keeps `zeman.db` next to itself instead of at the repository root. That is what makes `desktop/release/` self-contained: copy the whole folder to any other Windows 10 or 11 computer (by USB drive, zip file, or network share) and double-click `zeman.exe` there — no installer, no separate runtime to install, and no repository needed on that computer. The executable is statically linked against raylib, raygui and SQLite, and its only external dependencies are Windows system DLLs and the Universal CRT, which both Windows 10 and 11 already ship; nothing else needs to be copied alongside it, and `desktop/release/` can be zipped up as-is. Rebuilding the release folder (for a new version) overwrites `zeman.exe` but leaves an existing `zeman.db` there untouched, since `cmake --install` only ever adds the files listed in `desktop/CMakeLists.txt`'s `install()` rules.
 
 `zeman.exe --port PORT` serves phones on another port than 47800, for example when something else uses it; the QR code and the address shown carry the port. `zeman.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
 
@@ -92,4 +103,4 @@ The **Month**, **Week** and **Day** buttons at the top choose how many days the 
 
 Keys: arrows move by a day or a week, Page Up/Page Down move to the previous or next month, week or day, M, W and D switch between month, week and day, Home jumps to today, Tab moves between form fields, and Escape cancels the form. In a form field being typed into, Ctrl+V pastes at the cursor (line breaks become spaces), and Ctrl+C and Ctrl+X copy or cut the whole field, because the text boxes have no selection.
 
-Events are stored in `zeman.db`, an SQLite database in the repository root (`zeman.db`, next to this README), whichever build directory the executable is in. CMake gives the executable that absolute path, so deleting a build directory does not delete the events; moving the repository means building again. The file is not committed, so back it up like any other file you want to keep. Databases from earlier versions are upgraded automatically when opened.
+Events are stored in `zeman.db`, an SQLite database in the repository root (`zeman.db`, next to this README), whichever build directory the executable is in. CMake gives the executable that absolute path, so deleting a build directory does not delete the events; moving the repository means building again. The file is not committed, so back it up like any other file you want to keep. Databases from earlier versions are upgraded automatically when opened. A `desktop/release/` build (see "Building a release folder to distribute" above) is the exception: there, `zeman.db` sits next to `zeman.exe` instead, so the whole folder can be copied elsewhere as one self-contained unit.

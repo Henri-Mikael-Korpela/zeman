@@ -69,12 +69,22 @@ target_include_directories(zeman PRIVATE include "${SHARED_INCLUDE_DIR}" "${QRCO
 # not wrap, to sleep while idle yet wake at once on input (see desktop_wait in main.c).
 target_include_directories(zeman SYSTEM PRIVATE "${EXTERNAL_DIR}/raylib/src/external/glfw/include")
 
-# The database lives in the repository root, not beside the executable, so that deleting a build
-# directory (which is routine) never deletes the events. An absolute path, so that every build
-# directory, wherever it is, uses the same file.
-set(DATABASE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../zeman.db")
-cmake_path(NORMAL_PATH DATABASE_FILE)
-target_compile_definitions(zeman PRIVATE "ZEMAN_DATABASE_PATH=\"${DATABASE_FILE}\"")
+# Off (the default, for the mingw-debug and mingw-release presets): the database lives in the
+# repository root, not beside the executable, so that deleting a build directory (which is
+# routine) never deletes the events. On (the mingw-package preset): the database goes beside the
+# executable instead, at run time (see database_path in main.c), so that the release folder
+# install() builds below is self-contained and works wherever it is copied to.
+option(ZEMAN_DATABASE_NEXT_TO_EXECUTABLE
+       "Put the database beside the executable, for a release folder meant to be copied elsewhere"
+       OFF)
+if(ZEMAN_DATABASE_NEXT_TO_EXECUTABLE)
+    target_compile_definitions(zeman PRIVATE ZEMAN_DATABASE_NEXT_TO_EXECUTABLE)
+else()
+    # An absolute path, so that every build directory, wherever it is, uses the same file.
+    set(DATABASE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../zeman.db")
+    cmake_path(NORMAL_PATH DATABASE_FILE)
+    target_compile_definitions(zeman PRIVATE "ZEMAN_DATABASE_PATH=\"${DATABASE_FILE}\"")
+endif()
 
 # The application icon, shared with the Android app's launcher icon (assets/zeman-app.png).
 if(WIN32)
@@ -112,4 +122,13 @@ if(MSVC)
         LINK_FLAGS_RELEASE "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
 else()
     target_compile_options(zeman PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    # Debug keeps the console, since raylib's own TraceLog messages (and a crash's stderr) print
+    # there; a Release build hides it, as a desktop app's window is the only thing meant to show.
+    set_target_properties(zeman PROPERTIES LINK_FLAGS_RELEASE "-mwindows")
 endif()
+
+# Lets `cmake --install` (see the mingw-package preset and README.md) collect everything a
+# release folder needs into one place: the executable and the fonts it loads at run time. Not
+# the database, which local_backend_open() creates next to the executable on first run.
+install(TARGETS zeman RUNTIME DESTINATION .)
+install(DIRECTORY "${FONTS_DIR}/" DESTINATION fonts)

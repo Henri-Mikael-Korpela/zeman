@@ -34,6 +34,9 @@ enum {
     INPUT_KEY_COUNT = 512,
     // Every mouse button raylib tracks, from MOUSE_BUTTON_LEFT to MOUSE_BUTTON_BACK.
     INPUT_MOUSE_BUTTON_COUNT = MOUSE_BUTTON_BACK + 1,
+    // Room for GetApplicationDirectory()'s result plus "zeman.db"; well above any realistic
+    // install path, so database_path's snprintf cannot be truncated in practice.
+    DATABASE_PATH_SIZE = 1024,
 };
 static_assert((int32_t)INPUT_KEY_COUNT > (int32_t)KEY_KB_MENU,
               "Every raylib key code is checked for input.");
@@ -46,14 +49,18 @@ static const double IDLE_WAIT_SECONDS = 0.020;
 // alone, such as how long ago an item was created and which day is today, is never stale.
 static const double REDRAW_INTERVAL_SECONDS = 1.0;
 
-// Where the events are kept: the repository root, set by CMake (see desktop/CMakeLists.txt), so
-// that deleting a build directory never deletes them. There is no fallback, because a guess
-// would silently start a second, empty database.
+// ZEMAN_DATABASE_NEXT_TO_EXECUTABLE (see desktop/CMakeLists.txt, the mingw-package preset) means
+// a packaged release: the database goes beside the executable at run time (database_path), so
+// that the whole release folder stays self-contained wherever it is copied to. Otherwise this is
+// a development build, and the database lives at the fixed, compile-time path below, the
+// repository root, so that deleting a build directory (which is routine) never deletes it.
+#ifndef ZEMAN_DATABASE_NEXT_TO_EXECUTABLE
 #ifndef ZEMAN_DATABASE_PATH
 #error "ZEMAN_DATABASE_PATH must be defined by the build."
 #endif
 static const char DATABASE_PATH[] = ZEMAN_DATABASE_PATH;
 static_assert(sizeof(DATABASE_PATH) > 1, "The database path is not empty.");
+#endif
 
 typedef enum View {
     VIEW_CALENDAR,
@@ -102,6 +109,7 @@ static bool options_parse(int argc, char **argv, Options *options);
 static bool port_parse(const char *text, uint16_t *port);
 static void desktop_open(Desktop *desktop, const Options *options);
 static void desktop_close(Desktop *desktop);
+static const char *database_path(char *buffer, int32_t buffer_size);
 static bool desktop_redraw_needed(Desktop *desktop);
 static void desktop_wait(void);
 static void desktop_frame(Desktop *desktop, App *app);
@@ -176,13 +184,35 @@ static void desktop_open(Desktop *desktop, const Options *options) {
                  (unsigned)options->connect_port);
         return;
     }
-    desktop->store_open = local_backend_open(&desktop->local, DATABASE_PATH);
+    char database_path_buffer[DATABASE_PATH_SIZE];
+    desktop->store_open = local_backend_open(
+        &desktop->local, database_path(database_path_buffer, sizeof(database_path_buffer)));
     desktop->backend = local_backend(&desktop->local);
     if (!server_start(&desktop->server, &desktop->backend, options->port)) {
         snprintf(desktop->info, sizeof(desktop->info), "Phone access off: %s",
                  desktop->server.error);
     }
     devices_view_init(&desktop->devices, &desktop->server);
+}
+
+// Returns the database's path: the fixed, compile-time path in a development build, or, in a
+// packaged release, buffer, filled with the running executable's own directory plus "zeman.db".
+// That directory is unknown until the executable runs there, since a packaged release can be
+// copied anywhere, so that case cannot be a compile-time constant the way the dev path is.
+static const char *database_path(char *buffer, int32_t buffer_size) {
+    assert(buffer != NULL);
+    assert(buffer_size > 0);
+#ifdef ZEMAN_DATABASE_NEXT_TO_EXECUTABLE
+    // GetApplicationDirectory() ends with a path separator already, as it does for fonts above.
+    int written = snprintf(buffer, (size_t)buffer_size, "%szeman.db", GetApplicationDirectory());
+    assert(written > 0);
+    assert(written < buffer_size);
+    return buffer;
+#else
+    (void)buffer;
+    (void)buffer_size;
+    return DATABASE_PATH;
+#endif
 }
 
 static void desktop_close(Desktop *desktop) {

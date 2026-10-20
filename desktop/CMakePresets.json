@@ -5,19 +5,31 @@
       "name": "mingw-release",
       "displayName": "MinGW Release",
       "generator": "MinGW Makefiles",
-      "binaryDir": "${sourceDir}/build",
+      "binaryDir": "${sourceDir}/build/release-win32",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     },
     {
       "name": "mingw-debug",
       "displayName": "MinGW Debug",
       "generator": "MinGW Makefiles",
-      "binaryDir": "${sourceDir}/build-debug",
+      "binaryDir": "${sourceDir}/build/debug-win32",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "mingw-package",
+      "displayName": "MinGW Release folder (for distribution)",
+      "generator": "MinGW Makefiles",
+      "binaryDir": "${sourceDir}/build/package-win32",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ZEMAN_DATABASE_NEXT_TO_EXECUTABLE": "ON",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/release"
+      }
     }
   ],
   "buildPresets": [
     { "name": "mingw-release", "configurePreset": "mingw-release" },
-    { "name": "mingw-debug", "configurePreset": "mingw-debug" }
+    { "name": "mingw-debug", "configurePreset": "mingw-debug" },
+    { "name": "mingw-package", "configurePreset": "mingw-package" }
   ]
 }
