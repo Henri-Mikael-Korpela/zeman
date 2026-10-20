@@ -1,14 +1,39 @@
 # Zeman
 
-## Project structure
+## Introduction
 
-- `desktop/` - the desktop app (Windows). It keeps the calendar in an SQLite database and serves it to phones on the same local network.
-- `android/` - the Android app. It shows and edits the desktop app's calendar over the network; it keeps no data of its own.
-- `shared/` - code both apps compile: the user interface, dates, events, and the network protocol and client.
-- `assets/` - the application icon: `zeman-app.ico` goes into the desktop executable (window, taskbar and file icon), and the Android build draws its launcher icons from `zeman-app.png`. Replace both files to change the icon.
-- `cmake/dependencies.cmake` - downloads raylib 5.5, raygui 4.0, SQLite 3.51.0, the [Rubik](https://fonts.google.com/specimen/Rubik) font (with its SIL Open Font License), Nayuki's [QR code generator](https://github.com/nayuki/QR-Code-generator) 1.8.0 and the [quirc](https://github.com/dlbeer/quirc) 1.2 QR decoder into `external/`, once; after that both builds are offline.
+**Zeman** is a practical offline calendar and task manager for Windows and Android. Instead of syncing your events, tasks and problems to a cloud service, it keeps them on your own Windows computer and serves them to your desktop and Android devices over the local network.
+
+## Features
+
+- Add events, opportunities, problems, tasks to your calendar.
+- Link tasks to problems they solve, and see which problems are solved or still need work.
+- View calendar items by month, week or day.
+- Create repeating events and tasks.
+- See added problems and their flow.
+
+## Project contents
+
+This repository contains the source code for both the desktop and Android apps, which are written in C using Raylib and RayGUI. User data is stored in SQLite database.
+
+### Structure
+
+- `desktop/` The desktop app (Windows).
+- `android/` The Android app. It shows and edits the desktop app's calendar over the network; it keeps no data of its own.
+- `shared/` Code both apps compile: the user interface, dates, events, and the network protocol and client.
+- `assets/` Contains App icons.
 
 Each of `desktop/`, `android/` and `shared/` has `src/` for its .c files and `include/zeman/` for its headers, which every file includes as `<zeman/app.h>`, `<zeman/server.h>` and so on, so that project headers are told apart from raylib's and the system's. The desktop build (`desktop/CMakeLists.txt`) and the Android build (`android/build.ps1`) each put their own `include` and `shared/include` on the compiler's include path; a new header goes in one of those folders.
+
+### Dependencies and their management
+
+`cmake/dependencies.cmake` downloads
+- raylib 5.5,
+- raygui 4.0,
+- SQLite 3.51.0,
+- the [Rubik](https://fonts.google.com/specimen/Rubik) font (with its SIL Open Font License), 
+- Nayuki's [QR code generator](https://github.com/nayuki/QR-Code-generator) 1.8.0 and the
+- [quirc](https://github.com/dlbeer/quirc) 1.2 QR decoder into `external/`, once; after that both builds are offline.
 
 ## Desktop app
 
@@ -100,6 +125,10 @@ Each event records when it was created:
 - The dot of the selected event or task is ringed, and its card shows when it was created and how long ago, such as `Created 18 Oct 2026, 20:47 (yesterday)`: minutes and hours for the first hours, then "today", "yesterday", days, "last week", weeks, "last month", months, "last year" and years.
 
 The **Month**, **Week** and **Day** buttons at the top choose how many days the calendar shows (on a phone, in a row under the header). The arrow buttons, Page Up/Page Down, the mouse wheel over the calendar and sideways swipes on a phone move by that range.
+
+In the week and day views, a white line across today's hours marks the time now and moves on every minute; other days have none.
+
+In the week and day views on the desktop, drag over a day's hours to draw a block. Before you press, a short line under the pointer shows where the block will start, with its time. The block snaps to quarter hours, and on release the form for a new event opens with that day and the block's start and end times (switch it to **Task** in the form if it is one). Until you save, the new item shows on the timeline as a see-through ghost block, labelled "New event" until it has a title; it follows the times, date and repeat you type in the form, and disappears if you cancel. Hold Ctrl before pressing to draw in five-minute steps instead: as soon as Ctrl is down, a round magnifier follows the pointer, with the start line in it, showing every five minutes and the time the edge will get, and the block moves at a quarter of the pointer's speed so that each step is easy to hit. A block that reaches midnight ends at 23:59. Escape cancels a block while drawing. The mouse wheel scrolls the hours; on a phone, dragging still scrolls them.
 
 Keys: arrows move by a day or a week, Page Up/Page Down move to the previous or next month, week or day, M, W and D switch between month, week and day, Home jumps to today, Tab moves between form fields, and Escape cancels the form. In a form field being typed into, Ctrl+V pastes at the cursor (line breaks become spaces), and Ctrl+C and Ctrl+X copy or cut the whole field, because the text boxes have no selection.
 
