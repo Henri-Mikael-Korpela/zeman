@@ -495,6 +495,8 @@ static void draw_timeline_mark(const App *app, const Layout *layout, float top,
                                int32_t first_day);
 static void draw_timeline_ghost(const App *app, const Layout *layout, float top,
                                 int32_t first_day);
+static void draw_timeline_now(const App *app, const Layout *layout, float top,
+                              int32_t first_day);
 static void draw_timeline_ghost_block(const App *app, const Event *event, Rectangle day);
 static void draw_timeline_mark_zoom(const App *app, float top);
 static void draw_timeline_mark_hover(const App *app, const Layout *layout, float top);
@@ -1564,6 +1566,9 @@ static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
     }
     draw_timeline_hours(app, layout, top);
     draw_timeline_ghost(app, layout, top, first_day);
+    // Over the items and the ghost, so that the time now is never hidden, but under the block
+    // being drawn, which the user is looking at.
+    draw_timeline_now(app, layout, top, first_day);
     draw_timeline_mark(app, layout, top, first_day);
     draw_timeline_mark_hover(app, layout, top);
 
@@ -1789,6 +1794,26 @@ static void draw_timeline_mark_zoom(const App *app, float top) {
     const int32_t edge = upwards ? range.minute_top : range.minute_bottom;
     draw_timeline_mark_zoom_edge(app, center, pointer_minute, edge, upwards);
     DrawRing(center, radius - 2, radius, 0.0f, 360.0f, 64, accent);
+}
+
+// A white line across today's column at the time now, with a dot at its left end, as calendar
+// apps mark it. Nothing when today is not in sight. The time is read by app_sync every frame,
+// and the desktop draws at least once a second while idle, so the line moves on each minute.
+static void draw_timeline_now(const App *app, const Layout *layout, float top,
+                              int32_t first_day) {
+    const int32_t column = date_to_day_number(app->today) - first_day;
+    if (column < 0 || column >= layout->columns) {
+        return;
+    }
+    assert(app->now_minute >= 0);
+    assert(app->now_minute < MINUTES_PER_DAY);
+    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    const float y = top + (float)app->now_minute * pixels_per_minute;
+    const float left = layout->grid.x + (float)column * layout->cell_width;
+    // Two pixels high, centred on the minute, so that it stands out from the one-pixel hour
+    // lines it may lie on.
+    DrawRectangleRec((Rectangle){ left, y - 1, layout->cell_width, 2 }, WHITE);
+    DrawCircleV((Vector2){ left + 1, y }, 4, WHITE);
 }
 
 // While the form for a new item is open, the item as it would be saved: a see-through block at
