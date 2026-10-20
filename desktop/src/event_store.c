@@ -317,13 +317,21 @@ static bool column_parse_kind(sqlite3_stmt *statement, int column, int32_t *kind
 static bool column_parse_target(sqlite3_stmt *statement, Event *event);
 static bool column_parse_location(sqlite3_stmt *statement, Event *event);
 
-bool event_store_open(Event_Store *store, const char *path) {
+bool event_store_open(Event_Store *store, const char *path, bool create) {
     assert(store != NULL);
     assert(path != NULL);
     *store = (Event_Store){ 0 };
 
-    int result = sqlite3_open_v2(path, &store->database,
-                                 SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL);
+    // SQLite takes the path as UTF-8, as the user types it, which the C library's fopen on
+    // Windows would not, so SQLite alone decides whether the file is there.
+    const int flags = create ? SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE : SQLITE_OPEN_READWRITE;
+    int result = sqlite3_open_v2(path, &store->database, flags, NULL);
+    if (result == SQLITE_CANTOPEN && !create) {
+        // Without create, a missing file is the usual cause, and the message says it plainly.
+        snprintf(store->error, sizeof(store->error),
+                 "Database file not found, or it cannot be opened.");
+        return false;
+    }
     if (result != SQLITE_OK) {
         return event_store_fail(store, "Cannot open database");
     }

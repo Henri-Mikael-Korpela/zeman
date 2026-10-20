@@ -20,10 +20,11 @@ typedef struct Event_Store {
     char error[EVENT_STORE_ERROR_SIZE];  // Message for the last failed call
 } Event_Store;
 
-// Opens or creates the database at path, migrates its schema to the current version, and
-// prepares all statements up front, so that later calls do not allocate statements.
-// On failure, store->error explains why; call event_store_close even then.
-bool event_store_open(Event_Store *store, const char *path);
+// Opens the database at path, or with create makes it when the file does not exist, migrates
+// its schema to the current version, and prepares all statements up front, so that later calls
+// do not allocate statements. On failure, store->error explains why; call event_store_close
+// even then.
+bool event_store_open(Event_Store *store, const char *path, bool create);
 void event_store_close(Event_Store *store);
 
 // Inserts the event or task and returns its new id, or 0 on failure. The database sets

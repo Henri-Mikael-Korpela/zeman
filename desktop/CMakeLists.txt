@@ -54,6 +54,8 @@ add_executable(zeman
     src/local_backend.c
     src/problems_view.c
     src/server.c
+    src/settings.c
+    src/settings_view.c
     src/raygui_impl.c
     "${SHARED_DIR}/app.c"
     "${SHARED_DIR}/calendar.c"
@@ -62,6 +64,7 @@ add_executable(zeman
     "${SHARED_DIR}/event.c"
     "${SHARED_DIR}/net.c"
     "${SHARED_DIR}/protocol.c"
+    "${SHARED_DIR}/text_box.c"
     "${QRCODEGEN_DIR}/qrcodegen.c"
 )
 target_include_directories(zeman PRIVATE include "${SHARED_INCLUDE_DIR}" "${QRCODEGEN_DIR}")

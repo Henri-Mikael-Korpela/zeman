@@ -166,7 +166,7 @@ function Build-Library([string]$Clang, [string]$RaylibLibrary) {
     Write-Host 'Compiling the app...'
     $objectDir = Join-Path $BuildDir 'obj\app'
     New-Item -ItemType Directory -Force $objectDir | Out-Null
-    $shared = @('app', 'calendar', 'client', 'discovery', 'event', 'net', 'protocol') |
+    $shared = @('app', 'calendar', 'client', 'discovery', 'event', 'net', 'protocol', 'text_box') |
         ForEach-Object { Join-Path $RootDir "shared\src\$_.c" }
     $own = @('main', 'android_input', 'android_permission', 'qr_scanner') |
         ForEach-Object { Join-Path $AndroidDir "src\$_.c" }

@@ -14,6 +14,8 @@
 #include <zeman/devices_view.h>
 #include <zeman/local_backend.h>
 #include <zeman/problems_view.h>
+#include <zeman/settings.h>
+#include <zeman/settings_view.h>
 
 enum {
     WINDOW_WIDTH_PIXELS = 1520,
@@ -35,9 +37,6 @@ enum {
     INPUT_KEY_COUNT = 512,
     // Every mouse button raylib tracks, from MOUSE_BUTTON_LEFT to MOUSE_BUTTON_BACK.
     INPUT_MOUSE_BUTTON_COUNT = MOUSE_BUTTON_BACK + 1,
-    // Room for GetApplicationDirectory()'s result plus "zeman.db"; well above any realistic
-    // install path, so database_path's snprintf cannot be truncated in practice.
-    DATABASE_PATH_SIZE = 1024,
 };
 static_assert((int32_t)INPUT_KEY_COUNT > (int32_t)KEY_KB_MENU,
               "Every raylib key code is checked for input.");
@@ -61,18 +60,20 @@ static const double REDRAW_INTERVAL_SECONDS = 1.0;
 #endif
 static const char DATABASE_PATH[] = ZEMAN_DATABASE_PATH;
 static_assert(sizeof(DATABASE_PATH) > 1, "The database path is not empty.");
+static_assert(sizeof(DATABASE_PATH) <= SETTINGS_PATH_SIZE, "The path fits the Settings view.");
 #endif
 
 typedef enum View {
     VIEW_CALENDAR,
     VIEW_PROBLEMS,
     VIEW_DEVICES,
+    VIEW_SETTINGS,
     VIEW_COUNT,
 } View;
 
 // Navigation items, top to bottom, indexed by View.
 static const char *const view_names[VIEW_COUNT] = { "Calendar", "Problems",
-                                                    "Connected Devices" };
+                                                    "Connected Devices", "Settings" };
 
 // What the last frame showed, to tell when the window needs a new one. Drawing every frame at
 // 60 FPS kept a CPU core busy while the app sat idle; drawing only when something changed
@@ -98,12 +99,14 @@ typedef struct Desktop {
     Client client;
     Devices_View devices;
     Problems_View problems;
+    Settings_View settings_view;
+    Settings settings;
     Backend backend;
     Redraw redraw;
     View view;
     bool client_mode;  // Without a database, server or navigation; see main
-    bool store_open;
     char info[INFO_SIZE];
+    char database_path[SETTINGS_PATH_SIZE];  // The database in use, or empty when none is open
 } Desktop;
 
 // What desktop_window_refresh needs to draw, as GLFW hands a callback only the window.
@@ -116,6 +119,8 @@ static bool options_parse(int argc, char **argv, Options *options);
 static bool port_parse(const char *text, uint16_t *port);
 static void desktop_open(Desktop *desktop, const Options *options);
 static void desktop_close(Desktop *desktop);
+static void desktop_database_open(Desktop *desktop);
+static void desktop_database_apply(Desktop *desktop, App *app);
 static const char *database_path(char *buffer, int32_t buffer_size);
 static bool desktop_redraw_needed(Desktop *desktop);
 static void desktop_wait(void);
@@ -154,8 +159,8 @@ int main(int argc, char **argv) {
     };
     App *app = app_create(&desktop.backend, &config);
     app_set_info(app, desktop.info);
-    if (!desktop.store_open) {
-        app_set_status(app, desktop.local.error);
+    if (!desktop.client_mode && !desktop.local.store_open) {
+        app_set_status(app, desktop.settings_view.message);
     }
 
     // Windows runs its own loop while the user drags a window edge, in which the main loop below
@@ -188,7 +193,6 @@ int main(int argc, char **argv) {
 
 static void desktop_open(Desktop *desktop, const Options *options) {
     desktop->client_mode = options->connect_host[0] != '\0';
-    desktop->store_open = true;
     desktop->view = VIEW_CALENDAR;
     desktop->info[0] = '\0';
     // Draws the first frame at once, as nothing is on screen yet.
@@ -202,15 +206,73 @@ static void desktop_open(Desktop *desktop, const Options *options) {
                  (unsigned)options->connect_port);
         return;
     }
-    char database_path_buffer[DATABASE_PATH_SIZE];
-    desktop->store_open = local_backend_open(
-        &desktop->local, database_path(database_path_buffer, sizeof(database_path_buffer)));
+    local_backend_init(&desktop->local);
     desktop->backend = local_backend(&desktop->local);
+    desktop_database_open(desktop);
     if (!server_start(&desktop->server, &desktop->backend, options->port)) {
         snprintf(desktop->info, sizeof(desktop->info), "Phone access off: %s",
                  desktop->server.error);
     }
     devices_view_init(&desktop->devices, &desktop->server);
+}
+
+// Opens the database that settings.ini names, or the build's default when it names none. A
+// named file must exist already, while the default is created on the first run, as it was
+// before there were settings. On failure no database is open, rather than the default: the
+// user chose another one, and events added to the default by mistake would seem lost to them.
+static void desktop_database_open(Desktop *desktop) {
+    Settings_View *view = &desktop->settings_view;
+    desktop->database_path[0] = '\0';
+    char message[SETTINGS_VIEW_MESSAGE_SIZE];
+    if (!settings_load(&desktop->settings, GetApplicationDirectory())) {
+        settings_view_init(view, "");
+        snprintf(message, sizeof(message), "No database opened: %s", desktop->settings.error);
+        settings_view_set_message(view, message);
+        return;
+    }
+    const bool configured = desktop->settings.database_path[0] != '\0';
+    char default_path[SETTINGS_PATH_SIZE];
+    const char *path = configured ? desktop->settings.database_path
+                                  : database_path(default_path, sizeof(default_path));
+    settings_view_init(view, path);
+    if (!local_backend_switch(&desktop->local, path, !configured)) {
+        snprintf(message, sizeof(message), "No database opened: %s", desktop->local.error);
+        settings_view_set_message(view, message);
+        return;
+    }
+    snprintf(desktop->database_path, sizeof(desktop->database_path), "%s", path);
+}
+
+// Switches to the database at the path in the Settings view and saves it as the setting. When
+// the new database cannot be opened, the one in use stays open, so the calendar keeps working.
+static void desktop_database_apply(Desktop *desktop, App *app) {
+    Settings_View *view = &desktop->settings_view;
+    if (view->path[0] == '\0') {
+        settings_view_set_message(view, "Enter the path of a database file.");
+        return;
+    }
+    char message[SETTINGS_VIEW_MESSAGE_SIZE];
+    if (!local_backend_switch(&desktop->local, view->path, false)) {
+        snprintf(message, sizeof(message), "Not changed: %s", desktop->local.error);
+        settings_view_set_message(view, message);
+        return;
+    }
+    assert(desktop->local.store_open);
+    snprintf(desktop->database_path, sizeof(desktop->database_path), "%s", view->path);
+    // The calendar and problems reload on the new revision, but the open form and the focused
+    // item hold ids of the old database, which would name other items in the new one.
+    app_discard_edits(app);
+    app_set_status(app, "");
+    snprintf(desktop->settings.database_path, sizeof(desktop->settings.database_path), "%s",
+             view->path);
+    if (!settings_save(&desktop->settings, GetApplicationDirectory())) {
+        snprintf(message, sizeof(message),
+                 "Switched, but the next start will not remember it: %s",
+                 desktop->settings.error);
+        settings_view_set_message(view, message);
+        return;
+    }
+    settings_view_set_message(view, "Switched to this database.");
 }
 
 // Returns the database's path: the fixed, compile-time path in a development build, or, in a
@@ -283,6 +345,12 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height) 
         break;
     case VIEW_DEVICES:
         devices_view_draw(&desktop->devices, &desktop->server, app, content);
+        break;
+    case VIEW_SETTINGS:
+        if (settings_view_draw(&desktop->settings_view, app, desktop->database_path,
+                               GetApplicationDirectory(), content)) {
+            desktop_database_apply(desktop, app);
+        }
         break;
     case VIEW_COUNT:
         assert(false); // Not a view.

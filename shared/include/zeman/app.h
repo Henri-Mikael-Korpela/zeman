@@ -56,6 +56,10 @@ void app_draw_problem_bar(const App *app, const char *title, bool done, Rectangl
 void app_set_info(App *app, const char *info);
 // Shown in the status bar until the user moves to another day.
 void app_set_status(App *app, const char *status);
+// Drops, without saving, what the user was doing with the loaded items: the open form, a delete
+// waiting for confirmation and the focused item. For when the data underneath is replaced, as
+// when the desktop switches to another database, where the same ids are other items.
+void app_discard_edits(App *app);
 // True while a form field is being typed into, so that Android can show its keyboard.
 bool app_text_input_active(const App *app);
 // With input off, app_frame still draws and loads but ignores the pointer and keys, for example

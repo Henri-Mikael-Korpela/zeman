@@ -41,23 +41,42 @@ static const Backend_Ops local_ops = {
     .error = local_error,
 };
 
-bool local_backend_open(Local_Backend *local, const char *path) {
-    assert(path != NULL);
+void local_backend_init(Local_Backend *local) {
+    assert(local != NULL);
     // Starts from the clock rather than 1, so that a phone that saw the revision of an earlier
     // run of this app does not mistake a new run's revision for one it has already loaded.
-    *local = (Local_Backend){ .revision = (uint64_t)time(NULL) << 20 };
-    local->store_open = event_store_open(&local->store, path);
-    if (!local->store_open) {
-        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
-        event_store_close(&local->store);
+    *local = (Local_Backend){ .revision = (uint64_t)time(NULL) << 20, .store_open = false };
+    // Seen only when no switch is tried, as when settings.ini cannot be read: the Settings view
+    // then says why and takes another path.
+    snprintf(local->error, sizeof(local->error), "No database is open; choose one in Settings.");
+}
+
+bool local_backend_switch(Local_Backend *local, const char *path, bool create) {
+    assert(local != NULL);
+    assert(path != NULL);
+    // Opened beside the current store, so that a failure leaves the current one in use.
+    Event_Store store;
+    if (!event_store_open(&store, path, create)) {
+        snprintf(local->error, sizeof(local->error), "%s", store.error);
+        event_store_close(&store);
+        return false;
     }
-    return local->store_open;
+    local_backend_close(local);
+    // The store holds only handles, which SQLite does not tie to where they are kept.
+    local->store = store;
+    local->store_open = true;
+    local->error[0] = '\0';
+    // Different data under the same ids: everything loaded from the old database is stale.
+    local_changed(local);
+    return true;
 }
 
 void local_backend_close(Local_Backend *local) {
     if (local->store_open) {
         event_store_close(&local->store);
         local->store_open = false;
+        // Keeps local_available's promise that a closed backend says why.
+        snprintf(local->error, sizeof(local->error), "The database was closed.");
     }
 }
 
@@ -65,11 +84,12 @@ Backend local_backend(Local_Backend *local) {
     return (Backend){ .ops = &local_ops, .context = local };
 }
 
-// The store's error is copied so that it outlives the store's next call.
+// The store's error is copied so that it outlives the store's next call. Without a store, the
+// error already says why none is open, from local_backend_init or the switch that failed, and is
+// kept, so that every failing operation tells the user the cause rather than only the effect.
 static bool local_available(Local_Backend *local) {
     if (!local->store_open) {
-        snprintf(local->error, sizeof(local->error), "No database: events cannot be loaded or "
-                                                     "saved.");
+        assert(local->error[0] != '\0');
         return false;
     }
     return true;
