@@ -4,6 +4,10 @@
 #include <string.h>
 
 #include "raygui.h"
+// Only to wait for input with a timeout and to see a close request, which raylib does not
+// wrap. The GL headers are left out because raylib loads OpenGL itself.
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 
 #include <zeman/client.h>
 #include <zeman/devices_view.h>
@@ -22,7 +26,25 @@ enum {
     NAVIGATION_ITEM_HEIGHT_PIXELS = 44,
     // Room for the longest server error or client address, so that nothing is cut here.
     INFO_SIZE = 256,
+    // Frames drawn after the last input, because input takes effect a frame late: a click sets
+    // state in one frame that the next draws, and some of it, like events reloaded for a new
+    // month, is drawn the frame after that.
+    REDRAW_FRAMES_AFTER_INPUT = 3,
+    // Every keyboard key code raylib tracks, from raylib's MAX_KEYBOARD_KEYS. Key 0 is no key.
+    INPUT_KEY_COUNT = 512,
+    // Every mouse button raylib tracks, from MOUSE_BUTTON_LEFT to MOUSE_BUTTON_BACK.
+    INPUT_MOUSE_BUTTON_COUNT = MOUSE_BUTTON_BACK + 1,
 };
+static_assert((int32_t)INPUT_KEY_COUNT > (int32_t)KEY_KB_MENU,
+              "Every raylib key code is checked for input.");
+
+// How long an idle wait may sleep before the app polls phones and the backend again. Phones are
+// then answered within 20 ms, near the 16 ms of a frame at 60 FPS, while a wake-up that finds
+// nothing to do costs microseconds rather than a frame's drawing.
+static const double IDLE_WAIT_SECONDS = 0.020;
+// The longest the window goes without a frame while idle, so that text that changes with time
+// alone, such as how long ago an item was created and which day is today, is never stale.
+static const double REDRAW_INTERVAL_SECONDS = 1.0;
 
 // Where the events are kept: the repository root, set by CMake (see desktop/CMakeLists.txt), so
 // that deleting a build directory never deletes them. There is no fallback, because a guess
@@ -44,6 +66,16 @@ typedef enum View {
 static const char *const view_names[VIEW_COUNT] = { "Calendar", "Problems",
                                                     "Connected Devices" };
 
+// What the last frame showed, to tell when the window needs a new one. Drawing every frame at
+// 60 FPS kept a CPU core busy while the app sat idle; drawing only when something changed
+// leaves it asleep between inputs.
+typedef struct Redraw {
+    double drawn_at_seconds;  // GetTime when the last frame was drawn
+    uint64_t revision;        // Backend revision when the last frame was drawn
+    int32_t client_count;     // Phones connected when the last frame was drawn
+    int32_t frames_pending;   // Frames still to draw for the last input
+} Redraw;
+
 typedef struct Options {
     char connect_host[CLIENT_HOST_SIZE];  // Empty unless --connect was given
     uint16_t connect_port;
@@ -59,6 +91,7 @@ typedef struct Desktop {
     Devices_View devices;
     Problems_View problems;
     Backend backend;
+    Redraw redraw;
     View view;
     bool client_mode;  // Without a database, server or navigation; see main
     bool store_open;
@@ -69,7 +102,10 @@ static bool options_parse(int argc, char **argv, Options *options);
 static bool port_parse(const char *text, uint16_t *port);
 static void desktop_open(Desktop *desktop, const Options *options);
 static void desktop_close(Desktop *desktop);
+static bool desktop_redraw_needed(Desktop *desktop);
+static void desktop_wait(void);
 static void desktop_frame(Desktop *desktop, App *app);
+static bool input_is_active(void);
 static View navigation_draw(const App *app, View current, Rectangle area);
 static void info_update(const Server *server, App *app);
 
@@ -105,9 +141,17 @@ int main(int argc, char **argv) {
         app_set_status(app, desktop.local.error);
     }
 
-    // The one intentionally unbounded loop: it runs until the window is closed.
+    // The one intentionally unbounded loop: it runs until the window is closed. Phones are
+    // served on every pass, drawn or not, so that they never wait for the window.
     while (!WindowShouldClose()) {
-        desktop_frame(&desktop, app);
+        if (!desktop.client_mode) {
+            server_poll(&desktop.server);
+        }
+        if (desktop_redraw_needed(&desktop)) {
+            desktop_frame(&desktop, app);
+        } else {
+            desktop_wait();
+        }
     }
 
     app_destroy(app);
@@ -121,6 +165,8 @@ static void desktop_open(Desktop *desktop, const Options *options) {
     desktop->store_open = true;
     desktop->view = VIEW_CALENDAR;
     desktop->info[0] = '\0';
+    // Draws the first frame at once, as nothing is on screen yet.
+    desktop->redraw = (Redraw){ .frames_pending = 1 };
     problems_view_init(&desktop->problems);
     if (desktop->client_mode) {
         client_init(&desktop->client);
@@ -151,9 +197,16 @@ static void desktop_close(Desktop *desktop) {
 // The navigation on the left, and the chosen view beside it. A client has no server, so it
 // shows the calendar alone.
 static void desktop_frame(Desktop *desktop, App *app) {
+    assert(desktop->redraw.frames_pending >= 0);
     if (!desktop->client_mode) {
-        server_poll(&desktop->server);
         info_update(&desktop->server, app);
+        desktop->redraw.client_count = server_client_count(&desktop->server);
+    }
+    // Taken before drawing, so that a change during the frame is drawn by the next one.
+    desktop->redraw.revision = backend_revision(&desktop->backend);
+    desktop->redraw.drawn_at_seconds = GetTime();
+    if (desktop->redraw.frames_pending > 0) {
+        desktop->redraw.frames_pending--;
     }
     const float width = (float)GetScreenWidth();
     const float height = (float)GetScreenHeight();
@@ -181,6 +234,78 @@ static void desktop_frame(Desktop *desktop, App *app) {
         break;
     }
     EndDrawing();
+}
+
+// Whether something changed since the last frame: input, data from this app or a phone, the
+// phones connected, or the time. The window keeps showing the last frame until then.
+static bool desktop_redraw_needed(Desktop *desktop) {
+    Redraw *redraw = &desktop->redraw;
+    assert(redraw->frames_pending >= 0);
+    assert(redraw->frames_pending <= REDRAW_FRAMES_AFTER_INPUT);
+    if (input_is_active()) {
+        redraw->frames_pending = REDRAW_FRAMES_AFTER_INPUT;
+    }
+    if (redraw->frames_pending > 0) {
+        return true;
+    }
+    // raylib learns of a close request only in the input poll at the end of a frame, so one
+    // more frame lets the main loop see it. The window is GLFW's current context, raylib's only
+    // window; GetWindowHandle would not do, as on Windows it returns the HWND instead.
+    GLFWwindow *window = glfwGetCurrentContext();
+    assert(window != NULL);
+    if (glfwWindowShouldClose(window)) {
+        return true;
+    }
+    if (GetTime() - redraw->drawn_at_seconds >= REDRAW_INTERVAL_SECONDS) {
+        return true;
+    }
+    // The client backend asks the desktop app for its revision at most every so often, so asking
+    // on every idle pass costs no more network than drawing every frame did.
+    if (backend_revision(&desktop->backend) != redraw->revision) {
+        return true;
+    }
+    if (desktop->client_mode) {
+        return false;
+    }
+    return server_client_count(&desktop->server) != redraw->client_count;
+}
+
+// Sleeps until input arrives or IDLE_WAIT_SECONDS pass. raylib's own EnableEventWaiting has no
+// timeout, which would leave phones unanswered until the user moved the mouse. GLFW's callbacks
+// record the input into raylib's state on top of the last frame's poll, so the input functions
+// see it as at the start of a frame, and input_is_active finds it.
+static void desktop_wait(void) {
+    assert(IsWindowReady());
+    assert(IDLE_WAIT_SECONDS > 0.0);
+    glfwWaitEventsTimeout(IDLE_WAIT_SECONDS);
+}
+
+// Whether the user did anything since the last input poll, or still holds a key or button, as
+// in a drag. A held key keeps frames coming, which raygui's key repeat in text boxes needs.
+static bool input_is_active(void) {
+    if (IsWindowResized()) {
+        return true;
+    }
+    const Vector2 mouse_delta = GetMouseDelta();
+    if (mouse_delta.x != 0.0f || mouse_delta.y != 0.0f) {
+        return true;
+    }
+    const Vector2 wheel_move = GetMouseWheelMoveV();
+    if (wheel_move.x != 0.0f || wheel_move.y != 0.0f) {
+        return true;
+    }
+    for (int32_t button = 0; button < INPUT_MOUSE_BUTTON_COUNT; button++) {
+        if (IsMouseButtonDown(button) || IsMouseButtonReleased(button)) {
+            return true;
+        }
+    }
+    // A press shows as down; a release is checked on its own, as nothing is down after it.
+    for (int32_t key = 1; key < INPUT_KEY_COUNT; key++) {
+        if (IsKeyDown(key) || IsKeyReleased(key)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Draws the items and returns the view to show: the one clicked this frame, or current.

@@ -65,6 +65,9 @@ add_executable(zeman
     "${QRCODEGEN_DIR}/qrcodegen.c"
 )
 target_include_directories(zeman PRIVATE include "${SHARED_INCLUDE_DIR}" "${QRCODEGEN_DIR}")
+# raylib builds GLFW into itself; main.c calls glfwWaitEventsTimeout from it, which raylib does
+# not wrap, to sleep while idle yet wake at once on input (see desktop_wait in main.c).
+target_include_directories(zeman SYSTEM PRIVATE "${EXTERNAL_DIR}/raylib/src/external/glfw/include")
 
 # The database lives in the repository root, not beside the executable, so that deleting a build
 # directory (which is routine) never deletes the events. An absolute path, so that every build
