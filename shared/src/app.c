@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -80,6 +81,20 @@ enum {
     // The hour at the top of the timeline when the app opens: the start of a usual day, since
     // the hours before it are rarely used.
     TIMELINE_SCROLL_HOUR_START = 7,
+    // A block drawn on the timeline snaps to quarter hours, which most meetings start on and
+    // which is 12 pixels at the timeline's scale, easy to hit with a mouse.
+    TIMELINE_MARK_STEP_MINUTES = 15,
+    // With Ctrl held at the press, it snaps to five minutes instead, which is 4 pixels at the
+    // timeline's scale, too fine to hit; hence the magnifier below.
+    TIMELINE_MARK_ZOOM_STEP_MINUTES = 5,
+    // The magnifier's scale, and how much slower than the pointer its time moves: a five-minute
+    // step is then 16 pixels of pointer travel, as easy to hit as a quarter hour unzoomed.
+    TIMELINE_MARK_ZOOM = 4,
+    // The magnifier's circle: about half an hour either side of its middle at its scale.
+    TIMELINE_MARK_ZOOM_RADIUS_PIXELS = 90,
+    // Half the length of the line that shows, before a press, where a block would start:
+    // short, so that it marks a point in time without hiding the items under it.
+    TIMELINE_MARK_HOVER_HALF_PIXELS = 28,
     // In a week or day, the day cells above the timeline hold the items without a time. They
     // grow with the busiest day shown, up to this share of the grid, so that the hours stay in
     // sight; past that they say "+N more".
@@ -183,6 +198,10 @@ static_assert(TIMELINE_ITEM_MINUTES_MIN * TIMELINE_HOUR_HEIGHT_PIXELS / 60 >=
 static_assert(TIMELINE_ITEM_MINUTES_DEFAULT >= TIMELINE_ITEM_MINUTES_MIN,
               "The default length is not cut short.");
 static_assert(TIMELINE_SCROLL_HOUR_START < MINUTES_PER_DAY / 60, "The start hour is in a day.");
+static_assert(MINUTES_PER_DAY % TIMELINE_MARK_STEP_MINUTES == 0, "Steps fill a day.");
+static_assert(TIMELINE_MARK_STEP_MINUTES % TIMELINE_MARK_ZOOM_STEP_MINUTES == 0,
+              "Zoomed steps land on every unzoomed one.");
+static_assert(60 % TIMELINE_MARK_STEP_MINUTES == 0, "Steps land on every hour.");
 
 // Cast because the constants come from different enums.
 static_assert((int)DATE_ISO_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
@@ -333,6 +352,23 @@ typedef struct Fonts {
     bool loaded;             // False when Rubik was missing and raylib's default font is used
 } Fonts;
 
+// A span of one day in minutes, from minute_top up to but not including minute_bottom.
+typedef struct Minute_Range {
+    int32_t minute_top;
+    int32_t minute_bottom;
+} Minute_Range;
+
+// A block the user draws on the timeline with the mouse to make an event or task at its times.
+// It belongs to the day the press began on, whichever way the pointer goes after.
+typedef struct Timeline_Mark {
+    float press_minute;   // Minute of day under the pointer at the press, not yet snapped
+    float press_y;        // Pointer y at the press, in layout pixels
+    int32_t day_number;   // Day of the column the press began in
+    bool pressed;         // The press began on the timeline and is held
+    bool drawing;         // It moved far enough to draw rather than click, or it is zoomed
+    bool zoomed;          // Ctrl was held at the press: five-minute steps under a magnifier
+} Timeline_Mark;
+
 typedef struct App {
     Event events[EVENT_COUNT_MAX];  // Events of the visible six weeks, ordered by start
     Task_Completion completions[COMPLETION_COUNT_MAX];  // Done task occurrences near the view
@@ -355,6 +391,7 @@ typedef struct App {
     // The week and day views' hours. Kept when moving between days and ranges, so that the
     // hours in sight stay put, as on a paper planner.
     Scroll timeline_scroll;
+    Timeline_Mark timeline_mark;
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
     bool events_truncated;
@@ -445,6 +482,29 @@ static void draw_grid(App *app, const Layout *layout);
 static void draw_grid_selection(const App *app, const Layout *layout, int32_t first_day);
 static void draw_timeline(App *app, const Layout *layout, int32_t first_day);
 static void draw_timeline_hours(const App *app, const Layout *layout, float top);
+static void timeline_mark_update(App *app, const Layout *layout, float top, int32_t first_day);
+static void timeline_mark_finish(App *app, float top);
+static int32_t timeline_column_at(const Layout *layout, Vector2 pointer);
+static float timeline_minute_at(float pointer_y, float top);
+static bool timeline_mark_ctrl_down(void);
+static bool timeline_mark_can_start(const App *app);
+static float timeline_mark_pointer_minute(const Timeline_Mark *mark, float pointer_y, float top);
+static Minute_Range timeline_mark_range(float press_minute, float pointer_minute,
+                                        int32_t step_minutes);
+static void draw_timeline_mark(const App *app, const Layout *layout, float top,
+                               int32_t first_day);
+static void draw_timeline_ghost(const App *app, const Layout *layout, float top,
+                                int32_t first_day);
+static void draw_timeline_ghost_block(const App *app, const Event *event, Rectangle day);
+static void draw_timeline_mark_zoom(const App *app, float top);
+static void draw_timeline_mark_hover(const App *app, const Layout *layout, float top);
+static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, float top);
+static void draw_timeline_mark_zoom_edge(const App *app, Vector2 center, float center_minute,
+                                         int32_t edge_minute, bool label_above);
+static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float center_minute);
+static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute, Minute_Range range,
+                                         Color color);
+static float circle_half_width(float radius, float offset_y);
 static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered);
 static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_t busy_bottom,
                                          bool hovered);
@@ -478,7 +538,8 @@ static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
 static float draw_panel_events_height(const App *app, float card_width);
 static void draw_panel_events_list(App *app, Rectangle list);
-static void scroll_update(Scroll *scroll, Rectangle list, float content_height);
+static void scroll_update(Scroll *scroll, Rectangle list, float content_height,
+                          bool drag_scrolls);
 static void draw_scrollbar(Rectangle list, float content_height, float offset_pixels);
 static bool draw_panel_event_card(App *app, const Event *event, Rectangle card);
 static void draw_panel_event_card_details(const Fonts *fonts, const Event *event, Date_Time now,
@@ -512,6 +573,7 @@ static bool text_line_fits(const Text_Style *style, const char *text, int32_t le
                            float width_pixels);
 static const char *form_parse(const Form *form, Date today, Event *event);
 static const char *form_parse_problem(const Form *form, Date today, Event *event);
+static const char *form_parse_body(const Form *form, Event *event);
 static const char *form_parse_order(const Event *event);
 static bool form_parse_time(const char *text, int32_t *minute_of_day);
 static bool form_parse_repeat_days(const char *text, int32_t *days);
@@ -755,6 +817,8 @@ static void app_handle_keys(App *app, const Layout *layout) {
             form_close(&app->form);
         }
         app->event_delete_id = 0;
+        // A block being drawn is dropped; the release then does nothing.
+        app->timeline_mark = (Timeline_Mark){ .pressed = false };
         return;
     }
     if (app->form.field_active != FORM_FIELD_NONE) {
@@ -1468,15 +1532,20 @@ static void draw_grid_selection(const App *app, const Layout *layout, int32_t fi
     DrawRectangleLinesEx(inner, 2, style_color(BORDER_COLOR_PRESSED));
 }
 
-// The hours of a week or day, scrolled by the wheel or by dragging, with each day's items that
-// have a time placed at their times. Clicking a day's hours selects the day, as its cell does.
+// The hours of a week or day, scrolled by the wheel, with each day's items that have a time
+// placed at their times. Clicking a day's hours selects the day, as its cell does. Dragging
+// draws a block that becomes a new event at its times; on a touch screen, where a finger has
+// no wheel, dragging scrolls instead.
 static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
     const Rectangle timeline = layout->timeline;
     assert(timeline.height > 0.0f);
     assert(layout->rows == 1);
-    scroll_update(&app->timeline_scroll, timeline, (float)TIMELINE_HEIGHT_PIXELS);
+    scroll_update(&app->timeline_scroll, timeline, (float)TIMELINE_HEIGHT_PIXELS, app->touch);
     // Where 00:00 is: above the timeline while it is scrolled down.
     const float top = timeline.y - app->timeline_scroll.offset_pixels;
+    if (!app->touch) {
+        timeline_mark_update(app, layout, top, first_day);
+    }
     // Every drawing below, and the scissor rectangles of the labels, stays within the timeline.
     app->fonts.clip = timeline;
     app->fonts.clipping = true;
@@ -1494,9 +1563,421 @@ static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
         DrawRectangleLinesEx(area, 1, style_color(BORDER_COLOR_NORMAL));
     }
     draw_timeline_hours(app, layout, top);
+    draw_timeline_ghost(app, layout, top, first_day);
+    draw_timeline_mark(app, layout, top, first_day);
+    draw_timeline_mark_hover(app, layout, top);
 
     app->fonts.clipping = false;
     EndScissorMode();
+    // After the scissor, because the circle may reach past the timeline's edges.
+    if (app->timeline_mark.drawing && app->timeline_mark.zoomed) {
+        draw_timeline_mark_zoom(app, top);
+    }
+    draw_timeline_mark_hover_zoom(app, layout, top);
+}
+
+// Starts a block at a press on a day's hours, follows the pointer while the button is held, and
+// opens the form for a new event at the block's times on release. A press that does not move
+// stays a click, which selects the day as before. Not while a form is open, which a new form
+// would replace, losing what was typed in it.
+static void timeline_mark_update(App *app, const Layout *layout, float top, int32_t first_day) {
+    Timeline_Mark *mark = &app->timeline_mark;
+    const Vector2 pointer = GetMousePosition();
+    const int32_t column = timeline_column_at(layout, pointer);
+    // A new press always starts afresh, even over a block left pressed when its release came
+    // while the timeline was not shown, as in the month view.
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && column >= 0 && !app->form.open) {
+        assert(column < layout->columns);
+        const bool zoomed = timeline_mark_ctrl_down();
+        *mark = (Timeline_Mark){
+            .press_minute = timeline_minute_at(pointer.y, top),
+            .press_y = pointer.y,
+            .day_number = first_day + column,
+            .pressed = true,
+            // Zoomed, the magnifier shows at once, so that the start can be set precisely too.
+            .drawing = zoomed,
+            .zoomed = zoomed,
+        };
+        return;
+    }
+    if (!mark->pressed) {
+        return;
+    }
+    const float moved = fabsf(pointer.y - mark->press_y);
+    if (moved > (float)LIST_DRAG_THRESHOLD_PIXELS) {
+        mark->drawing = true;
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        if (mark->drawing && !app->form.open) {
+            timeline_mark_finish(app, top);
+        }
+        *mark = (Timeline_Mark){ .pressed = false };
+        return;
+    }
+    // A release this frame never seen, as when the window lost the pointer, ends the press.
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        *mark = (Timeline_Mark){ .pressed = false };
+    }
+}
+
+// Opens the form for a new event on the block's day at its times. The form's Event and Task
+// toggle then makes it a task instead, as for any new item.
+static void timeline_mark_finish(App *app, float top) {
+    const Timeline_Mark *mark = &app->timeline_mark;
+    assert(mark->pressed);
+    assert(mark->drawing);
+    assert(!app->form.open);
+    const float pointer_minute = timeline_mark_pointer_minute(mark, GetMousePosition().y, top);
+    const int32_t step = mark->zoomed ? TIMELINE_MARK_ZOOM_STEP_MINUTES
+                                      : TIMELINE_MARK_STEP_MINUTES;
+    const Minute_Range range = timeline_mark_range(mark->press_minute, pointer_minute, step);
+    const Date date = date_from_day_number(mark->day_number);
+    app_select(app, date);
+    app_form_open(app, date, EVENT_KIND_EVENT);
+    Form *form = &app->form;
+    time_format(range.minute_top, form->text[FORM_FIELD_START_TIME], TIME_TEXT_SIZE);
+    time_format(range.minute_bottom, form->text[FORM_FIELD_END_TIME], TIME_TEXT_SIZE);
+    assert(form->field_active == FORM_FIELD_TITLE);
+}
+
+// The minute of day the pointer stands for, not yet snapped. Unzoomed, it is the minute under
+// the pointer. Zoomed, it moves TIMELINE_MARK_ZOOM times slower than the pointer from where the
+// press was, so that the magnifier's five-minute steps are as far apart under the hand as
+// quarter hours are unzoomed; the wheel scrolling meanwhile then changes nothing.
+static float timeline_mark_pointer_minute(const Timeline_Mark *mark, float pointer_y, float top) {
+    assert(mark->pressed);
+    if (!mark->zoomed) {
+        return timeline_minute_at(pointer_y, top);
+    }
+    const float zoomed_pixels_per_minute =
+        (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
+    const float moved_minutes = (pointer_y - mark->press_y) / zoomed_pixels_per_minute;
+    return fminf(fmaxf(mark->press_minute + moved_minutes, 0.0f), (float)MINUTES_PER_DAY);
+}
+
+// The day column under the pointer, from 0, or -1 when the pointer is not over the days'
+// hours, as over the hour labels in the gutter.
+static int32_t timeline_column_at(const Layout *layout, Vector2 pointer) {
+    if (!CheckCollisionPointRec(pointer, layout->timeline)) {
+        return -1;
+    }
+    if (pointer.x < layout->grid.x) {
+        return -1;
+    }
+    int32_t column = (int32_t)((pointer.x - layout->grid.x) / layout->cell_width);
+    // The right border's pixel would round to the column past the last.
+    if (column >= layout->columns) {
+        column = layout->columns - 1;
+    }
+    assert(column >= 0);
+    return column;
+}
+
+// The minute of day under the pointer, not yet snapped, kept within the day.
+static float timeline_minute_at(float pointer_y, float top) {
+    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    const float minute = (pointer_y - top) / pixels_per_minute;
+    return fminf(fmaxf(minute, 0.0f), (float)MINUTES_PER_DAY);
+}
+
+static bool timeline_mark_ctrl_down(void) {
+    return IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+}
+
+// A press may start a block: none is being drawn, and no form is open, which a new form would
+// replace, losing what was typed in it. The hints before a press follow the same rule, so that
+// they never promise a block the press would not draw.
+static bool timeline_mark_can_start(const App *app) {
+    if (app->timeline_mark.pressed) {
+        return false;
+    }
+    return !app->form.open;
+}
+
+// The block between the press and the pointer, either way up, covering every step either one
+// touches, and at least one step long. A block that would end at midnight ends at 23:59
+// instead, because a time of day stops there, and the item then stays on its own day.
+static Minute_Range timeline_mark_range(float press_minute, float pointer_minute,
+                                        int32_t step_minutes) {
+    assert(press_minute >= 0.0f);
+    assert(press_minute <= (float)MINUTES_PER_DAY);
+    assert(pointer_minute >= 0.0f);
+    assert(pointer_minute <= (float)MINUTES_PER_DAY);
+    assert(step_minutes > 0);
+    assert(MINUTES_PER_DAY % step_minutes == 0);
+    const float step = (float)step_minutes;
+    Minute_Range range = {
+        .minute_top = (int32_t)floorf(fminf(press_minute, pointer_minute) / step) * step_minutes,
+        .minute_bottom = (int32_t)ceilf(fmaxf(press_minute, pointer_minute) / step) * step_minutes,
+    };
+    // A press at the very bottom of the day starts there, with no step left below it.
+    if (range.minute_top >= MINUTES_PER_DAY) {
+        range.minute_top = MINUTES_PER_DAY - step_minutes;
+    }
+    // A click that did not move, or a drag along one step's edge, still makes one step.
+    if (range.minute_bottom <= range.minute_top) {
+        range.minute_bottom = range.minute_top + step_minutes;
+    }
+    assert(range.minute_bottom <= MINUTES_PER_DAY);
+    if (range.minute_bottom == MINUTES_PER_DAY) {
+        range.minute_bottom = MINUTES_PER_DAY - 1;
+    }
+    assert(range.minute_top >= 0);
+    assert(range.minute_top < range.minute_bottom);
+    assert(range.minute_bottom < MINUTES_PER_DAY);
+    return range;
+}
+
+// The block being drawn, across its day's column, with its times. Not drawn while its day is out
+// of sight, as after moving to another week with the keys; the release still makes the item.
+static void draw_timeline_mark(const App *app, const Layout *layout, float top,
+                               int32_t first_day) {
+    const Timeline_Mark *mark = &app->timeline_mark;
+    if (!mark->drawing) {
+        return;
+    }
+    assert(mark->pressed);
+    const int32_t column = mark->day_number - first_day;
+    if (column < 0 || column >= layout->columns) {
+        return;
+    }
+    const float pointer_minute = timeline_mark_pointer_minute(mark, GetMousePosition().y, top);
+    const int32_t step = mark->zoomed ? TIMELINE_MARK_ZOOM_STEP_MINUTES
+                                      : TIMELINE_MARK_STEP_MINUTES;
+    const Minute_Range range = timeline_mark_range(mark->press_minute, pointer_minute, step);
+    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    // Inset as items are, so that the block lines up with the items it will sit among.
+    const float inset = 2.0f;
+    const Rectangle block = {
+        layout->grid.x + (float)column * layout->cell_width + inset,
+        top + (float)range.minute_top * pixels_per_minute,
+        layout->cell_width - 2 * inset,
+        (float)(range.minute_bottom - range.minute_top) * pixels_per_minute,
+    };
+    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    DrawRectangleRec(block, Fade(accent, 0.35f));
+    DrawRectangleLinesEx(block, 2, accent);
+    char start[TIME_TEXT_SIZE];
+    char end[TIME_TEXT_SIZE];
+    time_format(range.minute_top, start, sizeof(start));
+    time_format(range.minute_bottom, end, sizeof(end));
+    // A hyphen rather than a dash, which the fonts' Latin-1 glyphs do not have.
+    char label[2 * TIME_TEXT_SIZE + 4];
+    snprintf(label, sizeof(label), "%s - %s", start, end);
+    draw_text(&app->fonts.small_strong, label, block.x + 6, block.y + 4,
+              style_color(TEXT_COLOR_NORMAL));
+}
+
+// A circle at the pointer showing the hours around the block's moving edge TIMELINE_MARK_ZOOM
+// times larger, with a line every five minutes, so that the edge can be put on any of them.
+static void draw_timeline_mark_zoom(const App *app, float top) {
+    const Timeline_Mark *mark = &app->timeline_mark;
+    assert(mark->zoomed);
+    assert(mark->drawing);
+    const Vector2 center = GetMousePosition();
+    const float pointer_minute = timeline_mark_pointer_minute(mark, center.y, top);
+    const Minute_Range range = timeline_mark_range(mark->press_minute, pointer_minute,
+                                                   TIMELINE_MARK_ZOOM_STEP_MINUTES);
+    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    DrawCircleV(center, radius, style_color(BACKGROUND_COLOR));
+    draw_timeline_mark_zoom_band(center, pointer_minute, range, Fade(accent, 0.35f));
+    draw_timeline_mark_zoom_ticks(app, center, pointer_minute);
+    // The edge that follows the pointer, with the time the form will get, on the side of the
+    // line away from the block, so that the band does not cover it.
+    const bool upwards = pointer_minute < mark->press_minute;
+    const int32_t edge = upwards ? range.minute_top : range.minute_bottom;
+    draw_timeline_mark_zoom_edge(app, center, pointer_minute, edge, upwards);
+    DrawRing(center, radius - 2, radius, 0.0f, 360.0f, 64, accent);
+}
+
+// While the form for a new item is open, the item as it would be saved: a see-through block at
+// its times on every day in sight it occurs on, so that the user sees it is placed but not yet
+// saved. Read from the form each frame, so that it follows edits to its times, date and repeat,
+// and is gone once the form is saved or cancelled. Nothing while the form cannot be read yet.
+static void draw_timeline_ghost(const App *app, const Layout *layout, float top,
+                                int32_t first_day) {
+    const Form *form = &app->form;
+    if (!form->open || form->editing_id != 0 || form->kind == EVENT_KIND_PROBLEM) {
+        return;
+    }
+    Event event = { .id = 0 };
+    if (form_parse_body(form, &event) != NULL) {
+        return;
+    }
+    if (!event_is_timed(&event)) {
+        return; // A ghost in the day cells is not drawn: there the form's dates already show.
+    }
+    const char *title = form->text[FORM_FIELD_TITLE];
+    title += strspn(title, " ");
+    // Until the user types a title, the ghost says what it will be.
+    snprintf(event.title, sizeof(event.title), "%s",
+             title[0] != '\0' ? title : event.kind == EVENT_KIND_TASK ? "New task" : "New event");
+    for (int32_t column = 0; column < layout->columns; column++) {
+        if (event_occurs_on_day(&event, first_day + column)) {
+            const Rectangle day = { layout->grid.x + (float)column * layout->cell_width, top,
+                                    layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
+            draw_timeline_ghost_block(app, &event, day);
+        }
+    }
+}
+
+// The ghost across the whole day, over the items it overlaps, which show through it; its place
+// among them in lanes is known only once it is saved.
+static void draw_timeline_ghost_block(const App *app, const Event *event, Rectangle day) {
+    assert(event->id == 0);
+    assert(event_is_timed(event));
+    // The same top and length the saved item will have, including the defaults for an item
+    // with only one time. The index is not used here.
+    const Timeline_Item item = timeline_item_make(event, 0);
+    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    const float inset = 2.0f;
+    const Rectangle block = {
+        day.x + inset,
+        day.y + (float)item.minute_top * pixels_per_minute,
+        day.width - 2 * inset - 1,
+        (float)(item.minute_bottom - item.minute_top) * pixels_per_minute - 1,
+    };
+    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    DrawRectangleRec(block, Fade(accent, 0.25f));
+    DrawRectangleLinesEx(block, 1, Fade(accent, 0.8f));
+    char label[TEXT_LINE_SIZE];
+    event_format_label(event, true, app_now(app), label, sizeof(label));
+    draw_text(&app->fonts.small, label, block.x + 6, block.y + 4,
+              Fade(style_color(TEXT_COLOR_NORMAL), 0.8f));
+}
+
+// Before a press, a short line across the pointer where a block would start, with its time, so
+// that the press can be aimed. It snaps as the press will, through the same function: to
+// quarter hours, or to five minutes with Ctrl held, when the magnifier shows it larger too.
+static void draw_timeline_mark_hover(const App *app, const Layout *layout, float top) {
+    const Vector2 pointer = GetMousePosition();
+    const int32_t column = timeline_column_at(layout, pointer);
+    if (column < 0 || !timeline_mark_can_start(app)) {
+        return;
+    }
+    const int32_t step = timeline_mark_ctrl_down() ? TIMELINE_MARK_ZOOM_STEP_MINUTES
+                                                   : TIMELINE_MARK_STEP_MINUTES;
+    const float minute = timeline_minute_at(pointer.y, top);
+    const int32_t start = timeline_mark_range(minute, minute, step).minute_top;
+    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    const float y = top + (float)start * pixels_per_minute;
+    // Centred on the pointer, but within its day, whose borders it does not cross.
+    const float day_left = layout->grid.x + (float)column * layout->cell_width + 2;
+    const float day_right = day_left + layout->cell_width - 4;
+    const float left = fmaxf(pointer.x - (float)TIMELINE_MARK_HOVER_HALF_PIXELS, day_left);
+    const float right = fminf(pointer.x + (float)TIMELINE_MARK_HOVER_HALF_PIXELS, day_right);
+    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    DrawRectangleRec((Rectangle){ left, y - 1, right - left, 2 }, accent);
+    char label[TIME_TEXT_SIZE];
+    time_format(start, label, sizeof(label));
+    // Above the line, where the block will not be, since it grows downwards from here.
+    draw_text(&app->fonts.small_strong, label, left, y - 18, accent);
+}
+
+// With Ctrl held before a press, the magnifier at the pointer, with the line where a block would
+// start, so that the start can be aimed to five minutes as precisely as the end.
+static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, float top) {
+    if (!timeline_mark_ctrl_down()) {
+        return;
+    }
+    const Vector2 center = GetMousePosition();
+    if (timeline_column_at(layout, center) < 0 || !timeline_mark_can_start(app)) {
+        return;
+    }
+    const float minute = timeline_minute_at(center.y, top);
+    const int32_t start = timeline_mark_range(minute, minute, TIMELINE_MARK_ZOOM_STEP_MINUTES)
+                              .minute_top;
+    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    DrawCircleV(center, radius, style_color(BACKGROUND_COLOR));
+    draw_timeline_mark_zoom_ticks(app, center, minute);
+    draw_timeline_mark_zoom_edge(app, center, minute, start, true);
+    DrawRing(center, radius - 2, radius, 0.0f, 360.0f, 64, style_color(BORDER_COLOR_PRESSED));
+}
+
+// A line across the magnifier at edge_minute, with its time above or below it. The edge is at
+// most one step from the middle, so it is always inside the circle.
+static void draw_timeline_mark_zoom_edge(const App *app, Vector2 center, float center_minute,
+                                         int32_t edge_minute, bool label_above) {
+    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    const float zoomed_pixels_per_minute =
+        (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
+    const float edge_y = center.y + ((float)edge_minute - center_minute) *
+                                        zoomed_pixels_per_minute;
+    assert(fabsf(edge_y - center.y) < radius);
+    const float half = circle_half_width(radius, edge_y - center.y);
+    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    DrawRectangleRec((Rectangle){ center.x - half, edge_y - 1, 2 * half, 2 }, accent);
+    char label[TIME_TEXT_SIZE];
+    time_format(edge_minute, label, sizeof(label));
+    const float label_y = label_above ? edge_y - 20 : edge_y + 4;
+    draw_text(&app->fonts.small_strong, label, center.x + 8, label_y,
+              style_color(TEXT_COLOR_NORMAL));
+}
+
+// A line every five minutes across the circle, brighter every quarter hour, which also has its
+// time at the left, so that the scale reads at a glance.
+static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float center_minute) {
+    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    const float zoomed_pixels_per_minute =
+        (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
+    // Minutes from the middle to the circle's top or bottom.
+    const float reach = radius / zoomed_pixels_per_minute;
+    const int32_t step = TIMELINE_MARK_ZOOM_STEP_MINUTES;
+    int32_t first = (int32_t)ceilf((center_minute - reach) / (float)step) * step;
+    int32_t last = (int32_t)floorf((center_minute + reach) / (float)step) * step;
+    if (first < 0) {
+        first = 0;
+    }
+    if (last > MINUTES_PER_DAY) {
+        last = MINUTES_PER_DAY;
+    }
+    // Bounded by the circle: about 2 * reach / step + 1 lines, a dozen at the scale chosen.
+    for (int32_t minute = first; minute <= last; minute += step) {
+        const float y = center.y + ((float)minute - center_minute) * zoomed_pixels_per_minute;
+        const float half = circle_half_width(radius, y - center.y);
+        const bool quarter = minute % TIMELINE_MARK_STEP_MINUTES == 0;
+        const Color color = style_color(quarter ? BORDER_COLOR_FOCUSED : BORDER_COLOR_NORMAL);
+        DrawRectangleRec((Rectangle){ center.x - half, y, 2 * half, 1 }, color);
+        // Near the top and bottom the circle is too narrow for a label.
+        if (quarter && minute < MINUTES_PER_DAY && half > radius / 2) {
+            char label[TIME_TEXT_SIZE];
+            time_format(minute, label, sizeof(label));
+            draw_text(&app->fonts.small, label, center.x - half + 8, y + 2,
+                      style_color(TEXT_COLOR_DISABLED));
+        }
+    }
+}
+
+// The block's part inside the circle, one pixel row at a time at the circle's width there,
+// because raylib clips drawing to rectangles only.
+static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute, Minute_Range range,
+                                         Color color) {
+    assert(range.minute_top < range.minute_bottom);
+    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    const float zoomed_pixels_per_minute =
+        (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
+    const float band_top = center.y + ((float)range.minute_top - center_minute) *
+                                          zoomed_pixels_per_minute;
+    const float band_bottom = center.y + ((float)range.minute_bottom - center_minute) *
+                                             zoomed_pixels_per_minute;
+    const float from = fmaxf(band_top, center.y - radius);
+    const float to = fminf(band_bottom, center.y + radius);
+    // At most the circle's height in rows.
+    const int32_t row_count = to > from ? (int32_t)ceilf(to - from) : 0;
+    assert(row_count <= 2 * TIMELINE_MARK_ZOOM_RADIUS_PIXELS + 1);
+    for (int32_t row = 0; row < row_count; row++) {
+        const float y = from + (float)row;
+        const float half = circle_half_width(radius, y + 0.5f - center.y);
+        DrawRectangleRec((Rectangle){ center.x - half, y, 2 * half, 1 }, color);
+    }
+}
+
+// Half the width of a circle at offset_y from its middle; 0 outside it.
+static float circle_half_width(float radius, float offset_y) {
+    assert(radius > 0.0f);
+    const float squared = radius * radius - offset_y * offset_y;
+    return squared > 0.0f ? sqrtf(squared) : 0.0f;
 }
 
 // The hour labels in the gutter left of the days; each day draws its own hour lines.
@@ -2082,7 +2563,7 @@ static void draw_panel_events(App *app, Rectangle body) {
         draw_text(&app->fonts.ui, "Nothing on this day.", body.x, list_top,
                   style_color(TEXT_COLOR_DISABLED));
     } else if (list.height > 0.0f) {
-        scroll_update(&app->panel_scroll, list, content_height);
+        scroll_update(&app->panel_scroll, list, content_height, true);
         draw_panel_events_list(app, list);
         draw_scrollbar(list, content_height, app->panel_scroll.offset_pixels);
     } else {
@@ -2117,7 +2598,9 @@ static float draw_panel_events_height(const App *app, float card_width) {
 // Scrolls the list by the wheel, or by dragging it with a finger or the mouse, and keeps the
 // offset within the content. Callers take a release as a click only while the press began in
 // the list and did not become a drag.
-static void scroll_update(Scroll *scroll, Rectangle list, float content_height) {
+// With drag_scrolls off, dragging is left to the caller and only the wheel scrolls.
+static void scroll_update(Scroll *scroll, Rectangle list, float content_height,
+                          bool drag_scrolls) {
     assert(list.height > 0.0f);
     assert(content_height > 0.0f);
     const Vector2 mouse = GetMousePosition();
@@ -2128,7 +2611,7 @@ static void scroll_update(Scroll *scroll, Rectangle list, float content_height) 
         scroll->pressed = false;
         scroll->dragging = false;
     }
-    if (over && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (drag_scrolls && over && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         scroll->pressed = true;
         scroll->dragging = false;
         scroll->drag_y = mouse.y;
@@ -2657,7 +3140,7 @@ static void draw_panel_form_targets(App *app, Rectangle body, float y, float end
     if (content_height > list.height) {
         list.width -= SCROLLBAR_GAP_PIXELS;
     }
-    scroll_update(&form->targets_scroll, list, content_height);
+    scroll_update(&form->targets_scroll, list, content_height, true);
     const Scroll *scroll = &form->targets_scroll;
     // A release opens nothing unless the press began here and stayed a tap.
     const bool clickable = scroll->pressed && !scroll->dragging &&
@@ -2890,7 +3373,14 @@ static const char *form_parse(const Form *form, Date today, Event *event) {
     if (form->kind == EVENT_KIND_PROBLEM) {
         return form_parse_problem(form, today, event);
     }
+    return form_parse_body(form, event);
+}
 
+// Everything of an event, task or opportunity but its title: dates, times, location,
+// description and repeat. Apart from form_parse, so that the timeline can show an unsaved item
+// at its times before it has a title, read exactly as saving will read it.
+static const char *form_parse_body(const Form *form, Event *event) {
+    assert(form->kind != EVENT_KIND_PROBLEM);
     if (!date_parse_iso(form->text[FORM_FIELD_START_DATE], &event->start_date)) {
         return "Start date must be YYYY-MM-DD.";
     }
