@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "raygui.h"
+#include "rlgl.h"
 // Only to wait for input with a timeout and to see a close request, which raylib does not
 // wrap. The GL headers are left out because raylib loads OpenGL itself.
 #define GLFW_INCLUDE_NONE
@@ -105,6 +106,12 @@ typedef struct Desktop {
     char info[INFO_SIZE];
 } Desktop;
 
+// What desktop_window_refresh needs to draw, as GLFW hands a callback only the window.
+typedef struct Desktop_Frame {
+    Desktop *desktop;
+    App *app;
+} Desktop_Frame;
+
 static bool options_parse(int argc, char **argv, Options *options);
 static bool port_parse(const char *text, uint16_t *port);
 static void desktop_open(Desktop *desktop, const Options *options);
@@ -113,6 +120,8 @@ static const char *database_path(char *buffer, int32_t buffer_size);
 static bool desktop_redraw_needed(Desktop *desktop);
 static void desktop_wait(void);
 static void desktop_frame(Desktop *desktop, App *app);
+static void desktop_draw(Desktop *desktop, App *app, float width, float height);
+static void desktop_window_refresh(GLFWwindow *window);
 static bool input_is_active(void);
 static View navigation_draw(const App *app, View current, Rectangle area);
 static void info_update(const Server *server, App *app);
@@ -148,6 +157,15 @@ int main(int argc, char **argv) {
     if (!desktop.store_open) {
         app_set_status(app, desktop.local.error);
     }
+
+    // Windows runs its own loop while the user drags a window edge, in which the main loop below
+    // does not run, so without this the new area stays black until the mouse is released. GLFW
+    // calls the refresh callback from that loop, which draws the app at the new size.
+    Desktop_Frame frame = { .desktop = &desktop, .app = app };
+    GLFWwindow *window = glfwGetCurrentContext();
+    assert(window != NULL);
+    glfwSetWindowUserPointer(window, &frame);
+    glfwSetWindowRefreshCallback(window, desktop_window_refresh);
 
     // The one intentionally unbounded loop: it runs until the window is closed. Phones are
     // served on every pass, drawn or not, so that they never wait for the window.
@@ -238,9 +256,16 @@ static void desktop_frame(Desktop *desktop, App *app) {
     if (desktop->redraw.frames_pending > 0) {
         desktop->redraw.frames_pending--;
     }
-    const float width = (float)GetScreenWidth();
-    const float height = (float)GetScreenHeight();
     BeginDrawing();
+    desktop_draw(desktop, app, (float)GetScreenWidth(), (float)GetScreenHeight());
+    EndDrawing();
+}
+
+// Draws the frame between BeginDrawing and the end of drawing, which the caller does, as
+// EndDrawing also polls input and waits for the next frame, neither wanted while resizing.
+static void desktop_draw(Desktop *desktop, App *app, float width, float height) {
+    assert(width > 0.0f);
+    assert(height > 0.0f);
     ClearBackground(GetColor((unsigned int)GuiGetStyle(DEFAULT, BACKGROUND_COLOR)));
     Rectangle content = { 0, 0, width, height };
     if (!desktop->client_mode) {
@@ -263,7 +288,19 @@ static void desktop_frame(Desktop *desktop, App *app) {
         assert(false); // Not a view.
         break;
     }
-    EndDrawing();
+}
+
+// Draws and shows a frame at the window's current size, from inside the resize loop. Not
+// EndDrawing: it would poll events again from within an event callback and sleep to hold the
+// frame rate, so only the part that puts the picture on screen is done.
+static void desktop_window_refresh(GLFWwindow *window) {
+    Desktop_Frame *frame = glfwGetWindowUserPointer(window);
+    assert(frame != NULL);
+    BeginDrawing();
+    desktop_draw(frame->desktop, frame->app, (float)GetScreenWidth(),
+                 (float)GetScreenHeight());
+    rlDrawRenderBatchActive();
+    SwapScreenBuffer();
 }
 
 // Whether something changed since the last frame: input, data from this app or a phone, the
