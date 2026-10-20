@@ -1,8 +1,10 @@
 # Zeman
 
+![Zeman Desktop screenshot](zeman-desktop-screenshot.png)
+
 ## Introduction
 
-**Zeman** is a practical offline calendar and task manager for Windows and Android. Instead of syncing your events, tasks and problems to a cloud service, it keeps them on your own Windows computer and serves them to your desktop and Android devices over the local network.
+**Zeman** (Hebrew for "period" (of time)) is a practical offline calendar and task manager for Windows and Android. Instead of syncing your events, tasks and problems to a cloud service, it keeps them on your own Windows computer and serves them to your desktop and Android devices over the local network.
 
 ## Features
 
