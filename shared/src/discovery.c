@@ -54,8 +54,8 @@ bool discovery_poll(Discovery *discovery) {
     }
 
     for (int32_t i = 0; i < DISCOVERY_ANSWERS_PER_POLL; i++) {
-        char answer[PROTOCOL_DISCOVERY_SIZE_MAX];
-        char address[NET_ADDRESS_SIZE];
+        char answer[PROTOCOL_DISCOVERY_SIZE_MAX] = "";
+        char address[NET_ADDRESS_SIZE] = "";
         uint16_t from_port = 0;
         int32_t length = net_udp_recv(discovery->socket, answer, sizeof(answer) - 1, address,
                                       sizeof(address), &from_port);
@@ -74,7 +74,9 @@ bool discovery_poll(Discovery *discovery) {
     return discovery->found;
 }
 
-// "ZEMAN-SERVER 1 47800": the reply prefix, then a port of digits only.
+/**
+ * "ZEMAN-SERVER 1 47800": the reply prefix, then a port of digits only.
+ */
 static bool discovery_parse_answer(const char *answer, uint16_t *port) {
     const size_t prefix_length = strlen(PROTOCOL_DISCOVERY_REPLY);
     if (strncmp(answer, PROTOCOL_DISCOVERY_REPLY, prefix_length) != 0) {

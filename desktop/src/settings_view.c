@@ -6,6 +6,7 @@
 
 #include "raygui.h"
 
+#include <zeman/bound.h>
 #include <zeman/text_box.h>
 
 enum {
@@ -55,7 +56,7 @@ bool settings_view_draw(Settings_View *view, const App *app, const char *databas
     y += LINE_PIXELS + 4;
 
     const float room = area.width - 2 * MARGIN_PIXELS - GAP_PIXELS - BUTTON_WIDTH_PIXELS;
-    const float box_width = room < BOX_WIDTH_PIXELS_MAX ? room : BOX_WIDTH_PIXELS_MAX;
+    const float box_width = float_min(room, (float)BOX_WIDTH_PIXELS_MAX);
     const Rectangle box = { x, y, box_width, CONTROL_HEIGHT_PIXELS };
     bool apply = settings_view_edit(view, box);
     const Rectangle button = { x + box_width + GAP_PIXELS, y, BUTTON_WIDTH_PIXELS,
@@ -65,7 +66,7 @@ bool settings_view_draw(Settings_View *view, const App *app, const char *databas
     }
     y += CONTROL_HEIGHT_PIXELS + LINE_PIXELS / 2;
 
-    char text[LABEL_SIZE];
+    char text[LABEL_SIZE] = "";
     snprintf(text, sizeof(text), "In use: %s", database_path[0] != '\0' ? database_path : "none");
     app_draw_text(app, APP_TEXT_DIM, text, x, y);
     y += LINE_PIXELS;
@@ -88,8 +89,10 @@ void settings_view_set_message(Settings_View *view, const char *message) {
     snprintf(view->message, sizeof(view->message), "%s", message);
 }
 
-// The path's text box. Returns true when Enter is pressed in it, which applies the path as the
-// Apply button does.
+/**
+ * The path's text box. Returns true when Enter is pressed in it, which applies the path as the
+ * Apply button does.
+ */
 static bool settings_view_edit(Settings_View *view, Rectangle box) {
     if (view->editing) {
         settings_view_paste(view);
@@ -107,9 +110,11 @@ static bool settings_view_edit(Settings_View *view, Rectangle box) {
     return IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER);
 }
 
-// Ctrl+V pastes at the cursor, as in the calendar's form, because a path is long to type and
-// raygui's text box has no clipboard of its own. GLFW drops the control character Ctrl+V types,
-// so the text box itself sees nothing of it.
+/**
+ * Ctrl+V pastes at the cursor, as in the calendar's form, because a path is long to type and
+ * raygui's text box has no clipboard of its own. GLFW drops the control character Ctrl+V types,
+ * so the text box itself sees nothing of it.
+ */
 static void settings_view_paste(Settings_View *view) {
     assert(view->editing);
     if (!IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_RIGHT_CONTROL)) {
@@ -132,8 +137,10 @@ static void settings_view_paste(Settings_View *view) {
                                              cursor_index, clipboard));
 }
 
-// Trims spaces from both ends, then one pair of double quotes around the whole path, which
-// Explorer's "Copy as path" adds and which no Windows file name can hold.
+/**
+ * Trims spaces from both ends, then one pair of double quotes around the whole path, which
+ * Explorer's "Copy as path" adds and which no Windows file name can hold.
+ */
 static void settings_view_path_clean(char *path) {
     size_t start = 0;
     size_t length = strlen(path);

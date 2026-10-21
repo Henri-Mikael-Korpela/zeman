@@ -8,8 +8,10 @@
 
 #include <zeman/text_box.h>
 
-// raygui's cursor is a static of the implementation above, so only this file can reach it.
-// raygui clamps it to the text's length itself, so any index from 0 up is safe to set.
+/**
+ * raygui's cursor is a static of the implementation above, so only this file can reach it.
+ * raygui clamps it to the text's length itself, so any index from 0 up is safe to set.
+ */
 int32_t text_box_cursor_index(void) {
     return (int32_t)textBoxCursorIndex;
 }

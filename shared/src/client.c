@@ -19,6 +19,8 @@ static Writer client_request_begin(Client *client, Protocol_Operation operation)
 static bool client_exchange(Client *client, const Writer *request, Reader *response);
 static bool client_call(Client *client, const Writer *request, Reader *response);
 static bool client_response_done(Client *client, const Reader *response);
+static int32_t client_response_count(Client *client, const Reader *response, int32_t count);
+static int64_t client_response_id(Client *client, const Reader *response, int64_t id);
 
 static int32_t client_load_range(void *context, Date first, Date last, Event *events,
                                  int32_t event_count_max, bool *truncated);
@@ -97,7 +99,7 @@ static int32_t client_load_range(void *context, Date first, Date last, Event *ev
     writer_date(&request, first);
     writer_date(&request, last);
     writer_i32(&request, event_count_max);
-    Reader response;
+    Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return -1;
     }
@@ -110,7 +112,7 @@ static int32_t client_load_range(void *context, Date first, Date last, Event *ev
     for (int32_t i = 0; i < count; i++) {
         events[i] = reader_event(&response);
     }
-    return client_response_done(client, &response) ? count : -1;
+    return client_response_count(client, &response, count);
 }
 
 static int32_t client_load_completions(void *context, Date first, Date last,
@@ -122,7 +124,7 @@ static int32_t client_load_completions(void *context, Date first, Date last,
     writer_date(&request, first);
     writer_date(&request, last);
     writer_i32(&request, completion_count_max);
-    Reader response;
+    Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return -1;
     }
@@ -135,26 +137,26 @@ static int32_t client_load_completions(void *context, Date first, Date last,
     for (int32_t i = 0; i < count; i++) {
         completions[i] = reader_completion(&response);
     }
-    return client_response_done(client, &response) ? count : -1;
+    return client_response_count(client, &response, count);
 }
 
 static int64_t client_insert(void *context, const Event *event) {
     Client *client = context;
     Writer request = client_request_begin(client, PROTOCOL_INSERT);
     writer_event(&request, event);
-    Reader response;
+    Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return 0;
     }
     int64_t id = reader_i64(&response);
-    return client_response_done(client, &response) && id > 0 ? id : 0;
+    return client_response_id(client, &response, id);
 }
 
 static bool client_update(void *context, const Event *event) {
     Client *client = context;
     Writer request = client_request_begin(client, PROTOCOL_UPDATE);
     writer_event(&request, event);
-    Reader response;
+    Reader response = { 0 };
     return client_call(client, &request, &response) && client_response_done(client, &response);
 }
 
@@ -162,7 +164,7 @@ static bool client_remove(void *context, int64_t id) {
     Client *client = context;
     Writer request = client_request_begin(client, PROTOCOL_DELETE);
     writer_i64(&request, id);
-    Reader response;
+    Reader response = { 0 };
     return client_call(client, &request, &response) && client_response_done(client, &response);
 }
 
@@ -171,8 +173,8 @@ static bool client_set_task_done(void *context, int64_t id, Date occurrence_star
     Writer request = client_request_begin(client, PROTOCOL_SET_TASK_DONE);
     writer_i64(&request, id);
     writer_date(&request, occurrence_start);
-    writer_u8(&request, done ? 1 : 0);
-    Reader response;
+    writer_u8(&request, (uint8_t)done);
+    Reader response = { 0 };
     return client_call(client, &request, &response) && client_response_done(client, &response);
 }
 
@@ -181,12 +183,12 @@ static int64_t client_location(void *context, const char *address, const char *c
     Writer request = client_request_begin(client, PROTOCOL_LOCATION);
     writer_text(&request, address);
     writer_text(&request, city);
-    Reader response;
+    Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return 0;
     }
     int64_t id = reader_i64(&response);
-    return client_response_done(client, &response) && id > 0 ? id : 0;
+    return client_response_id(client, &response, id);
 }
 
 static int32_t client_load_target_tasks(void *context, int64_t target_id, Linked_Task *tasks,
@@ -197,7 +199,7 @@ static int32_t client_load_target_tasks(void *context, int64_t target_id, Linked
     Writer request = client_request_begin(client, PROTOCOL_LOAD_TARGET_TASKS);
     writer_i64(&request, target_id);
     writer_i32(&request, task_count_max);
-    Reader response;
+    Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return -1;
     }
@@ -210,7 +212,7 @@ static int32_t client_load_target_tasks(void *context, int64_t target_id, Linked
     for (int32_t i = 0; i < count; i++) {
         tasks[i] = reader_linked_task(&response);
     }
-    return client_response_done(client, &response) ? count : -1;
+    return client_response_count(client, &response, count);
 }
 
 static int32_t client_load_task_targets(void *context, int64_t task_id, bool problems_only,
@@ -221,9 +223,9 @@ static int32_t client_load_task_targets(void *context, int64_t task_id, bool pro
     assert(target_count_max > 0);
     Writer request = client_request_begin(client, PROTOCOL_LOAD_TASK_TARGETS);
     writer_i64(&request, task_id);
-    writer_u8(&request, problems_only ? 1 : 0);
+    writer_u8(&request, (uint8_t)problems_only);
     writer_i32(&request, target_count_max);
-    Reader response;
+    Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return -1;
     }
@@ -240,7 +242,7 @@ static int32_t client_load_task_targets(void *context, int64_t task_id, bool pro
             response.failed = true;
         }
     }
-    return client_response_done(client, &response) ? count : -1;
+    return client_response_count(client, &response, count);
 }
 
 static bool client_set_task_targets(void *context, int64_t task_id, const int64_t *target_ids,
@@ -255,11 +257,13 @@ static bool client_set_task_targets(void *context, int64_t task_id, const int64_
     for (int32_t i = 0; i < target_count; i++) {
         writer_i64(&request, target_ids[i]);
     }
-    Reader response;
+    Reader response = { 0 };
     return client_call(client, &request, &response) && client_response_done(client, &response);
 }
 
-// Asks the desktop at most every CLIENT_REVISION_INTERVAL_MS; between, the last answer stands.
+/**
+ * Asks the desktop at most every CLIENT_REVISION_INTERVAL_MS; between, the last answer stands.
+ */
 static uint64_t client_revision(void *context) {
     Client *client = context;
     int64_t now = net_monotonic_ms();
@@ -270,7 +274,7 @@ static uint64_t client_revision(void *context) {
     }
     client->revision_checked_ms = now;
     Writer request = client_request_begin(client, PROTOCOL_REVISION);
-    Reader response;
+    Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         client->revision = 0;
         return 0;
@@ -319,12 +323,12 @@ static bool client_connect(Client *client) {
 
     // In its own buffer: connecting happens inside a call whose request is already waiting in
     // client->request, and must not overwrite it.
-    uint8_t hello[PROTOCOL_LENGTH_SIZE + 8];
+    uint8_t hello[PROTOCOL_LENGTH_SIZE + 8] = { 0 };
     Writer request = writer_make(hello + PROTOCOL_LENGTH_SIZE,
                                  sizeof(hello) - PROTOCOL_LENGTH_SIZE);
     writer_u8(&request, PROTOCOL_HELLO);
     writer_u32(&request, PROTOCOL_VERSION);
-    Reader response;
+    Reader response = { 0 };
     if (!client_exchange(client, &request, &response)) {
         client_disconnect(client, "The desktop app did not answer.");
         return false;
@@ -347,7 +351,9 @@ static void client_disconnect(Client *client, const char *reason) {
     snprintf(client->error, sizeof(client->error), "%s", reason);
 }
 
-// The payload goes after room for the length prefix, which client_exchange fills in.
+/**
+ * The payload goes after room for the length prefix, which client_exchange fills in.
+ */
 static Writer client_request_begin(Client *client, Protocol_Operation operation) {
     assert(operation > 0);
     assert(operation < PROTOCOL_OPERATION_END);
@@ -357,10 +363,12 @@ static Writer client_request_begin(Client *client, Protocol_Operation operation)
     return request;
 }
 
-// Sends the request and reads the response up to its result. Returns false, with the error set,
-// if the connection fails (and is closed) or the desktop app reports a failure (and stays
-// connected). Every request is written after PROTOCOL_LENGTH_SIZE free bytes, where the length
-// prefix goes.
+/**
+ * Sends the request and reads the response up to its result. Returns false, with the error set,
+ * if the connection fails (and is closed) or the desktop app reports a failure (and stays
+ * connected). Every request is written after PROTOCOL_LENGTH_SIZE free bytes, where the length
+ * prefix goes.
+ */
 static bool client_exchange(Client *client, const Writer *request, Reader *response) {
     assert(client->connected);
     // Every request is far smaller than its buffer; overflowing it is a programmer error.
@@ -372,7 +380,7 @@ static bool client_exchange(Client *client, const Writer *request, Reader *respo
         client_disconnect(client, "The connection to the desktop app was lost.");
         return false;
     }
-    uint8_t prefix[PROTOCOL_LENGTH_SIZE];
+    uint8_t prefix[PROTOCOL_LENGTH_SIZE] = { 0 };
     if (!net_recv_all(client->socket, prefix, sizeof(prefix), CLIENT_IO_TIMEOUT_MS)) {
         client_disconnect(client, "The connection to the desktop app was lost.");
         return false;
@@ -405,12 +413,39 @@ static bool client_call(Client *client, const Writer *request, Reader *response)
     return client_exchange(client, request, response);
 }
 
-// A response with fields missing, left over or breaking their rules means the two apps do not
-// understand each other, so the connection is dropped rather than trusted.
+/**
+ * A response with fields missing, left over or breaking their rules means the two apps do not
+ * understand each other, so the connection is dropped rather than trusted.
+ */
 static bool client_response_done(Client *client, const Reader *response) {
     if (!reader_done(response)) {
         client_disconnect(client, "The desktop app sent an invalid answer.");
         return false;
     }
     return true;
+}
+
+/**
+ * count, once the whole answer has been read as it should be, or -1 for a load that failed.
+ */
+static int32_t client_response_count(Client *client, const Reader *response, int32_t count) {
+    assert(count >= 0);
+    if (client_response_done(client, response)) {
+        return count;
+    }
+    return -1;
+}
+
+/**
+ * The id a write answered with, once the whole answer has been read as it should be, or 0 for
+ * one that failed or came back without a stored id.
+ */
+static int64_t client_response_id(Client *client, const Reader *response, int64_t id) {
+    if (!client_response_done(client, response)) {
+        return 0;
+    }
+    if (id > 0) {
+        return id;
+    }
+    return 0;
 }

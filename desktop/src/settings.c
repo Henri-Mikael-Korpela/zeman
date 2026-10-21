@@ -28,7 +28,7 @@ bool settings_load(Settings *settings, const char *directory) {
     assert(settings != NULL);
     assert(directory != NULL);
     *settings = (Settings){ 0 };
-    char path[SETTINGS_FILE_PATH_SIZE];
+    char path[SETTINGS_FILE_PATH_SIZE] = "";
     if (!settings_file_path(path, sizeof(path), directory)) {
         snprintf(settings->error, sizeof(settings->error), "The app's folder path is too long.");
         return false;
@@ -43,7 +43,7 @@ bool settings_load(Settings *settings, const char *directory) {
         return false;
     }
     // One byte for the terminator, so that the text can be parsed as a string.
-    char text[SETTINGS_FILE_SIZE_MAX + 1];
+    char text[SETTINGS_FILE_SIZE_MAX + 1] = "";
     const size_t size = fread(text, 1, SETTINGS_FILE_SIZE_MAX, file);
     const bool failed = ferror(file) != 0;
     // A full buffer may hide more: one byte more tells.
@@ -72,7 +72,7 @@ bool settings_save(Settings *settings, const char *directory) {
     assert(strchr(settings->database_path, '\n') == NULL);
     assert(strchr(settings->database_path, '\r') == NULL);
     settings->error[0] = '\0';
-    char path[SETTINGS_FILE_PATH_SIZE];
+    char path[SETTINGS_FILE_PATH_SIZE] = "";
     if (!settings_file_path(path, sizeof(path), directory)) {
         snprintf(settings->error, sizeof(settings->error), "The app's folder path is too long.");
         return false;
@@ -130,8 +130,10 @@ static bool settings_parse(Settings *settings, char *text) {
     return true;
 }
 
-// Reads one "key=value" line. Keys this version does not know are skipped, so that settings
-// written by a later version still let this one start.
+/**
+ * Reads one "key=value" line. Keys this version does not know are skipped, so that settings
+ * written by a later version still let this one start.
+ */
 static bool settings_parse_line(Settings *settings, char *line) {
     char *trimmed = text_trim(line);
     if (settings_line_is_skipped(trimmed)) {
@@ -158,20 +160,20 @@ static bool settings_parse_line(Settings *settings, char *line) {
     return true;
 }
 
-// Blank lines, comments and [section] headers, which INI files may have, hold no setting.
+/**
+ * Blank lines, comments and [section] headers, which INI files may have, hold no setting.
+ */
 static bool settings_line_is_skipped(const char *line) {
-    switch (line[0]) {
-    case '\0':
-    case ';':
-    case '#':
-    case '[':
+    if (line[0] == '\0') {
         return true;
-    default:
-        return false; // Any other character starts a key.
     }
+    // Any other character starts a key.
+    return strchr(";#[", line[0]) != NULL;
 }
 
-// Strips spaces, tabs and the carriage return of a Windows line break from both ends, in place.
+/**
+ * Strips spaces, tabs and the carriage return of a Windows line break from both ends, in place.
+ */
 static char *text_trim(char *text) {
     size_t length = strlen(text);
     size_t start = 0;

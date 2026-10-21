@@ -17,14 +17,14 @@ enum {
 };
 
 typedef struct Server_Client {
-    uint8_t request[PROTOCOL_LENGTH_SIZE + PROTOCOL_REQUEST_SIZE_MAX];
-    uint8_t response[PROTOCOL_LENGTH_SIZE + PROTOCOL_RESPONSE_SIZE_MAX];
+    int64_t connected_at;  // Seconds since 1970, when the phone connected
+    Net_Socket socket;
     int32_t request_length;   // Bytes of the current request received so far
     int32_t response_length;  // Bytes of the response to send, 0 when none
     int32_t response_sent;
-    int64_t connected_at;  // Seconds since 1970, when the phone connected
-    Net_Socket socket;
     bool active;
+    uint8_t request[PROTOCOL_LENGTH_SIZE + PROTOCOL_REQUEST_SIZE_MAX];
+    uint8_t response[PROTOCOL_LENGTH_SIZE + PROTOCOL_RESPONSE_SIZE_MAX];
     char address[NET_ADDRESS_SIZE];  // The phone's address on the local network
 } Server_Client;
 
@@ -49,7 +49,9 @@ typedef struct Server {
     char error[SERVER_ERROR_SIZE];
 } Server;
 
-// Returns false, with error set, when the port cannot be used; the desktop app works without.
+/**
+ * Returns false, with error set, when the port cannot be used; the desktop app works without.
+ */
 bool server_start(Server *server, Backend *backend, uint16_t port);
 void server_stop(Server *server);
 void server_poll(Server *server);

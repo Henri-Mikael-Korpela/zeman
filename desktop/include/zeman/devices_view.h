@@ -23,7 +23,9 @@ typedef struct Devices_View {
     bool qr_ready;  // False when the server is off, so there is nothing to connect to
 } Devices_View;
 
-// Makes the QR code for the server's address. Call after server_start.
+/**
+ * Makes the QR code for the server's address. Call after server_start.
+ */
 void devices_view_init(Devices_View *view, const Server *server);
 void devices_view_draw(const Devices_View *view, const Server *server, const App *app,
                        Rectangle area);

@@ -3,6 +3,8 @@
 #include <assert.h>
 #include <string.h>
 
+#include <zeman/bound.h>
+
 enum {
     // Pasting reads at most this many bytes of the clipboard: far more than the largest text
     // box, so that a huge clipboard of mostly line breaks still fills it, while the read stays
@@ -22,7 +24,7 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index,
     assert(text_size <= TEXT_BOX_SIZE_MAX);
     assert(cursor_index >= 0);
     assert(cursor_index <= length);
-    char pasted[TEXT_BOX_SIZE_MAX];
+    char pasted[TEXT_BOX_SIZE_MAX] = "";
     int32_t pasted_length = 0;
     const int32_t room = text_size - 1 - length;
     int32_t i = 0;
@@ -40,7 +42,7 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index,
             pasted_length += size;
         }
         // Anything else, such as the carriage return of a Windows line break, is skipped.
-        i += size > 0 ? size : 1;
+        i += int32_max(size, 1);
     }
     assert(pasted_length <= room);
     // The tail moves right, terminator included, to make room at the cursor.
@@ -51,8 +53,10 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index,
     return cursor_index + pasted_length;
 }
 
-// Bytes in the UTF-8 character that text starts with, or 0 when it is not valid UTF-8 there,
-// such as a stray continuation byte or a sequence cut short by the end of the text.
+/**
+ * Bytes in the UTF-8 character that text starts with, or 0 when it is not valid UTF-8 there,
+ * such as a stray continuation byte or a sequence cut short by the end of the text.
+ */
 static int32_t utf8_sequence_size(const char *text) {
     const unsigned char first = (unsigned char)text[0];
     assert(first != 0);

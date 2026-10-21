@@ -25,8 +25,10 @@ typedef struct Discovery {
 
 bool discovery_start(Discovery *discovery);
 void discovery_stop(Discovery *discovery);
-// Sends a probe when one is due and reads answers. Returns true once a desktop app was found;
-// found_address and found_port then say where.
+/**
+ * Sends a probe when one is due and reads answers. Returns true once a desktop app was found;
+ * found_address and found_port then say where.
+ */
 bool discovery_poll(Discovery *discovery);
 
 #endif

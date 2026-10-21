@@ -32,7 +32,10 @@ void android_input_install(Android_Input *input) {
 
 int android_input_char_pressed(void) {
     struct android_app *app = GetAndroidApp();
-    Android_Input *input = app != NULL ? app->userData : NULL;
+    Android_Input *input = NULL;
+    if (app != NULL) {
+        input = app->userData;
+    }
     if (input == NULL || input->queue_count == 0) {
         return 0;
     }
@@ -64,8 +67,10 @@ const char *android_input_data_directory(void) {
     return app->activity->internalDataPath;
 }
 
-// Queues the character of each key press, then lets raylib handle the event as usual, so that
-// keys such as Backspace and Enter still reach raygui.
+/**
+ * Queues the character of each key press, then lets raylib handle the event as usual, so that
+ * keys such as Backspace and Enter still reach raygui.
+ */
 static int32_t android_input_callback(struct android_app *app, AInputEvent *event) {
     Android_Input *input = app->userData;
     assert(input != NULL);
@@ -75,8 +80,10 @@ static int32_t android_input_callback(struct android_app *app, AInputEvent *even
             int32_t character = android_key_character(AKeyEvent_getKeyCode(event),
                                                       AKeyEvent_getMetaState(event));
             // A held key arrives as one event with a repeat count.
-            int32_t count = action == AKEY_EVENT_ACTION_MULTIPLE ? AKeyEvent_getRepeatCount(event)
-                                                                 : 1;
+            int32_t count = 1;
+            if (action == AKEY_EVENT_ACTION_MULTIPLE) {
+                count = AKeyEvent_getRepeatCount(event);
+            }
             for (int32_t i = 0; i < count && i < ANDROID_INPUT_QUEUE_SIZE; i++) {
                 android_input_push(input, character);
             }
@@ -94,44 +101,74 @@ static void android_input_push(Android_Input *input, int32_t character) {
     input->queue_count++;
 }
 
-// The character a key types on a US keyboard, or 0 for keys that type none.
+// A key that types a symbol, with what it types alone and with Shift held.
+typedef struct Key_Symbol {
+    int32_t key_code;
+    char plain;
+    char shifted;
+} Key_Symbol;
+
+// A table rather than a switch, because key codes come from the system and the many codes that
+// type nothing are no mistake to assert on, and because each key then states both its symbols
+// once. Keys that type the same with and without Shift list it twice.
+static const Key_Symbol key_symbols[] = {
+    { AKEYCODE_SPACE, ' ', ' ' },
+    { AKEYCODE_COMMA, ',', '<' },
+    { AKEYCODE_PERIOD, '.', '>' },
+    { AKEYCODE_MINUS, '-', '_' },
+    { AKEYCODE_EQUALS, '=', '+' },
+    { AKEYCODE_LEFT_BRACKET, '[', '{' },
+    { AKEYCODE_RIGHT_BRACKET, ']', '}' },
+    { AKEYCODE_BACKSLASH, '\\', '|' },
+    { AKEYCODE_SEMICOLON, ';', ':' },
+    { AKEYCODE_APOSTROPHE, '\'', '"' },
+    { AKEYCODE_SLASH, '/', '?' },
+    { AKEYCODE_GRAVE, '`', '~' },
+    { AKEYCODE_AT, '@', '@' },
+    { AKEYCODE_PLUS, '+', '+' },
+    { AKEYCODE_STAR, '*', '*' },
+    { AKEYCODE_POUND, '#', '#' },
+};
+enum { KEY_SYMBOL_COUNT = sizeof(key_symbols) / sizeof(key_symbols[0]) };
+
+/**
+ * The character a key types on a US keyboard, or 0 for keys that type none.
+ */
 static int32_t android_key_character(int32_t key_code, int32_t meta_state) {
     const bool shift = (meta_state & AMETA_SHIFT_ON) != 0;
     const bool caps_lock = (meta_state & AMETA_CAPS_LOCK_ON) != 0;
     if (key_code >= AKEYCODE_A && key_code <= AKEYCODE_Z) {
         int32_t offset = key_code - AKEYCODE_A;
-        return shift != caps_lock ? 'A' + offset : 'a' + offset;
+        // Caps Lock and Shift cancel each other out, as on a keyboard.
+        if (shift != caps_lock) {
+            return 'A' + offset;
+        }
+        return 'a' + offset;
     }
     if (key_code >= AKEYCODE_0 && key_code <= AKEYCODE_9) {
         static const char shifted_digits[] = ")!@#$%^&*(";
         int32_t digit = key_code - AKEYCODE_0;
-        return shift ? shifted_digits[digit] : '0' + digit;
+        if (shift) {
+            return shifted_digits[digit];
+        }
+        return '0' + digit;
     }
-    // Key codes come from the system, so codes not listed here must be handled too.
-    switch (key_code) {
-    case AKEYCODE_SPACE: return ' ';
-    case AKEYCODE_COMMA: return shift ? '<' : ',';
-    case AKEYCODE_PERIOD: return shift ? '>' : '.';
-    case AKEYCODE_MINUS: return shift ? '_' : '-';
-    case AKEYCODE_EQUALS: return shift ? '+' : '=';
-    case AKEYCODE_LEFT_BRACKET: return shift ? '{' : '[';
-    case AKEYCODE_RIGHT_BRACKET: return shift ? '}' : ']';
-    case AKEYCODE_BACKSLASH: return shift ? '|' : '\\';
-    case AKEYCODE_SEMICOLON: return shift ? ':' : ';';
-    case AKEYCODE_APOSTROPHE: return shift ? '"' : '\'';
-    case AKEYCODE_SLASH: return shift ? '?' : '/';
-    case AKEYCODE_GRAVE: return shift ? '~' : '`';
-    case AKEYCODE_AT: return '@';
-    case AKEYCODE_PLUS: return '+';
-    case AKEYCODE_STAR: return '*';
-    case AKEYCODE_POUND: return '#';
-    default: return 0;
+    for (int32_t i = 0; i < KEY_SYMBOL_COUNT; i++) {
+        if (key_symbols[i].key_code == key_code) {
+            if (shift) {
+                return key_symbols[i].shifted;
+            }
+            return key_symbols[i].plain;
+        }
     }
+    return 0;
 }
 
-// InputMethodManager.showSoftInput or hideSoftInputFromWindow on the activity's window, through
-// JNI, because NativeActivity has no Java code of its own to do it. A failure only means the
-// keyboard did not change, so it is not reported.
+/**
+ * InputMethodManager.showSoftInput or hideSoftInputFromWindow on the activity's window, through
+ * JNI, because NativeActivity has no Java code of its own to do it. A failure only means the
+ * keyboard did not change, so it is not reported.
+ */
 static void android_keyboard_jni(struct android_app *app, bool visible) {
     JavaVM *vm = app->activity->vm;
     JNIEnv *env = NULL;
@@ -180,8 +217,10 @@ detach:
     (*vm)->DetachCurrentThread(vm);
 }
 
-// Finds the activity's InputMethodManager and the top view of its window. Returns false when
-// any step fails.
+/**
+ * Finds the activity's InputMethodManager and the top view of its window. Returns false when
+ * any step fails.
+ */
 static bool android_keyboard_find(JNIEnv *env, jobject activity, jobject *manager,
                                   jobject *decor_view) {
     jclass activity_class = (*env)->GetObjectClass(env, activity);
@@ -220,8 +259,10 @@ static bool android_keyboard_find(JNIEnv *env, jobject activity, jobject *manage
     return !jni_failed(env, *decor_view);
 }
 
-// True, with the exception cleared, when a JNI call failed. Every later call needs the earlier
-// ones to have worked, and JNI must not be called with an exception pending.
+/**
+ * True, with the exception cleared, when a JNI call failed. Every later call needs the earlier
+ * ones to have worked, and JNI must not be called with an exception pending.
+ */
 static bool jni_failed(JNIEnv *env, const void *result) {
     if (result == NULL || (*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);

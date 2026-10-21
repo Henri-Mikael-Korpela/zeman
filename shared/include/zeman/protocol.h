@@ -108,28 +108,44 @@ uint32_t reader_u32(Reader *reader);
 int32_t reader_i32(Reader *reader);
 uint64_t reader_u64(Reader *reader);
 int64_t reader_i64(Reader *reader);
-// Copies the text with a terminator; a text that does not fit fails the reader.
+/**
+ * Copies the text with a terminator; a text that does not fit fails the reader.
+ */
 void reader_text(Reader *reader, char *text, size_t text_size);
-// A date that is not a real date fails the reader.
+/**
+ * A date that is not a real date fails the reader.
+ */
 Date reader_date(Reader *reader);
-// An event that breaks event_is_valid fails the reader.
+/**
+ * An event that breaks event_is_valid fails the reader.
+ */
 Event reader_event(Reader *reader);
 Task_Completion reader_completion(Reader *reader);
-// Links with no id or title, counts that do not add up, or a target of another kind than a
-// problem or an opportunity, fail the reader.
+/**
+ * Links with no id or title, counts that do not add up, or a target of another kind than a
+ * problem or an opportunity, fail the reader.
+ */
 Linked_Task reader_linked_task(Reader *reader);
 Link_Target reader_link_target(Reader *reader);
-// True when the whole message was read and nothing failed.
+/**
+ * True when the whole message was read and nothing failed.
+ */
 bool reader_done(const Reader *reader);
 
-// Writes the link to the desktop app at address and port, as the QR code holds it.
+/**
+ * Writes the link to the desktop app at address and port, as the QR code holds it.
+ */
 void protocol_link_format(char *link, size_t link_size, const char *address, uint16_t port);
-// Reads address and port from a link, or from "address" or "address:port" typed without the
-// prefix, the port then being PROTOCOL_PORT_DEFAULT. Returns false for anything else; whether
-// the address is local is left to the caller.
+/**
+ * Reads address and port from a link, or from "address" or "address:port" typed without the
+ * prefix, the port then being PROTOCOL_PORT_DEFAULT. Returns false for anything else; whether
+ * the address is local is left to the caller.
+ */
 bool protocol_link_parse(const char *link, char *address, size_t address_size, uint16_t *port);
 
-// Little-endian length prefix of a message.
+/**
+ * Little-endian length prefix of a message.
+ */
 void protocol_length_write(uint8_t *bytes, uint32_t length);
 uint32_t protocol_length_read(const uint8_t *bytes);
 

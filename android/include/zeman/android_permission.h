@@ -8,7 +8,9 @@
 // ask android_camera_permitted again until it is true.
 
 bool android_camera_permitted(void);
-// Shows Android's dialog asking to allow the camera.
+/**
+ * Shows Android's dialog asking to allow the camera.
+ */
 void android_camera_permission_request(void);
 
 #endif

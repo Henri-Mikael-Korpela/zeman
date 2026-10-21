@@ -95,8 +95,8 @@ typedef struct Phone {
     Connect_Screen connect;
     Scan_Screen scan;
     Android_Input input;
-    Drawer drawer;
     App *app;
+    Drawer drawer;
     float scale;
     View view;
     bool scanning;                    // The QR scan covers the connection settings
@@ -131,8 +131,10 @@ static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *ad
                                         size_t address_size);
 static bool scan_screen_read(Scan_Screen *scan, char *address, size_t address_size);
 
-// The Android app: the calendar of a desktop app on the same local network. raylib's Android
-// platform code calls this from android_main.
+/**
+ * The Android app: the calendar of a desktop app on the same local network. raylib's Android
+ * platform code calls this from android_main.
+ */
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -142,7 +144,10 @@ int main(int argc, char **argv) {
     static Phone phone;
     android_input_install(&phone.input);
 
-    int shorter_side = GetScreenWidth() < GetScreenHeight() ? GetScreenWidth() : GetScreenHeight();
+    int shorter_side = GetScreenHeight();
+    if (GetScreenWidth() < shorter_side) {
+        shorter_side = GetScreenWidth();
+    }
     phone.scale = (float)shorter_side / LAYOUT_WIDTH_PIXELS;
     client_init(&phone.client);
     Backend backend = client_backend(&phone.client);
@@ -169,8 +174,10 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-// Draws the open view beside the edge's handle, with the drawer over both, and moves between
-// views. The drawer reads the pointer first, so that the view ignores it while the drawer is out.
+/**
+ * Draws the open view beside the edge's handle, with the drawer over both, and moves between
+ * views. The drawer reads the pointer first, so that the view ignores it while the drawer is out.
+ */
 static void phone_frame(Phone *phone) {
     if (phone->scanning) {
         phone_frame_scan(phone);
@@ -190,7 +197,7 @@ static void phone_frame(Phone *phone) {
     if (!input) {
         phone->connect.editing = false;
     }
-    char status[MESSAGE_SIZE];
+    char status[MESSAGE_SIZE] = "";
     phone_status(phone, status, sizeof(status));
 
     bool typing = false;
@@ -226,8 +233,10 @@ static void phone_frame(Phone *phone) {
     android_input_keyboard_set_visible(&phone->input, typing);
 }
 
-// The QR scan covers the whole screen; giving it up returns to the connection settings, which
-// stay open meanwhile.
+/**
+ * The QR scan covers the whole screen; giving it up returns to the connection settings, which
+ * stay open meanwhile.
+ */
 static void phone_frame_scan(Phone *phone) {
     assert(phone->view == VIEW_CONNECTION);
     assert(phone->connect.open);
@@ -242,7 +251,9 @@ static void phone_frame_scan(Phone *phone) {
     android_input_keyboard_set_visible(&phone->input, false);
 }
 
-// The connection settings search the network only while they are open.
+/**
+ * The connection settings search the network only while they are open.
+ */
 static void phone_view_set(Phone *phone, View view) {
     assert(view >= 0);
     assert(view < VIEW_COUNT);
@@ -257,11 +268,13 @@ static void phone_view_set(Phone *phone, View view) {
     phone->view = view;
 }
 
-// Connects to the desktop at address, already checked, remembers it for the next start, and
-// shows its calendar. Choosing the desktop in use again reconnects to it.
+/**
+ * Connects to the desktop at address, already checked, remembers it for the next start, and
+ * shows its calendar. Choosing the desktop in use again reconnects to it.
+ */
 static void phone_desktop_set(Phone *phone, const char *address) {
     assert(address[0] != '\0');
-    char copy[ADDRESS_TEXT_SIZE];
+    char copy[ADDRESS_TEXT_SIZE] = "";
     snprintf(copy, sizeof(copy), "%s", address);  // address may be the connection screen's
     snprintf(phone->address, sizeof(phone->address), "%s", copy);
     desktop_choose(&phone->client, phone->app, phone->address);
@@ -269,7 +282,9 @@ static void phone_desktop_set(Phone *phone, const char *address) {
     phone_view_set(phone, VIEW_CALENDAR);
 }
 
-// One line on the connection, for the drawer and the connection settings.
+/**
+ * One line on the connection, for the drawer and the connection settings.
+ */
 static void phone_status(const Phone *phone, char *text, size_t text_size) {
     assert(text_size > 0);
     char host[CLIENT_HOST_SIZE] = "";
@@ -285,15 +300,17 @@ static void phone_status(const Phone *phone, char *text, size_t text_size) {
     }
 }
 
-// address is a link, "address" or "address:port", already checked by protocol_link_parse.
+/**
+ * address is a link, "address" or "address:port", already checked by protocol_link_parse.
+ */
 static void desktop_choose(Client *client, App *app, const char *address) {
-    char host[CLIENT_HOST_SIZE];
+    char host[CLIENT_HOST_SIZE] = "";
     uint16_t port = 0;
     bool parsed = protocol_link_parse(address, host, sizeof(host), &port);
     assert(parsed);
     (void)parsed; // Unused when assertions are compiled out.
     client_set_server(client, host, port);
-    char info[INFO_SIZE];
+    char info[INFO_SIZE] = "";
     snprintf(info, sizeof(info), "Desktop %s", host);
     app_set_info(app, info);
 }
@@ -301,12 +318,15 @@ static void desktop_choose(Client *client, App *app, const char *address) {
 static void settings_path(char *path, size_t path_size) {
     int written = snprintf(path, path_size, "%s/desktop_address.txt",
                            android_input_data_directory());
-    assert(written > 0 && (size_t)written < path_size);
+    assert(written > 0);
+    assert((size_t)written < path_size);
 }
 
-// Returns false when nothing usable was saved, so that the app asks for the desktop.
+/**
+ * Returns false when nothing usable was saved, so that the app asks for the desktop.
+ */
 static bool settings_load(char *address, size_t address_size) {
-    char path[PATH_SIZE];
+    char path[PATH_SIZE] = "";
     settings_path(path, sizeof(path));
     FILE *file = fopen(path, "r");
     if (file == NULL) {
@@ -319,7 +339,7 @@ static bool settings_load(char *address, size_t address_size) {
         return false;
     }
     address[strcspn(address, "\r\n")] = '\0';
-    char host[CLIENT_HOST_SIZE];
+    char host[CLIENT_HOST_SIZE] = "";
     uint16_t port = 0;
     if (!protocol_link_parse(address, host, sizeof(host), &port)) {
         address[0] = '\0';  // Empty means no desktop chosen, see Phone.address.
@@ -331,7 +351,7 @@ static bool settings_load(char *address, size_t address_size) {
 static void settings_save(const char *address) {
     // Some Android versions do not create the app's data folder until something asks for it.
     mkdir(android_input_data_directory(), 0770);
-    char path[PATH_SIZE];
+    char path[PATH_SIZE] = "";
     settings_path(path, sizeof(path));
     FILE *file = fopen(path, "w");
     if (file == NULL) {
@@ -341,9 +361,11 @@ static void settings_save(const char *address) {
     fclose(file);
 }
 
-// Reads the pointer, in layout pixels, and returns the view to show. Closed, the drawer takes
-// presses on the edge only; open, it takes them everywhere, so that a tap beside it or a drag
-// to the left closes it. Back closes it too.
+/**
+ * Reads the pointer, in layout pixels, and returns the view to show. Closed, the drawer takes
+ * presses on the edge only; open, it takes them everywhere, so that a tap beside it or a drag
+ * to the left closes it. Back closes it too.
+ */
 static View drawer_update(Drawer *drawer, View current) {
     assert(drawer->open_fraction >= 0.0f);
     assert(drawer->open_fraction <= 1.0f);
@@ -388,7 +410,10 @@ static View drawer_update(Drawer *drawer, View current) {
     }
 
     if (!drawer->dragging) {
-        float target = drawer->open ? 1.0f : 0.0f;
+        float target = 0.0f;
+        if (drawer->open) {
+            target = 1.0f;
+        }
         float step = target - drawer->open_fraction;
         if (step > DRAWER_STEP) {
             step = DRAWER_STEP;
@@ -403,8 +428,10 @@ static View drawer_update(Drawer *drawer, View current) {
     return chosen;
 }
 
-// Closed, a tap on the edge opens the drawer. Open, a tap on an item shows its view and closes
-// the drawer, a tap beside the drawer closes it, and a tap elsewhere on it does nothing.
+/**
+ * Closed, a tap on the edge opens the drawer. Open, a tap on an item shows its view and closes
+ * the drawer, a tap beside the drawer closes it, and a tap elsewhere on it does nothing.
+ */
 static View drawer_update_tap(Drawer *drawer, View current, Vector2 pointer) {
     if (!drawer->open) {
         assert(!drawer->dragging);
@@ -424,7 +451,9 @@ static View drawer_update_tap(Drawer *drawer, View current, Vector2 pointer) {
     return current;
 }
 
-// The view takes input only with the drawer wholly closed and nothing pressed on it.
+/**
+ * The view takes input only with the drawer wholly closed and nothing pressed on it.
+ */
 static bool drawer_is_closed(const Drawer *drawer) {
     if (drawer->open || drawer->pressed) {
         return false;
@@ -432,7 +461,9 @@ static bool drawer_is_closed(const Drawer *drawer) {
     return drawer->open_fraction == 0.0f;
 }
 
-// Where an item of the drawer is, with the drawer's left edge at x.
+/**
+ * Where an item of the drawer is, with the drawer's left edge at x.
+ */
 static Rectangle drawer_item(int32_t index, float x) {
     assert(index >= 0);
     assert(index < VIEW_COUNT);
@@ -440,8 +471,10 @@ static Rectangle drawer_item(int32_t index, float x) {
                         DRAWER_WIDTH_PIXELS - 1, DRAWER_ITEM_HEIGHT_PIXELS };
 }
 
-// The drawer slides in from the left over a darkened view. Its items look like the desktop's
-// navigation; the connection is shown at the bottom.
+/**
+ * The drawer slides in from the left over a darkened view. Its items look like the desktop's
+ * navigation; the connection is shown at the bottom.
+ */
 static void drawer_draw(const Drawer *drawer, const App *app, View current, const char *status,
                         float width, float height) {
     assert(width > 0.0f);
@@ -473,8 +506,10 @@ static void drawer_draw(const Drawer *drawer, const App *app, View current, cons
     app_draw_text(app, APP_TEXT_SMALL, status, x + 20, height - 40);
 }
 
-// The strip along the left edge, with a handle and an arrow pointing out of it, so that the
-// navigation is seen to come from there.
+/**
+ * The strip along the left edge, with a handle and an arrow pointing out of it, so that the
+ * navigation is seen to come from there.
+ */
 static void gutter_draw(float height) {
     assert(height > 0.0f);
     const Color border = GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_NORMAL));
@@ -493,8 +528,10 @@ static void gutter_draw(float height) {
                accent);
 }
 
-// The scan screen uses the calendar's layout pixels: drawing and touches are scaled the same
-// way, as app_frame does for the calendar.
+/**
+ * The scan screen uses the calendar's layout pixels: drawing and touches are scaled the same
+ * way, as app_frame does for the calendar.
+ */
 static void screen_begin(float scale) {
     SetMouseScale(1.0f / scale, 1.0f / scale);
     BeginDrawing();
@@ -529,8 +566,10 @@ static void connect_screen_close(Connect_Screen *screen) {
     screen->open = false;
 }
 
-// Draws the connection settings right of the edge's strip, between the caller's BeginDrawing
-// and EndDrawing. Without input, as while the drawer is out, the controls ignore touches.
+/**
+ * Draws the connection settings right of the edge's strip, between the caller's BeginDrawing
+ * and EndDrawing. Without input, as while the drawer is out, the controls ignore touches.
+ */
 static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *app, float scale,
                                            const char *status, bool input) {
     assert(screen->open);
@@ -562,10 +601,15 @@ static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *ap
     }
     SetMouseOffset(0, 0);
     SetMouseScale(1.0f, 1.0f);
-    return result != CONNECT_NONE ? result : typed;
+    if (result != CONNECT_NONE) {
+        return result;
+    }
+    return typed;
 }
 
-// The recommended way first, the QR code; then a desktop found on this network, if any.
+/**
+ * The recommended way first, the QR code; then a desktop found on this network, if any.
+ */
 static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float width, float *y) {
     const float x = MARGIN_PIXELS;
     const float content_width = width - 2 * MARGIN_PIXELS;
@@ -586,7 +630,7 @@ static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float 
 
     const Discovery *discovery = &screen->discovery;
     if (discovery->found) {
-        char text[MESSAGE_SIZE];
+        char text[MESSAGE_SIZE] = "";
         snprintf(text, sizeof(text), "Found a desktop at %s.", discovery->found_address);
         GuiLabel((Rectangle){ x, *y, content_width - 110, LINE_PIXELS }, text);
         if (GuiButton((Rectangle){ x + content_width - 100, *y - 6, 100, 40 }, "Use it")) {
@@ -599,7 +643,9 @@ static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float 
     return result;
 }
 
-// Typing the address, as shown in the desktop's status bar and Connected Devices view.
+/**
+ * Typing the address, as shown in the desktop's status bar and Connected Devices view.
+ */
 static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float width, float y) {
     const float x = MARGIN_PIXELS;
     const float content_width = width - 2 * MARGIN_PIXELS;
@@ -613,7 +659,7 @@ static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float 
     }
     y += 56;
     if (GuiButton((Rectangle){ x, y, content_width, 40 }, "Connect")) {
-        char host[CLIENT_HOST_SIZE];
+        char host[CLIENT_HOST_SIZE] = "";
         uint16_t port = 0;
         screen->editing = false;
         if (!protocol_link_parse(screen->address, host, sizeof(host), &port)) {
@@ -632,8 +678,10 @@ static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float 
     return result;
 }
 
-// Asks for the camera if needed, then shows the camera and reads codes until one is the
-// desktop's. Returns CONNECT_CHOSEN with address filled in, or CONNECT_CANCELLED.
+/**
+ * Asks for the camera if needed, then shows the camera and reads codes until one is the
+ * desktop's. Returns CONNECT_CHOSEN with address filled in, or CONNECT_CANCELLED.
+ */
 static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *address,
                                         size_t address_size) {
     QR_Scanner *scanner = &scan->scanner;
@@ -667,10 +715,16 @@ static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *ad
     const float preview_height = height - y - 4 * LINE_PIXELS - BUTTON_HEIGHT_PIXELS;
     qr_scanner_draw(scanner, (Rectangle){ x, y, content_width, preview_height });
     y += preview_height + 8;
-    const char *hint = !permitted ? "Allow the camera to scan the code."
-                                  : "Point the camera at the code.";
-    GuiLabel((Rectangle){ x, y, content_width, LINE_PIXELS },
-             scan->message[0] != '\0' ? scan->message : hint);
+    const char *hint = "Point the camera at the code.";
+    if (!permitted) {
+        hint = "Allow the camera to scan the code.";
+    }
+    // What the scan itself says, such as why a code was refused, comes before the hint.
+    const char *shown = hint;
+    if (scan->message[0] != '\0') {
+        shown = scan->message;
+    }
+    GuiLabel((Rectangle){ x, y, content_width, LINE_PIXELS }, shown);
     y += 2 * LINE_PIXELS;
     bool cancelled = GuiButton((Rectangle){ x, y, content_width, BUTTON_HEIGHT_PIXELS }, "Cancel");
     screen_end();
@@ -681,13 +735,15 @@ static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *ad
     return CONNECT_NONE;
 }
 
-// Reads the newest frame; a code that is not a local desktop link is reported and ignored.
+/**
+ * Reads the newest frame; a code that is not a local desktop link is reported and ignored.
+ */
 static bool scan_screen_read(Scan_Screen *scan, char *address, size_t address_size) {
-    char text[PROTOCOL_LINK_SIZE * 4];
+    char text[PROTOCOL_LINK_SIZE * 4] = "";
     if (!qr_scanner_poll(&scan->scanner, text, sizeof(text))) {
         return false;
     }
-    char host[CLIENT_HOST_SIZE];
+    char host[CLIENT_HOST_SIZE] = "";
     uint16_t port = 0;
     bool is_link = strncmp(text, PROTOCOL_LINK_PREFIX, strlen(PROTOCOL_LINK_PREFIX)) == 0;
     if (!is_link || !protocol_link_parse(text, host, sizeof(host), &port)) {

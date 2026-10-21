@@ -33,32 +33,48 @@ typedef struct Date_Time {
 } Date_Time;
 
 Date date_today(void);
-// The date and the time of day from one reading of the clock, so that they never straddle
-// midnight the way two separate calls could.
+/**
+ * The date and the time of day from one reading of the clock, so that they never straddle
+ * midnight the way two separate calls could.
+ */
 Date_Time date_time_now(void);
-// How long ago created was, as of now, in words: "just now", "5 minutes ago", "2 hours ago",
-// "today", "yesterday", "3 days ago", "last week", "2 weeks ago", "last month", "5 months ago",
-// "last year", "3 years ago". A moment in the future, from clocks that disagree, is "just now".
+/**
+ * How long ago created was, as of now, in words: "just now", "5 minutes ago", "2 hours ago",
+ * "today", "yesterday", "3 days ago", "last week", "2 weeks ago", "last month", "5 months ago",
+ * "last year", "3 years ago". A moment in the future, from clocks that disagree, is "just now".
+ */
 void date_time_format_age(Date_Time created, Date_Time now, char *buffer, size_t buffer_size);
 bool date_is_valid(Date date);
 bool date_equal(Date a, Date b);
 int32_t days_in_month(int32_t year, int32_t month);
-// Days since 1970-01-01, so that date differences are a subtraction.
+/**
+ * Days since 1970-01-01, so that date differences are a subtraction.
+ */
 int32_t date_to_day_number(Date date);
 Date date_from_day_number(int32_t day_number);
-// 0 = Monday ... 6 = Sunday.
+/**
+ * 0 = Monday ... 6 = Sunday.
+ */
 int32_t date_weekday(Date date);
 Date date_add_days(Date date, int32_t days);
-// The ISO 8601 week number, 1 ... 53, which the weeks of the Monday-first calendar follow: week 1
-// is the week with the year's first Thursday, so a week at the turn of the year may be week 52
-// or 53 of the old year, or week 1 of the new.
+/**
+ * The ISO 8601 week number, 1 ... 53, which the weeks of the Monday-first calendar follow: week 1
+ * is the week with the year's first Thursday, so a week at the turn of the year may be week 52
+ * or 53 of the old year, or week 1 of the new.
+ */
 int32_t date_iso_week(Date date);
-// The day is clamped to the length of the target month.
+/**
+ * The day is clamped to the length of the target month.
+ */
 Date date_add_months(Date date, int32_t months);
-// Parses exactly "YYYY-MM-DD". Returns false for malformed or impossible dates.
+/**
+ * Parses exactly "YYYY-MM-DD". Returns false for malformed or impossible dates.
+ */
 bool date_parse_iso(const char *text, Date *date);
 void date_format_iso(Date date, char *buffer, size_t buffer_size);
-// Parses exactly "HH:MM". Returns false for malformed or out-of-range times.
+/**
+ * Parses exactly "HH:MM". Returns false for malformed or out-of-range times.
+ */
 bool time_parse(const char *text, int32_t *minute_of_day);
 void time_format(int32_t minute_of_day, char *buffer, size_t buffer_size);
 const char *month_name(int32_t month);

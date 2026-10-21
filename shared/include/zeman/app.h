@@ -38,27 +38,41 @@ typedef enum App_Text {
     APP_TEXT_SMALL,
 } App_Text;
 
-// Creates the one App. Needs the window, because fonts are loaded into textures.
+/**
+ * Creates the one App. Needs the window, because fonts are loaded into textures.
+ */
 App *app_create(Backend *backend, const App_Config *config);
 void app_destroy(App *app);
-// Handles input and draws the calendar into area, in screen pixels, between the caller's
-// BeginDrawing and EndDrawing. Mouse positions are moved into the area while it runs and left
-// unscaled and unmoved after, for whatever the caller draws next.
+/**
+ * Handles input and draws the calendar into area, in screen pixels, between the caller's
+ * BeginDrawing and EndDrawing. Mouse positions are moved into the area while it runs and left
+ * unscaled and unmoved after, for whatever the caller draws next.
+ */
 void app_frame(App *app, Rectangle area);
-// Draws text in one of the calendar's styles, at a position in screen pixels divided by the
-// scale (layout pixels), outside app_frame.
+/**
+ * Draws text in one of the calendar's styles, at a position in screen pixels divided by the
+ * scale (layout pixels), outside app_frame.
+ */
 void app_draw_text(const App *app, App_Text style, const char *text, float x, float y);
 float app_measure_text(const App *app, App_Text style, const char *text);
-// Draws a problem as the calendar does in its day cells, in layout pixels outside app_frame:
-// red with a "!" while open, green with a check mark once done.
+/**
+ * Draws a problem as the calendar does in its day cells, in layout pixels outside app_frame:
+ * red with a "!" while open, green with a check mark once done.
+ */
 void app_draw_problem_bar(const App *app, const char *title, bool done, Rectangle bar);
-// Shown first in the status bar for as long as the app runs, for example where phones connect.
+/**
+ * Shown first in the status bar for as long as the app runs, for example where phones connect.
+ */
 void app_set_info(App *app, const char *info);
-// Shown in the status bar until the user moves to another day.
+/**
+ * Shown in the status bar until the user moves to another day.
+ */
 void app_set_status(App *app, const char *status);
-// Drops, without saving, what the user was doing with the loaded items: the open form, a delete
-// waiting for confirmation and the focused item. For when the data underneath is replaced, as
-// when the desktop switches to another database, where the same ids are other items.
+/**
+ * Drops, without saving, what the user was doing with the loaded items: the open form, a delete
+ * waiting for confirmation and the focused item. For when the data underneath is replaced, as
+ * when the desktop switches to another database, where the same ids are other items.
+ */
 void app_discard_edits(App *app);
 // The pointer's shape for what is under it, which the desktop shows; a touch screen has none.
 typedef enum App_Cursor {
@@ -68,12 +82,18 @@ typedef enum App_Cursor {
     APP_CURSOR_MOVE,    // Dragging an item on the hours to another time or day
 } App_Cursor;
 
-// The cursor for the pointer's place after app_frame.
+/**
+ * The cursor for the pointer's place after app_frame.
+ */
 App_Cursor app_cursor(const App *app);
-// True while a form field is being typed into, so that Android can show its keyboard.
+/**
+ * True while a form field is being typed into, so that Android can show its keyboard.
+ */
 bool app_text_input_active(const App *app);
-// With input off, app_frame still draws and loads but ignores the pointer and keys, for example
-// while the phone's navigation drawer covers the calendar. On at start.
+/**
+ * With input off, app_frame still draws and loads but ignores the pointer and keys, for example
+ * while the phone's navigation drawer covers the calendar. On at start.
+ */
 void app_set_input_enabled(App *app, bool enabled);
 
 #endif

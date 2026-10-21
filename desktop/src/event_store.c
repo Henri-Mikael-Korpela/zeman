@@ -324,7 +324,10 @@ bool event_store_open(Event_Store *store, const char *path, bool create) {
 
     // SQLite takes the path as UTF-8, as the user types it, which the C library's fopen on
     // Windows would not, so SQLite alone decides whether the file is there.
-    const int flags = create ? SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE : SQLITE_OPEN_READWRITE;
+    int flags = SQLITE_OPEN_READWRITE;
+    if (create) {
+        flags |= SQLITE_OPEN_CREATE;
+    }
     int result = sqlite3_open_v2(path, &store->database, flags, NULL);
     if (result == SQLITE_CANTOPEN && !create) {
         // Without create, a missing file is the usual cause, and the message says it plainly.
@@ -418,7 +421,10 @@ bool event_store_delete(Event_Store *store, int64_t id) {
 bool event_store_set_task_done(Event_Store *store, int64_t id, Date occurrence_start, bool done) {
     assert(store != NULL);
     assert(id > 0);
-    Statement which = done ? STATEMENT_COMPLETION_INSERT : STATEMENT_COMPLETION_DELETE;
+    Statement which = STATEMENT_COMPLETION_DELETE;
+    if (done) {
+        which = STATEMENT_COMPLETION_INSERT;
+    }
     sqlite3_stmt *statement = store->statements[which];
     int result = sqlite3_bind_int64(statement, 1, id);
     if (result == SQLITE_OK) {
@@ -598,7 +604,7 @@ int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool 
     // A task not stored yet has id 0, which no link has, so that no target comes back linked.
     int result = bind_id_and_limit(statement, task_id, target_count_max);
     if (result == SQLITE_OK) {
-        result = sqlite3_bind_int(statement, 3, problems_only ? 1 : 0);
+        result = sqlite3_bind_int(statement, 3, (int)problems_only);
     }
     int32_t target_count = 0;
     *truncated = false;
@@ -634,8 +640,10 @@ int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool 
     return target_count;
 }
 
-// One transaction, so that a link that cannot be made leaves the task's earlier links as they
-// were rather than half replaced.
+/**
+ * One transaction, so that a link that cannot be made leaves the task's earlier links as they
+ * were rather than half replaced.
+ */
 bool event_store_set_task_targets(Event_Store *store, int64_t task_id, const int64_t *target_ids,
                                   int32_t target_count) {
     assert(task_id > 0);
@@ -657,7 +665,9 @@ bool event_store_set_task_targets(Event_Store *store, int64_t task_id, const int
     return ok;
 }
 
-// Deletes the task's links, then inserts the new ones, inside the caller's transaction.
+/**
+ * Deletes the task's links, then inserts the new ones, inside the caller's transaction.
+ */
 static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_id,
                                               const int64_t *target_ids, int32_t target_count) {
     sqlite3_stmt *statement = store->statements[STATEMENT_LINK_DELETE];
@@ -699,9 +709,11 @@ static bool event_store_fail(Event_Store *store, const char *context) {
     return false;
 }
 
-// Runs a bound write statement and resets it whatever the outcome, so that it can be reused.
-// With row_expected, a statement that changes no row fails: the row was deleted meanwhile,
-// for example from another tool.
+/**
+ * Runs a bound write statement and resets it whatever the outcome, so that it can be reused.
+ * With row_expected, a statement that changes no row fails: the row was deleted meanwhile,
+ * for example from another tool.
+ */
 static bool event_store_write(Event_Store *store, sqlite3_stmt *statement, int result,
                               const char *context, bool row_expected) {
     if (result == SQLITE_OK) {
@@ -721,7 +733,9 @@ static bool event_store_write(Event_Store *store, sqlite3_stmt *statement, int r
     return true;
 }
 
-// Binds ?1 to the id and ?2 to one row more than wanted, as bind_range does.
+/**
+ * Binds ?1 to the id and ?2 to one row more than wanted, as bind_range does.
+ */
 static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_count_max) {
     assert(id >= 0);
     assert(row_count_max > 0);
@@ -732,7 +746,9 @@ static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_co
     return result;
 }
 
-// Longer titles from outside this program are cut to fit, as in event_store_load_range_row.
+/**
+ * Longer titles from outside this program are cut to fit, as in event_store_load_range_row.
+ */
 static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Task *task) {
     const char *title = (const char *)sqlite3_column_text(statement, 1);
     if (title == NULL || title[0] == '\0') {
@@ -776,8 +792,10 @@ static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Targ
     return target->target_id > 0 && event_kind_is_target(target->kind);
 }
 
-// Binds ?1 and ?2 to the dates and ?3 to one row more than wanted, so that the caller can tell
-// whether the result was cut short.
+/**
+ * Binds ?1 and ?2 to the dates and ?3 to one row more than wanted, so that the caller can tell
+ * whether the result was cut short.
+ */
 static int bind_range(sqlite3_stmt *statement, Date first, Date last, int32_t row_count_max) {
     assert(date_to_day_number(first) <= date_to_day_number(last));
     int result = bind_date(statement, 1, first);
@@ -811,16 +829,22 @@ static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event) 
     }
     if (result == SQLITE_OK) {
         const char *unit = repeat_unit_names[event->repeat_unit];
-        result = unit == NULL ? sqlite3_bind_null(statement, 6)
-                              : sqlite3_bind_text(statement, 6, unit, -1, SQLITE_STATIC);
+        if (unit == NULL) {
+            result = sqlite3_bind_null(statement, 6);
+        } else {
+            result = sqlite3_bind_text(statement, 6, unit, -1, SQLITE_STATIC);
+        }
     }
     if (result == SQLITE_OK) {
         result = sqlite3_bind_int(statement, 7, event->repeat_interval);
     }
     if (result == SQLITE_OK) {
         assert(!event->repeat_has_end || event->repeat_unit != REPEAT_NONE);
-        result = event->repeat_has_end ? bind_date(statement, 8, event->repeat_end_date)
-                                       : sqlite3_bind_null(statement, 8);
+        if (event->repeat_has_end) {
+            result = bind_date(statement, 8, event->repeat_end_date);
+        } else {
+            result = sqlite3_bind_null(statement, 8);
+        }
     }
     if (result == SQLITE_OK) {
         result = sqlite3_bind_text(statement, 9, event_kind_names[event->kind], -1,
@@ -828,9 +852,11 @@ static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event) 
     }
     if (result == SQLITE_OK) {
         assert(event->location.id >= 0);
-        result = event->location.id == 0
-                     ? sqlite3_bind_null(statement, 10)
-                     : sqlite3_bind_int64(statement, 10, event->location.id);
+        if (event->location.id == 0) {
+            result = sqlite3_bind_null(statement, 10);
+        } else {
+            result = sqlite3_bind_int64(statement, 10, event->location.id);
+        }
     }
     if (result == SQLITE_OK) {
         result = sqlite3_bind_text(statement, 11, event->description, -1, SQLITE_TRANSIENT);
@@ -842,20 +868,22 @@ static int bind_time(sqlite3_stmt *statement, int index, int32_t minute_of_day) 
     if (minute_of_day == TIME_NONE) {
         return sqlite3_bind_null(statement, index);
     }
-    char text[TIME_TEXT_SIZE];
+    char text[TIME_TEXT_SIZE] = "";
     time_format(minute_of_day, text, sizeof(text));
     return sqlite3_bind_text(statement, index, text, -1, SQLITE_TRANSIENT);
 }
 
 static int bind_date(sqlite3_stmt *statement, int index, Date date) {
-    char text[DATE_ISO_SIZE];
+    char text[DATE_ISO_SIZE] = "";
     date_format_iso(date, text, sizeof(text));
     // SQLITE_TRANSIENT copies the text, because the buffer is on this stack frame.
     return sqlite3_bind_text(statement, index, text, -1, SQLITE_TRANSIENT);
 }
 
-// Returns false if the row holds text this program would never write, for example after the
-// database was edited by hand, rather than showing a half-parsed event.
+/**
+ * Returns false if the row holds text this program would never write, for example after the
+ * database was edited by hand, rather than showing a half-parsed event.
+ */
 static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     assert(event != NULL);
     *event = (Event){ .id = sqlite3_column_int64(statement, COLUMN_ID) };
@@ -885,8 +913,8 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     if (created_at == NULL || strlen(created_at) < 16) {
         return false;
     }
-    char created_date[DATE_ISO_SIZE];
-    char created_time[TIME_TEXT_SIZE];
+    char created_date[DATE_ISO_SIZE] = "";
+    char created_time[TIME_TEXT_SIZE] = "";
     snprintf(created_date, sizeof(created_date), "%.10s", created_at);
     snprintf(created_time, sizeof(created_time), "%.5s", created_at + 11);
     if (!date_parse_iso(created_date, &event->created_date)) {
@@ -919,8 +947,10 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     return event->id > 0;
 }
 
-// A link target's rules, which the database enforces as well, checked again because drawing
-// relies on them; and whether its tasks are done, which the query computes for targets only.
+/**
+ * A link target's rules, which the database enforces as well, checked again because drawing
+ * relies on them; and whether its tasks are done, which the query computes for targets only.
+ */
 static bool column_parse_target(sqlite3_stmt *statement, Event *event) {
     event->tasks_done = sqlite3_column_int(statement, COLUMN_TASKS_DONE) != 0;
     assert(!event->tasks_done || event_kind_is_target(event->kind));
@@ -939,8 +969,10 @@ static bool column_parse_target(sqlite3_stmt *statement, Event *event) {
     return event->repeat_unit == REPEAT_NONE;
 }
 
-// No location leaves event->location zeroed, with id 0. Longer texts from outside this program
-// are cut to fit, as titles are.
+/**
+ * No location leaves event->location zeroed, with id 0. Longer texts from outside this program
+ * are cut to fit, as titles are.
+ */
 static bool column_parse_location(sqlite3_stmt *statement, Event *event) {
     assert(event->location.id == 0);
     if (sqlite3_column_type(statement, COLUMN_LOCATION_ID) == SQLITE_NULL) {
@@ -974,11 +1006,17 @@ static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minu
     return time_parse(text, minute_of_day);
 }
 
-// Checks the same rules as the form, because the rest of the program relies on them: a known
-// unit, an interval in range, and occurrences that do not overlap.
+/**
+ * Checks the same rules as the form, because the rest of the program relies on them: a known
+ * unit, an interval in range, and occurrences that do not overlap.
+ */
 static bool column_parse_repeat(sqlite3_stmt *statement, Event *event) {
     const char *unit = (const char *)sqlite3_column_text(statement, COLUMN_REPEAT_UNIT);
-    event->repeat_unit = unit == NULL ? REPEAT_NONE : REPEAT_UNIT_COUNT;
+    // REPEAT_UNIT_COUNT stands for a unit that is not known, until one matches below.
+    event->repeat_unit = REPEAT_UNIT_COUNT;
+    if (unit == NULL) {
+        event->repeat_unit = REPEAT_NONE;
+    }
     for (int32_t i = REPEAT_NONE + 1; unit != NULL && i < REPEAT_UNIT_COUNT; i++) {
         if (strcmp(unit, repeat_unit_names[i]) == 0) {
             event->repeat_unit = i;
@@ -1032,7 +1070,10 @@ static bool event_store_migrate(Event_Store *store) {
     if (result == SQLITE_OK) {
         result = sqlite3_step(statement);
     }
-    int32_t version = result == SQLITE_ROW ? sqlite3_column_int(statement, 0) : -1;
+    int32_t version = -1;
+    if (result == SQLITE_ROW) {
+        version = sqlite3_column_int(statement, 0);
+    }
     sqlite3_finalize(statement);
     if (version < 0) {
         return event_store_fail(store, "Cannot read schema version");
@@ -1051,8 +1092,10 @@ static bool event_store_migrate(Event_Store *store) {
     return true;
 }
 
-// Reports a database whose links between tables are broken, for example by a bad migration,
-// rather than letting it fail later in confusing ways.
+/**
+ * Reports a database whose links between tables are broken, for example by a bad migration,
+ * rather than letting it fail later in confusing ways.
+ */
 static bool event_store_check_foreign_keys(Event_Store *store) {
     sqlite3_stmt *statement = NULL;
     int result = sqlite3_prepare_v2(store->database, "PRAGMA foreign_key_check;", -1, &statement,
@@ -1071,11 +1114,13 @@ static bool event_store_check_foreign_keys(Event_Store *store) {
     return true;
 }
 
-// One transaction per step, so that a failed step leaves the database at the previous version.
+/**
+ * One transaction per step, so that a failed step leaves the database at the previous version.
+ */
 static bool event_store_migrate_step(Event_Store *store, int32_t version) {
     assert(version >= 0);
     assert(version < SCHEMA_VERSION);
-    char set_version_sql[64];
+    char set_version_sql[64] = "";
     snprintf(set_version_sql, sizeof(set_version_sql), "PRAGMA user_version = %d;",
              (int)version + 1);
 

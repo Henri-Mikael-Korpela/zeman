@@ -50,8 +50,10 @@ int32_t event_repeat_gap_days_min(const Event *event) {
     return INT32_MAX;
 }
 
-// Occurrences never overlap (see event_repeat_gap_days_min), so the latest occurrence that
-// starts on or before the day is the only one that can cover it.
+/**
+ * Occurrences never overlap (see event_repeat_gap_days_min), so the latest occurrence that
+ * starts on or before the day is the only one that can cover it.
+ */
 bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *start_day) {
     assert(event->repeat_unit >= 0);
     assert(event->repeat_unit < REPEAT_UNIT_COUNT);
@@ -66,15 +68,19 @@ bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *st
         break;
     case REPEAT_DAY:
     case REPEAT_WEEK: {
-        int32_t step = event->repeat_unit == REPEAT_WEEK ? 7 * event->repeat_interval
-                                                         : event->repeat_interval;
+        int32_t step = event->repeat_interval;
+        if (event->repeat_unit == REPEAT_WEEK) {
+            step = 7 * event->repeat_interval;
+        }
         candidate = first_day + (day_number - first_day) / step * step;
         break;
     }
     case REPEAT_MONTH:
     case REPEAT_YEAR: {
-        int32_t month_step = event->repeat_unit == REPEAT_YEAR ? 12 * event->repeat_interval
-                                                               : event->repeat_interval;
+        int32_t month_step = event->repeat_interval;
+        if (event->repeat_unit == REPEAT_YEAR) {
+            month_step = 12 * event->repeat_interval;
+        }
         if (!event_occurrence_on_day_monthly(event, day_number, month_step, &candidate)) {
             return false;
         }
@@ -138,8 +144,10 @@ void event_format_repeat(const Event *event, char *buffer, size_t buffer_size) {
     buffer[0] = '\0';
 }
 
-// Finds the latest occurrence on or before day_number for events that repeat every
-// month_step months on the start's day of the month.
+/**
+ * Finds the latest occurrence on or before day_number for events that repeat every
+ * month_step months on the start's day of the month.
+ */
 static bool event_occurrence_on_day_monthly(const Event *event, int32_t day_number,
                                             int32_t month_step, int32_t *start_day) {
     assert(month_step >= 1);
@@ -241,8 +249,10 @@ bool event_kind_is_target(int32_t kind) {
     return kind == EVENT_KIND_PROBLEM || kind == EVENT_KIND_OPPORTUNITY;
 }
 
-// Compares the deadline and now as minutes since 1970, so that the date and the time of day are
-// one comparison; a deadline without a time is the last minute of its day.
+/**
+ * Compares the deadline and now as minutes since 1970, so that the date and the time of day are
+ * one comparison; a deadline without a time is the last minute of its day.
+ */
 bool opportunity_is_missed(Date end_date, int32_t end_minute, bool tasks_done, Date_Time now) {
     assert(date_is_valid(end_date));
     assert(date_is_valid(now.date));
@@ -250,7 +260,10 @@ bool opportunity_is_missed(Date end_date, int32_t end_minute, bool tasks_done, D
     if (tasks_done) {
         return false;
     }
-    const int32_t deadline_minute = end_minute == TIME_NONE ? MINUTES_PER_DAY - 1 : end_minute;
+    int32_t deadline_minute = end_minute;
+    if (end_minute == TIME_NONE) {
+        deadline_minute = MINUTES_PER_DAY - 1;
+    }
     // int64_t, because minutes since 1970 pass INT32_MAX in the year 6053.
     const int64_t deadline = (int64_t)date_to_day_number(end_date) * MINUTES_PER_DAY +
                              deadline_minute;

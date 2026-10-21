@@ -86,9 +86,9 @@ typedef struct Redraw {
 } Redraw;
 
 typedef struct Options {
-    char connect_host[CLIENT_HOST_SIZE];  // Empty unless --connect was given
     uint16_t connect_port;
     uint16_t port;  // Where to serve phones, from --port
+    char connect_host[CLIENT_HOST_SIZE];  // Empty unless --connect was given
 } Options;
 
 // Everything the desktop app runs. The server and client hold large message buffers, so this
@@ -97,17 +97,17 @@ typedef struct Desktop {
     Local_Backend local;
     Server server;
     Client client;
-    Devices_View devices;
     Problems_View problems;
-    Settings_View settings_view;
-    Settings settings;
     Backend backend;
     Redraw redraw;
     View view;
-    bool client_mode;  // Without a database, server or navigation; see main
     // The App_Cursor shown. Kept so that it changes only when it must: raylib creates a new
     // system cursor on every SetMouseCursor.
     int32_t cursor;
+    Devices_View devices;
+    Settings_View settings_view;
+    Settings settings;
+    bool client_mode;  // Without a database, server or navigation; see main
     char info[INFO_SIZE];
     char database_path[SETTINGS_PATH_SIZE];  // The database in use, or empty when none is open
 } Desktop;
@@ -135,19 +135,26 @@ static int desktop_cursor_shape(App_Cursor cursor);
 static View navigation_draw(const App *app, View current, Rectangle area);
 static void info_update(const Server *server, App *app);
 
-// The desktop app keeps the calendar in its SQLite database and serves it to phones on the
-// local network, on --port PORT or the default. With --connect ADDRESS[:PORT] it instead works
-// as a client of another desktop app, exactly as the phone does, which tests the network path
-// on one computer.
+/**
+ * The desktop app keeps the calendar in its SQLite database and serves it to phones on the
+ * local network, on --port PORT or the default. With --connect ADDRESS[:PORT] it instead works
+ * as a client of another desktop app, exactly as the phone does, which tests the network path
+ * on one computer.
+ */
 int main(int argc, char **argv) {
-    Options options = { .connect_host = "", .connect_port = PROTOCOL_PORT_DEFAULT,
-                        .port = PROTOCOL_PORT_DEFAULT };
+    Options options = {
+        .connect_host = "",
+        .connect_port = PROTOCOL_PORT_DEFAULT,
+        .port = PROTOCOL_PORT_DEFAULT
+    };
     if (!options_parse(argc, argv, &options)) {
         fprintf(stderr, "Usage: zeman [--port PORT | --connect ADDRESS[:PORT]]\n");
         return 1;
     }
+
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
-    InitWindow(WINDOW_WIDTH_PIXELS, WINDOW_HEIGHT_PIXELS,
+    InitWindow(WINDOW_WIDTH_PIXELS,
+               WINDOW_HEIGHT_PIXELS,
                options.connect_host[0] != '\0' ? "Zeman (client)" : "Zeman");
     SetWindowMinSize(WINDOW_WIDTH_PIXELS_MIN, WINDOW_HEIGHT_PIXELS_MIN);
     SetTargetFPS(60);
@@ -156,6 +163,7 @@ int main(int argc, char **argv) {
 
     static Desktop desktop;
     desktop_open(&desktop, &options);
+
     App_Config config = {
         .font_directory = GetApplicationDirectory(),
         .scale = 1.0f,
@@ -168,16 +176,20 @@ int main(int argc, char **argv) {
     }
 
     // Windows runs its own loop while the user drags a window edge, in which the main loop below
-    // does not run, so without this the new area stays black until the mouse is released. GLFW
-    // calls the refresh callback from that loop, which draws the app at the new size.
-    Desktop_Frame frame = { .desktop = &desktop, .app = app };
+    // does not run, so without this the new area stays black until the mouse is released.
+    // GLFW calls the refresh callback from that loop, which draws the app at the new size.
+    Desktop_Frame frame = {
+        .desktop = &desktop,
+        .app = app
+    };
     GLFWwindow *window = glfwGetCurrentContext();
     assert(window != NULL);
     glfwSetWindowUserPointer(window, &frame);
     glfwSetWindowRefreshCallback(window, desktop_window_refresh);
 
-    // The one intentionally unbounded loop: it runs until the window is closed. Phones are
-    // served on every pass, drawn or not, so that they never wait for the window.
+    // An intentionally unbounded loop: it runs until the window is closed.
+    // Phones are served on every pass, whether or not rendering happens,
+    // so that phones never wait for the window.
     while (!WindowShouldClose()) {
         if (!desktop.client_mode) {
             server_poll(&desktop.server);
@@ -189,6 +201,7 @@ int main(int argc, char **argv) {
         }
     }
 
+    // CLeanup
     app_destroy(app);
     desktop_close(&desktop);
     CloseWindow();
@@ -220,14 +233,16 @@ static void desktop_open(Desktop *desktop, const Options *options) {
     devices_view_init(&desktop->devices, &desktop->server);
 }
 
-// Opens the database that settings.ini names, or the build's default when it names none. A
-// named file must exist already, while the default is created on the first run, as it was
-// before there were settings. On failure no database is open, rather than the default: the
-// user chose another one, and events added to the default by mistake would seem lost to them.
+/**
+ * Opens the database that settings.ini names, or the build's default when it names none. A
+ * named file must exist already, while the default is created on the first run, as it was
+ * before there were settings. On failure no database is open, rather than the default: the
+ * user chose another one, and events added to the default by mistake would seem lost to them.
+ */
 static void desktop_database_open(Desktop *desktop) {
     Settings_View *view = &desktop->settings_view;
     desktop->database_path[0] = '\0';
-    char message[SETTINGS_VIEW_MESSAGE_SIZE];
+    char message[SETTINGS_VIEW_MESSAGE_SIZE] = "";
     if (!settings_load(&desktop->settings, GetApplicationDirectory())) {
         settings_view_init(view, "");
         snprintf(message, sizeof(message), "No database opened: %s", desktop->settings.error);
@@ -235,9 +250,11 @@ static void desktop_database_open(Desktop *desktop) {
         return;
     }
     const bool configured = desktop->settings.database_path[0] != '\0';
-    char default_path[SETTINGS_PATH_SIZE];
-    const char *path = configured ? desktop->settings.database_path
-                                  : database_path(default_path, sizeof(default_path));
+    char default_path[SETTINGS_PATH_SIZE] = "";
+    const char *path = database_path(default_path, sizeof(default_path));
+    if (configured) {
+        path = desktop->settings.database_path;
+    }
     settings_view_init(view, path);
     if (!local_backend_switch(&desktop->local, path, !configured)) {
         snprintf(message, sizeof(message), "No database opened: %s", desktop->local.error);
@@ -247,15 +264,17 @@ static void desktop_database_open(Desktop *desktop) {
     snprintf(desktop->database_path, sizeof(desktop->database_path), "%s", path);
 }
 
-// Switches to the database at the path in the Settings view and saves it as the setting. When
-// the new database cannot be opened, the one in use stays open, so the calendar keeps working.
+/**
+ * Switches to the database at the path in the Settings view and saves it as the setting. When
+ * the new database cannot be opened, the one in use stays open, so the calendar keeps working.
+ */
 static void desktop_database_apply(Desktop *desktop, App *app) {
     Settings_View *view = &desktop->settings_view;
     if (view->path[0] == '\0') {
         settings_view_set_message(view, "Enter the path of a database file.");
         return;
     }
-    char message[SETTINGS_VIEW_MESSAGE_SIZE];
+    char message[SETTINGS_VIEW_MESSAGE_SIZE] = "";
     if (!local_backend_switch(&desktop->local, view->path, false)) {
         snprintf(message, sizeof(message), "Not changed: %s", desktop->local.error);
         settings_view_set_message(view, message);
@@ -279,10 +298,12 @@ static void desktop_database_apply(Desktop *desktop, App *app) {
     settings_view_set_message(view, "Switched to this database.");
 }
 
-// Returns the database's path: the fixed, compile-time path in a development build, or, in a
-// packaged release, buffer, filled with the running executable's own directory plus "zeman.db".
-// That directory is unknown until the executable runs there, since a packaged release can be
-// copied anywhere, so that case cannot be a compile-time constant the way the dev path is.
+/**
+ * Returns the database's path: the fixed, compile-time path in a development build, or, in a
+ * packaged release, buffer, filled with the running executable's own directory plus "zeman.db".
+ * That directory is unknown until the executable runs there, since a packaged release can be
+ * copied anywhere, so that case cannot be a compile-time constant the way the dev path is.
+ */
 static const char *database_path(char *buffer, int32_t buffer_size) {
     assert(buffer != NULL);
     assert(buffer_size > 0);
@@ -308,27 +329,35 @@ static void desktop_close(Desktop *desktop) {
     local_backend_close(&desktop->local);
 }
 
-// The navigation on the left, and the chosen view beside it. A client has no server, so it
-// shows the calendar alone.
+/**
+ * The navigation on the left, and the chosen view beside it. A client has no server, so it
+ * shows the calendar alone.
+ */
 static void desktop_frame(Desktop *desktop, App *app) {
     assert(desktop->redraw.frames_pending >= 0);
+
     if (!desktop->client_mode) {
         info_update(&desktop->server, app);
         desktop->redraw.client_count = server_client_count(&desktop->server);
     }
+
     // Taken before drawing, so that a change during the frame is drawn by the next one.
     desktop->redraw.revision = backend_revision(&desktop->backend);
     desktop->redraw.drawn_at_seconds = GetTime();
     if (desktop->redraw.frames_pending > 0) {
         desktop->redraw.frames_pending--;
     }
+
+    // Render
     BeginDrawing();
     desktop_draw(desktop, app, (float)GetScreenWidth(), (float)GetScreenHeight());
     EndDrawing();
 }
 
-// Draws the frame between BeginDrawing and the end of drawing, which the caller does, as
-// EndDrawing also polls input and waits for the next frame, neither wanted while resizing.
+/**
+ * Draws the frame between BeginDrawing and the end of drawing, which the caller does, as
+ * EndDrawing also polls input and waits for the next frame, neither wanted while resizing.
+ */
 static void desktop_draw(Desktop *desktop, App *app, float width, float height) {
     assert(width > 0.0f);
     assert(height > 0.0f);
@@ -360,16 +389,20 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height) 
         assert(false); // Not a view.
         break;
     }
-    const App_Cursor cursor = desktop->view == VIEW_CALENDAR ? app_cursor(app)
-                                                              : APP_CURSOR_DEFAULT;
+    App_Cursor cursor = APP_CURSOR_DEFAULT;
+    if (desktop->view == VIEW_CALENDAR) {
+        cursor = app_cursor(app);
+    }
     if ((int32_t)cursor != desktop->cursor) {
         SetMouseCursor(desktop_cursor_shape(cursor));
         desktop->cursor = (int32_t)cursor;
     }
 }
 
-// The system cursor for each of the app's: a hand as links show, and the arrows that window
-// systems use for resizing and moving.
+/**
+ * The system cursor for each of the app's: a hand as links show, and the arrows that window
+ * systems use for resizing and moving.
+ */
 static int desktop_cursor_shape(App_Cursor cursor) {
     switch (cursor) {
     case APP_CURSOR_DEFAULT:
@@ -385,9 +418,11 @@ static int desktop_cursor_shape(App_Cursor cursor) {
     return MOUSE_CURSOR_DEFAULT;
 }
 
-// Draws and shows a frame at the window's current size, from inside the resize loop. Not
-// EndDrawing: it would poll events again from within an event callback and sleep to hold the
-// frame rate, so only the part that puts the picture on screen is done.
+/**
+ * Draws and shows a frame at the window's current size, from inside the resize loop. Not
+ * EndDrawing: it would poll events again from within an event callback and sleep to hold the
+ * frame rate, so only the part that puts the picture on screen is done.
+ */
 static void desktop_window_refresh(GLFWwindow *window) {
     Desktop_Frame *frame = glfwGetWindowUserPointer(window);
     assert(frame != NULL);
@@ -398,8 +433,10 @@ static void desktop_window_refresh(GLFWwindow *window) {
     SwapScreenBuffer();
 }
 
-// Whether something changed since the last frame: input, data from this app or a phone, the
-// phones connected, or the time. The window keeps showing the last frame until then.
+/**
+ * Whether something changed since the last frame: input, data from this app or a phone, the
+ * phones connected, or the time. The window keeps showing the last frame until then.
+ */
 static bool desktop_redraw_needed(Desktop *desktop) {
     Redraw *redraw = &desktop->redraw;
     assert(redraw->frames_pending >= 0);
@@ -432,18 +469,22 @@ static bool desktop_redraw_needed(Desktop *desktop) {
     return server_client_count(&desktop->server) != redraw->client_count;
 }
 
-// Sleeps until input arrives or IDLE_WAIT_SECONDS pass. raylib's own EnableEventWaiting has no
-// timeout, which would leave phones unanswered until the user moved the mouse. GLFW's callbacks
-// record the input into raylib's state on top of the last frame's poll, so the input functions
-// see it as at the start of a frame, and input_is_active finds it.
+/**
+ * Sleeps until input arrives or IDLE_WAIT_SECONDS pass. raylib's own EnableEventWaiting has no
+ * timeout, which would leave phones unanswered until the user moved the mouse. GLFW's callbacks
+ * record the input into raylib's state on top of the last frame's poll, so the input functions
+ * see it as at the start of a frame, and input_is_active finds it.
+ */
 static void desktop_wait(void) {
     assert(IsWindowReady());
     assert(IDLE_WAIT_SECONDS > 0.0);
     glfwWaitEventsTimeout(IDLE_WAIT_SECONDS);
 }
 
-// Whether the user did anything since the last input poll, or still holds a key or button, as
-// in a drag. A held key keeps frames coming, which raygui's key repeat in text boxes needs.
+/**
+ * Whether the user did anything since the last input poll, or still holds a key or button, as
+ * in a drag. A held key keeps frames coming, which raygui's key repeat in text boxes needs.
+ */
 static bool input_is_active(void) {
     if (IsWindowResized()) {
         return true;
@@ -470,7 +511,9 @@ static bool input_is_active(void) {
     return false;
 }
 
-// Draws the items and returns the view to show: the one clicked this frame, or current.
+/**
+ * Draws the items and returns the view to show: the one clicked this frame, or current.
+ */
 static View navigation_draw(const App *app, View current, Rectangle area) {
     DrawRectangleRec(area, GetColor((unsigned int)GuiGetStyle(DEFAULT, BASE_COLOR_NORMAL)));
     DrawRectangleRec((Rectangle){ area.x + area.width - 1, area.y, 1, area.height },
@@ -531,12 +574,14 @@ static bool port_parse(const char *text, uint16_t *port) {
     return true;
 }
 
-// Tells the user where phones connect, and how many are connected.
+/**
+ * Tells the user where phones connect, and how many are connected.
+ */
 static void info_update(const Server *server, App *app) {
     if (!server->listening) {
         return;
     }
-    char info[INFO_SIZE];
+    char info[INFO_SIZE] = "";
     int32_t count = server_client_count(server);
     if (count == 0) {
         snprintf(info, sizeof(info), "Phone access: %s", server->address);

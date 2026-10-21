@@ -19,7 +19,7 @@ void writer_u8(Writer *writer, uint8_t value) {
 }
 
 void writer_u32(Writer *writer, uint32_t value) {
-    uint8_t bytes[4];
+    uint8_t bytes[4] = { 0 };
     protocol_length_write(bytes, value);
     writer_bytes(writer, bytes, sizeof(bytes));
 }
@@ -51,7 +51,9 @@ void writer_date(Writer *writer, Date date) {
     writer_i32(writer, date.day);
 }
 
-// Every field, in declaration order; reader_event reads them back in the same order.
+/**
+ * Every field, in declaration order; reader_event reads them back in the same order.
+ */
 void writer_event(Writer *writer, const Event *event) {
     writer_i64(writer, event->id);
     writer_i64(writer, event->location.id);
@@ -60,17 +62,25 @@ void writer_event(Writer *writer, const Event *event) {
     writer_date(writer, event->start_date);
     writer_date(writer, event->end_date);
     // A new event has no creation time yet; zeroes stand for it.
-    writer_date(writer, date_is_valid(event->created_date) ? event->created_date
-                                                           : (Date){ 0, 0, 0 });
-    writer_date(writer, event->repeat_has_end ? event->repeat_end_date : (Date){ 0, 0, 0 });
+    Date created_date = { 0, 0, 0 };
+    if (date_is_valid(event->created_date)) {
+        created_date = event->created_date;
+    }
+    writer_date(writer, created_date);
+    // Zeroes also stand for a repeat that never ends.
+    Date repeat_end_date = { 0, 0, 0 };
+    if (event->repeat_has_end) {
+        repeat_end_date = event->repeat_end_date;
+    }
+    writer_date(writer, repeat_end_date);
     writer_i32(writer, event->start_minute);
     writer_i32(writer, event->end_minute);
     writer_i32(writer, event->created_minute);
     writer_i32(writer, event->repeat_unit);
     writer_i32(writer, event->repeat_interval);
     writer_i32(writer, event->kind);
-    writer_u8(writer, event->repeat_has_end ? 1 : 0);
-    writer_u8(writer, event->tasks_done ? 1 : 0);
+    writer_u8(writer, (uint8_t)event->repeat_has_end);
+    writer_u8(writer, (uint8_t)event->tasks_done);
     writer_text(writer, event->title);
     writer_text(writer, event->description);
 }
@@ -82,11 +92,13 @@ void writer_completion(Writer *writer, const Task_Completion *completion) {
 
 void writer_linked_task(Writer *writer, const Linked_Task *task) {
     writer_i64(writer, task->task_id);
-    writer_u8(writer, task->done ? 1 : 0);
+    writer_u8(writer, (uint8_t)task->done);
     writer_text(writer, task->title);
 }
 
-// Every field, in declaration order; reader_link_target reads them back in the same order.
+/**
+ * Every field, in declaration order; reader_link_target reads them back in the same order.
+ */
 void writer_link_target(Writer *writer, const Link_Target *target) {
     writer_i64(writer, target->target_id);
     writer_date(writer, target->end_date);
@@ -94,7 +106,7 @@ void writer_link_target(Writer *writer, const Link_Target *target) {
     writer_i32(writer, target->task_count);
     writer_i32(writer, target->task_done_count);
     writer_i32(writer, target->kind);
-    writer_u8(writer, target->linked ? 1 : 0);
+    writer_u8(writer, (uint8_t)target->linked);
     writer_text(writer, target->title);
 }
 
@@ -224,8 +236,10 @@ Linked_Task reader_linked_task(Reader *reader) {
     return task;
 }
 
-// The counts, kind and deadline are checked as target_status, event_kind_is_target and
-// opportunity_is_missed assert them, because they come from the network.
+/**
+ * The counts, kind and deadline are checked as target_status, event_kind_is_target and
+ * opportunity_is_missed assert them, because they come from the network.
+ */
 Link_Target reader_link_target(Reader *reader) {
     Link_Target target = { 0 };
     target.target_id = reader_i64(reader);
@@ -295,7 +309,8 @@ static bool reader_bytes(Reader *reader, void *bytes, size_t count) {
 void protocol_link_format(char *link, size_t link_size, const char *address, uint16_t port) {
     int written = snprintf(link, link_size, "%s%s:%u", PROTOCOL_LINK_PREFIX, address,
                            (unsigned)port);
-    assert(written > 0 && (size_t)written < link_size);
+    assert(written > 0);
+    assert((size_t)written < link_size);
 }
 
 bool protocol_link_parse(const char *link, char *address, size_t address_size, uint16_t *port) {
@@ -310,7 +325,10 @@ bool protocol_link_parse(const char *link, char *address, size_t address_size, u
         return false;
     }
     const char *colon = strchr(link, ':');
-    size_t address_length = colon != NULL ? (size_t)(colon - link) : strlen(link);
+    size_t address_length = strlen(link);
+    if (colon != NULL) {
+        address_length = (size_t)(colon - link);
+    }
     if (address_length == 0 || address_length >= address_size) {
         return false;
     }

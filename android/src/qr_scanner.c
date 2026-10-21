@@ -29,7 +29,7 @@ bool qr_scanner_start(QR_Scanner *scanner) {
     scanner->error[0] = '\0';
     scanner->has_frame = false;
     scanner->manager = ACameraManager_create();
-    char camera_id[CAMERA_ID_SIZE];
+    char camera_id[CAMERA_ID_SIZE] = "";
     if (scanner->manager == NULL || !qr_scanner_find_camera(scanner, camera_id,
                                                              sizeof(camera_id))) {
         return qr_scanner_fail(scanner, "This phone has no camera the app can use.");
@@ -64,8 +64,10 @@ bool qr_scanner_start(QR_Scanner *scanner) {
     return true;
 }
 
-// Releases everything in the reverse order of qr_scanner_start; also after a start that failed
-// halfway, so every step checks what exists.
+/**
+ * Releases everything in the reverse order of qr_scanner_start; also after a start that failed
+ * halfway, so every step checks what exists.
+ */
 void qr_scanner_stop(QR_Scanner *scanner) {
     if (scanner->session != NULL) {
         ACameraCaptureSession_stopRepeating(scanner->session);
@@ -131,14 +133,15 @@ bool qr_scanner_poll(QR_Scanner *scanner, char *text, size_t text_size) {
     int width = 0;
     int height = 0;
     uint8_t *buffer = quirc_begin(scanner->decoder, &width, &height);
-    assert(width == QR_SCANNER_WIDTH && height == QR_SCANNER_HEIGHT);
+    assert(width == QR_SCANNER_WIDTH);
+    assert(height == QR_SCANNER_HEIGHT);
     memcpy(buffer, scanner->luminance, sizeof(scanner->luminance));
     quirc_end(scanner->decoder);
     // Bounded by quirc, which finds a handful of codes at most in one frame.
     int count = quirc_count(scanner->decoder);
     for (int i = 0; i < count; i++) {
-        struct quirc_code code;
-        struct quirc_data data;
+        struct quirc_code code = { 0 };
+        struct quirc_data data = { 0 };
         quirc_extract(scanner->decoder, i, &code);
         if (quirc_decode(&code, &data) != QUIRC_SUCCESS) {
             continue;
@@ -161,11 +164,17 @@ void qr_scanner_draw(const QR_Scanner *scanner, Rectangle area) {
     }
     // A frame turned by a quarter swaps its width and height on the screen.
     bool sideways = scanner->sensor_orientation == 90 || scanner->sensor_orientation == 270;
-    float shown_width = sideways ? QR_SCANNER_HEIGHT : QR_SCANNER_WIDTH;
-    float shown_height = sideways ? QR_SCANNER_WIDTH : QR_SCANNER_HEIGHT;
-    float fit = area.width / shown_width < area.height / shown_height
-                    ? area.width / shown_width
-                    : area.height / shown_height;
+    float shown_width = QR_SCANNER_WIDTH;
+    float shown_height = QR_SCANNER_HEIGHT;
+    if (sideways) {
+        shown_width = QR_SCANNER_HEIGHT;
+        shown_height = QR_SCANNER_WIDTH;
+    }
+    // The largest size at which the whole frame fits the area.
+    float fit = area.height / shown_height;
+    if (area.width / shown_width < fit) {
+        fit = area.width / shown_width;
+    }
     float width = QR_SCANNER_WIDTH * fit;
     float height = QR_SCANNER_HEIGHT * fit;
     Rectangle source = { 0, 0, QR_SCANNER_WIDTH, QR_SCANNER_HEIGHT };
@@ -174,7 +183,9 @@ void qr_scanner_draw(const QR_Scanner *scanner, Rectangle area) {
                    (float)scanner->sensor_orientation, WHITE);
 }
 
-// The first back-facing camera, or else the first camera; and how its frames are turned.
+/**
+ * The first back-facing camera, or else the first camera; and how its frames are turned.
+ */
 static bool qr_scanner_find_camera(QR_Scanner *scanner, char *camera_id, size_t camera_id_size) {
     ACameraIdList *ids = NULL;
     if (ACameraManager_getCameraIdList(scanner->manager, &ids) != ACAMERA_OK || ids == NULL) {
@@ -212,8 +223,10 @@ static bool qr_scanner_find_camera(QR_Scanner *scanner, char *camera_id, size_t 
     return found;
 }
 
-// Frames go to an image reader, which the app reads at its own pace; preview frames with
-// continuous autofocus, so that a code held close is sharp.
+/**
+ * Frames go to an image reader, which the app reads at its own pace; preview frames with
+ * continuous autofocus, so that a code held close is sharp.
+ */
 static bool qr_scanner_open_session(QR_Scanner *scanner) {
     if (AImageReader_new(QR_SCANNER_WIDTH, QR_SCANNER_HEIGHT, AIMAGE_FORMAT_YUV_420_888,
                          QR_SCANNER_IMAGE_COUNT, &scanner->reader) != AMEDIA_OK) {
@@ -251,7 +264,9 @@ static bool qr_scanner_open_session(QR_Scanner *scanner) {
                                                      &scanner->request, NULL) == ACAMERA_OK;
 }
 
-// Copies the brightness plane row by row, because its rows may be padded past the width.
+/**
+ * Copies the brightness plane row by row, because its rows may be padded past the width.
+ */
 static bool qr_scanner_copy_frame(QR_Scanner *scanner, AImage *image) {
     int32_t width = 0;
     int32_t height = 0;

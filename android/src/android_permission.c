@@ -81,8 +81,10 @@ static JNIEnv *permission_attach(JavaVM *vm) {
     return env;
 }
 
-// True, with the exception cleared, when a JNI call failed, so that no later call runs with an
-// exception pending.
+/**
+ * True, with the exception cleared, when a JNI call failed, so that no later call runs with an
+ * exception pending.
+ */
 static bool permission_failed(JNIEnv *env, const void *result) {
     if (result == NULL || (*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);

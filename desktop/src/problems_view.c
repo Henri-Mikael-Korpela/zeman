@@ -50,7 +50,7 @@ void problems_view_draw(Problems_View *view, Backend *backend, const App *app, R
         return;
     }
     if (view->truncated) {
-        char text[LABEL_SIZE];
+        char text[LABEL_SIZE] = "";
         snprintf(text, sizeof(text), "Showing the newest %d problems.", PROBLEMS_VIEW_COUNT_MAX);
         float text_width = app_measure_text(app, APP_TEXT_DIM, text);
         app_draw_text(app, APP_TEXT_DIM, text, x + width - text_width, y + 10);
@@ -75,9 +75,11 @@ void problems_view_draw(Problems_View *view, Backend *backend, const App *app, R
     }
 }
 
-// The newest first, which is the backend's order for targets offered to a task not stored yet:
-// none of them are linked to it, so none are moved ahead. Opportunities are left out, because
-// this view is about problems.
+/**
+ * The newest first, which is the backend's order for targets offered to a task not stored yet:
+ * none of them are linked to it, so none are moved ahead. Opportunities are left out, because
+ * this view is about problems.
+ */
 static void problems_view_load(Problems_View *view, Backend *backend, uint64_t revision) {
     view->revision = revision;
     view->problem_count = 0;
@@ -96,14 +98,16 @@ static void problems_view_load(Problems_View *view, Backend *backend, uint64_t r
     view->problem_count = count;
 }
 
-// The state and its count above, and the problems in that state as bars in a cell below, like
-// a weekday name above its day. When not all fit, the last line counts the rest.
+/**
+ * The state and its count above, and the problems in that state as bars in a cell below, like
+ * a weekday name above its day. When not all fit, the last line counts the rest.
+ */
 static void problems_view_draw_column(const Problems_View *view, const App *app,
                                       Target_Status status, int32_t count, Rectangle header,
                                       Rectangle cell) {
     assert(count >= 0);
     assert(count <= view->problem_count);
-    char text[LABEL_SIZE];
+    char text[LABEL_SIZE] = "";
     snprintf(text, sizeof(text), "%s (%" PRId32 ")", target_status_name(status), count);
     float text_width = app_measure_text(app, APP_TEXT_NORMAL, text);
     app_draw_text(app, APP_TEXT_NORMAL, text, header.x + (header.width - text_width) / 2,
@@ -118,7 +122,10 @@ static void problems_view_draw_column(const Problems_View *view, const App *app,
     if (slot_count <= 0) {
         return;
     }
-    const int32_t bar_count = count <= slot_count ? count : slot_count - 1;
+    int32_t bar_count = count;
+    if (count > slot_count) {
+        bar_count = slot_count - 1;
+    }
     int32_t bar_index = 0;
     for (int32_t i = 0; i < view->problem_count && bar_index < bar_count; i++) {
         const Link_Target *problem = &view->problems[i];

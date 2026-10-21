@@ -40,7 +40,7 @@ void devices_view_draw(const Devices_View *view, const Server *server, const App
     app_draw_text(app, APP_TEXT_HEADING, "Connected Devices", x, y);
     y += 2 * LINE_PIXELS;
 
-    char text[TEXT_SIZE];
+    char text[TEXT_SIZE] = "";
     if (!server->listening || !view->qr_ready) {
         snprintf(text, sizeof(text), "Phone access is off: %s", server->error);
         app_draw_text(app, APP_TEXT_NORMAL, text, x, y);
@@ -69,7 +69,9 @@ void devices_view_draw(const Devices_View *view, const Server *server, const App
     devices_view_draw_clients(server, app, side_x, side_y);
 }
 
-// Draws the code on white with its quiet zone, and returns its width in pixels.
+/**
+ * Draws the code on white with its quiet zone, and returns its width in pixels.
+ */
 static float devices_view_draw_qr(const Devices_View *view, float x, float y) {
     const int32_t modules = qrcodegen_getSize(view->qr);
     const float size = (float)((modules + 2 * QR_QUIET_ZONE_MODULES) * QR_MODULE_PIXELS);
@@ -104,7 +106,7 @@ static void devices_view_draw_clients(const Server *server, const App *app, floa
         if (local != NULL) {
             strftime(since, sizeof(since), "%H:%M", local);
         }
-        char text[TEXT_SIZE];
+        char text[TEXT_SIZE] = "";
         snprintf(text, sizeof(text), "%s, since %s", client->address, since);
         app_draw_text(app, APP_TEXT_NORMAL, text, x, y);
         y += LINE_PIXELS;

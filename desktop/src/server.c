@@ -53,7 +53,7 @@ bool server_start(Server *server, Backend *backend, uint16_t port) {
     net_local_address(server->address, sizeof(server->address));
     server->listening = true;
     // Without discovery, phones can still connect by typing the address.
-    char discovery_error[SERVER_ERROR_SIZE];
+    char discovery_error[SERVER_ERROR_SIZE] = "";
     if (!net_udp_open(PROTOCOL_DISCOVERY_PORT, &server->discovery, discovery_error,
                       sizeof(discovery_error))) {
         server->discovery = NET_SOCKET_INVALID;
@@ -111,14 +111,16 @@ void server_poll(Server *server) {
     server_discovery_poll(server);
 }
 
-// Answers each probe from the local network with this server's port, at the sender's address.
+/**
+ * Answers each probe from the local network with this server's port, at the sender's address.
+ */
 static void server_discovery_poll(Server *server) {
     if (server->discovery == NET_SOCKET_INVALID) {
         return;
     }
     for (int32_t i = 0; i < SERVER_DISCOVERY_PACKETS_PER_POLL; i++) {
-        char packet[PROTOCOL_DISCOVERY_SIZE_MAX];
-        char address[NET_ADDRESS_SIZE];
+        char packet[PROTOCOL_DISCOVERY_SIZE_MAX] = "";
+        char address[NET_ADDRESS_SIZE] = "";
         uint16_t port = 0;
         int32_t length = net_udp_recv(server->discovery, packet, sizeof(packet) - 1, address,
                                       sizeof(address), &port);
@@ -129,10 +131,11 @@ static void server_discovery_poll(Server *server) {
         if (!net_address_is_local(address) || strcmp(packet, PROTOCOL_DISCOVERY_PROBE) != 0) {
             continue;
         }
-        char reply[PROTOCOL_DISCOVERY_SIZE_MAX];
+        char reply[PROTOCOL_DISCOVERY_SIZE_MAX] = "";
         int reply_length = snprintf(reply, sizeof(reply), "%s%u", PROTOCOL_DISCOVERY_REPLY,
                                     (unsigned)server->port);
-        assert(reply_length > 0 && reply_length < (int)sizeof(reply));
+        assert(reply_length > 0);
+        assert(reply_length < (int)sizeof(reply));
         net_udp_send(server->discovery, address, port, reply, reply_length);
     }
 }
@@ -140,12 +143,14 @@ static void server_discovery_poll(Server *server) {
 int32_t server_client_count(const Server *server) {
     int32_t count = 0;
     for (int32_t i = 0; i < SERVER_CLIENT_COUNT_MAX; i++) {
-        count += server->clients[i].active ? 1 : 0;
+        count += (int32_t)server->clients[i].active;
     }
     return count;
 }
 
-// Finishes sending the previous response, then reads at most one request and answers it.
+/**
+ * Finishes sending the previous response, then reads at most one request and answers it.
+ */
 static void server_client_poll(Server *server, Server_Client *client) {
     if (!client->active || !server_client_flush(client)) {
         return;
@@ -198,7 +203,9 @@ static void server_client_poll(Server *server, Server_Client *client) {
     server_client_flush(client);
 }
 
-// Sends what the socket takes now. Returns false if the connection was dropped.
+/**
+ * Sends what the socket takes now. Returns false if the connection was dropped.
+ */
 static bool server_client_flush(Server_Client *client) {
     if (client->response_length == 0) {
         return true;
@@ -224,8 +231,14 @@ static void server_client_drop(Server_Client *client) {
 }
 
 static void server_handle(Server *server, Reader *request, Writer *response) {
-    uint8_t operation = reader_u8(request);
-    switch (operation) {
+    const uint8_t operation = reader_u8(request);
+    // The byte comes from the network, so values that are no operation are answered, not
+    // asserted; the switch below then names every operation, so that a new one cannot be missed.
+    if (operation < PROTOCOL_HELLO || operation >= PROTOCOL_OPERATION_END) {
+        server_fail(response, "Unknown request: update the desktop app.");
+        return;
+    }
+    switch ((Protocol_Operation)operation) {
     case PROTOCOL_HELLO: {
         uint32_t version = reader_u32(request);
         (void)version; // The client compares versions, and says so to its user.
@@ -281,9 +294,8 @@ static void server_handle(Server *server, Reader *request, Writer *response) {
     case PROTOCOL_SET_TASK_TARGETS:
         server_handle_set_task_targets(server, request, response);
         return;
-    default:
-        // The byte comes from the network, so values that are no operation must be answered.
-        server_fail(response, "Unknown request: update the desktop app.");
+    case PROTOCOL_OPERATION_END:
+        assert(false); // Excluded by the range check above.
         return;
     }
 }
@@ -307,7 +319,7 @@ static void server_handle_load_range(Server *server, Reader *request, Writer *re
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_u8(response, truncated ? 1 : 0);
+    writer_u8(response, (uint8_t)truncated);
     writer_i32(response, count);
     for (int32_t i = 0; i < count; i++) {
         writer_event(response, &server->events[i]);
@@ -333,14 +345,16 @@ static void server_handle_load_completions(Server *server, Reader *request, Writ
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_u8(response, truncated ? 1 : 0);
+    writer_u8(response, (uint8_t)truncated);
     writer_i32(response, count);
     for (int32_t i = 0; i < count; i++) {
         writer_completion(response, &server->completions[i]);
     }
 }
 
-// reader_event has checked the event against event_is_valid already.
+/**
+ * reader_event has checked the event against event_is_valid already.
+ */
 static void server_handle_insert(Server *server, Reader *request, Writer *response) {
     Event event = reader_event(request);
     if (!reader_done(request) || event.id != 0) {
@@ -390,8 +404,8 @@ static void server_handle_set_task_done(Server *server, Reader *request, Writer 
 }
 
 static void server_handle_location(Server *server, Reader *request, Writer *response) {
-    char address[LOCATION_ADDRESS_SIZE];
-    char city[LOCATION_CITY_SIZE];
+    char address[LOCATION_ADDRESS_SIZE] = "";
+    char city[LOCATION_CITY_SIZE] = "";
     reader_text(request, address, sizeof(address));
     reader_text(request, city, sizeof(city));
     if (!reader_done(request) || (address[0] == '\0' && city[0] == '\0')) {
@@ -425,14 +439,16 @@ static void server_handle_load_target_tasks(Server *server, Reader *request, Wri
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_u8(response, truncated ? 1 : 0);
+    writer_u8(response, (uint8_t)truncated);
     writer_i32(response, count);
     for (int32_t i = 0; i < count; i++) {
         writer_linked_task(response, &server->linked_tasks[i]);
     }
 }
 
-// task_id 0 asks for the targets offered to a task not stored yet.
+/**
+ * task_id 0 asks for the targets offered to a task not stored yet.
+ */
 static void server_handle_load_task_targets(Server *server, Reader *request, Writer *response) {
     int64_t task_id = reader_i64(request);
     uint8_t problems_only = reader_u8(request);
@@ -452,14 +468,16 @@ static void server_handle_load_task_targets(Server *server, Reader *request, Wri
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_u8(response, truncated ? 1 : 0);
+    writer_u8(response, (uint8_t)truncated);
     writer_i32(response, count);
     for (int32_t i = 0; i < count; i++) {
         writer_link_target(response, &server->link_targets[i]);
     }
 }
 
-// The store asserts that each target comes once, so repeats from the network are refused here.
+/**
+ * The store asserts that each target comes once, so repeats from the network are refused here.
+ */
 static void server_handle_set_task_targets(Server *server, Reader *request, Writer *response) {
     int64_t task_id = reader_i64(request);
     int32_t count = reader_i32(request);
@@ -467,7 +485,7 @@ static void server_handle_set_task_targets(Server *server, Reader *request, Writ
         server_fail(response, "Invalid request.");
         return;
     }
-    int64_t target_ids[LINK_COUNT_MAX];
+    int64_t target_ids[LINK_COUNT_MAX] = { 0 };
     bool valid = true;
     for (int32_t i = 0; i < count; i++) {
         target_ids[i] = reader_i64(request);
@@ -495,7 +513,9 @@ static bool server_range_is_valid(Date first, Date last) {
     return days >= 0 && days <= SERVER_RANGE_DAYS_MAX;
 }
 
-// Replaces anything written so far with a failure and its message.
+/**
+ * Replaces anything written so far with a failure and its message.
+ */
 static void server_fail(Writer *response, const char *message) {
     response->length = 0;
     response->overflow = false;

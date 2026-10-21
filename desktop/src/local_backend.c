@@ -55,7 +55,7 @@ bool local_backend_switch(Local_Backend *local, const char *path, bool create) {
     assert(local != NULL);
     assert(path != NULL);
     // Opened beside the current store, so that a failure leaves the current one in use.
-    Event_Store store;
+    Event_Store store = { 0 };
     if (!event_store_open(&store, path, create)) {
         snprintf(local->error, sizeof(local->error), "%s", store.error);
         event_store_close(&store);
@@ -84,9 +84,11 @@ Backend local_backend(Local_Backend *local) {
     return (Backend){ .ops = &local_ops, .context = local };
 }
 
-// The store's error is copied so that it outlives the store's next call. Without a store, the
-// error already says why none is open, from local_backend_init or the switch that failed, and is
-// kept, so that every failing operation tells the user the cause rather than only the effect.
+/**
+ * The store's error is copied so that it outlives the store's next call. Without a store, the
+ * error already says why none is open, from local_backend_init or the switch that failed, and is
+ * kept, so that every failing operation tells the user the cause rather than only the effect.
+ */
 static bool local_available(Local_Backend *local) {
     if (!local->store_open) {
         assert(local->error[0] != '\0');

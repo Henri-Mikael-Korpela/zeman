@@ -20,11 +20,15 @@ typedef struct Settings {
     char error[SETTINGS_ERROR_SIZE];         // Why the last load or save failed
 } Settings;
 
-// Reads settings.ini from directory, which ends with a path separator. A missing file is not an
-// error: every setting then has its default. Returns false, with error set, when the file
-// exists but cannot be read or holds a setting that does not fit.
+/**
+ * Reads settings.ini from directory, which ends with a path separator. A missing file is not an
+ * error: every setting then has its default. Returns false, with error set, when the file
+ * exists but cannot be read or holds a setting that does not fit.
+ */
 bool settings_load(Settings *settings, const char *directory);
-// Writes every setting to settings.ini in directory. Returns false, with error set, on failure.
+/**
+ * Writes every setting to settings.ini in directory. Returns false, with error set, on failure.
+ */
 bool settings_save(Settings *settings, const char *directory);
 
 #endif

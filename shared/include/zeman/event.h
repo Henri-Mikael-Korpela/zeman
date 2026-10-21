@@ -116,39 +116,57 @@ typedef enum Target_Status {
     TARGET_STATUS_COUNT,
 } Target_Status;
 
-// Checks every rule an event must follow before it is stored: terminated texts, a title, valid
-// dates and times, a known kind and repeat, and occurrences that do not overlap; a problem has
-// one day and no times, repeat or location, and an opportunity no repeat. The form enforces
-// these already; this is for data from outside the program, such as the network, which the
-// store's assertions must never see. That a problem falls on the day it was created is left to
-// the caller and the database.
+/**
+ * Checks every rule an event must follow before it is stored: terminated texts, a title, valid
+ * dates and times, a known kind and repeat, and occurrences that do not overlap; a problem has
+ * one day and no times, repeat or location, and an opportunity no repeat. The form enforces
+ * these already; this is for data from outside the program, such as the network, which the
+ * store's assertions must never see. That a problem falls on the day it was created is left to
+ * the caller and the database.
+ */
 bool event_is_valid(const Event *event);
 
-// A link target that tasks can be linked to: a problem or an opportunity.
+/**
+ * A link target that tasks can be linked to: a problem or an opportunity.
+ */
 bool event_kind_is_target(int32_t kind);
 
-// An opportunity whose deadline has passed before its linked tasks were all done. The deadline
-// is inclusive: one at 17:00 is missed from 17:01, and one without a time from the next day.
+/**
+ * An opportunity whose deadline has passed before its linked tasks were all done. The deadline
+ * is inclusive: one at 17:00 is missed from 17:01, and one without a time from the next day.
+ */
 bool opportunity_is_missed(Date end_date, int32_t end_minute, bool tasks_done, Date_Time now);
 
-// Whole days from the start date to the end date of one occurrence; 0 for a one-day event.
+/**
+ * Whole days from the start date to the end date of one occurrence; 0 for a one-day event.
+ */
 int32_t event_duration_days(const Event *event);
 
-// The fewest days between the starts of two occurrences. An occurrence must be shorter than
-// this, so that occurrences never overlap and at most one covers any given day.
+/**
+ * The fewest days between the starts of two occurrences. An occurrence must be shorter than
+ * this, so that occurrences never overlap and at most one covers any given day.
+ */
 int32_t event_repeat_gap_days_min(const Event *event);
 
-// Finds the occurrence that covers day_number. Returns false if none does.
+/**
+ * Finds the occurrence that covers day_number. Returns false if none does.
+ */
 bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *start_day);
 
-// A copy of the event with its dates moved to the occurrence that starts on start_day.
+/**
+ * A copy of the event with its dates moved to the occurrence that starts on start_day.
+ */
 Event event_occurrence_at(const Event *event, int32_t start_day);
 
-// "every week", "every 10 days", and so on; empty for an event that does not repeat.
+/**
+ * "every week", "every 10 days", and so on; empty for an event that does not repeat.
+ */
 void event_format_repeat(const Event *event, char *buffer, size_t buffer_size);
 
 Target_Status target_status(int32_t task_count, int32_t task_done_count);
-// "No planned tasks", "Planned", "Partly completed" or "Completed".
+/**
+ * "No planned tasks", "Planned", "Partly completed" or "Completed".
+ */
 const char *target_status_name(Target_Status status);
 
 #endif

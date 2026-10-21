@@ -37,7 +37,7 @@ static void net_error_text(const char *context, char *error, size_t error_size);
 
 bool net_startup(void) {
 #if defined(_WIN32)
-    WSADATA data;
+    WSADATA data = { 0 };
     return WSAStartup(MAKEWORD(2, 2), &data) == 0;
 #else
     return true;
@@ -56,7 +56,7 @@ bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, Net_Socket
     assert(timeout_ms > 0);
     *socket_out = NET_SOCKET_INVALID;
 
-    char port_text[8];
+    char port_text[8] = "";
     snprintf(port_text, sizeof(port_text), "%u", (unsigned)port);
     struct addrinfo hints = { 0 };
     hints.ai_family = AF_INET;
@@ -158,7 +158,12 @@ int32_t net_send(Net_Socket socket, const void *data, int32_t length) {
     if (result > 0) {
         return result;
     }
-    return result < 0 && net_would_block() ? 0 : -1;
+    if (result < 0) {
+        if (net_would_block()) {
+            return 0;
+        }
+    }
+    return -1;
 }
 
 int32_t net_recv(Net_Socket socket, void *data, int32_t length) {
@@ -168,7 +173,12 @@ int32_t net_recv(Net_Socket socket, void *data, int32_t length) {
         return result;
     }
     // 0 is an orderly close by the other side, which ends the connection like an error.
-    return result < 0 && net_would_block() ? 0 : -1;
+    if (result < 0) {
+        if (net_would_block()) {
+            return 0;
+        }
+    }
+    return -1;
 }
 
 bool net_send_all(Net_Socket socket, const void *data, int32_t length, int32_t timeout_ms) {
@@ -280,7 +290,7 @@ int32_t net_udp_recv(Net_Socket socket, void *data, int32_t size, char *address,
 }
 
 bool net_address_is_local(const char *address) {
-    struct in_addr parsed;
+    struct in_addr parsed = { 0 };
     if (inet_pton(AF_INET, address, &parsed) != 1) {
         return false;
     }
@@ -291,7 +301,7 @@ int64_t net_monotonic_ms(void) {
 #if defined(_WIN32)
     return (int64_t)GetTickCount64();
 #else
-    struct timespec now;
+    struct timespec now = { 0 };
     clock_gettime(CLOCK_MONOTONIC, &now);
     return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 #endif
@@ -313,7 +323,7 @@ void net_local_address(char *buffer, size_t buffer_size) {
         struct sockaddr_in local = { 0 };
         socklen_t length = sizeof(local);
         if (getsockname(platform, (struct sockaddr *)&local, &length) == 0) {
-            char text[NET_ADDRESS_SIZE];
+            char text[NET_ADDRESS_SIZE] = "";
             if (inet_ntop(AF_INET, &local.sin_addr, text, sizeof(text)) != NULL) {
                 snprintf(buffer, buffer_size, "%s", text);
             }
@@ -352,16 +362,23 @@ static bool net_would_block(void) {
 #endif
 }
 
-// Waits until the socket can be written or read, or the timeout passes.
+/**
+ * Waits until the socket can be written or read, or the timeout passes.
+ */
 static bool net_wait(Net_Socket socket, bool for_write, int32_t timeout_ms) {
     assert(timeout_ms >= 0);
-    fd_set set;
+    fd_set set = { 0 };
     FD_ZERO(&set);
     FD_SET((Platform_Socket)socket, &set);
     struct timeval timeout = { timeout_ms / 1000, (timeout_ms % 1000) * 1000 };
+    fd_set *read_set = &set;
+    fd_set *write_set = NULL;
+    if (for_write) {
+        read_set = NULL;
+        write_set = &set;
+    }
     // The first argument is ignored by Winsock and needed by POSIX.
-    int count = select((int)((Platform_Socket)socket + 1), for_write ? NULL : &set,
-                       for_write ? &set : NULL, NULL, &timeout);
+    int count = select((int)((Platform_Socket)socket + 1), read_set, write_set, NULL, &timeout);
     return count > 0;
 }
 

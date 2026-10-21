@@ -6,6 +6,8 @@
 #include <string.h>
 #include <time.h>
 
+#include <zeman/bound.h>
+
 enum {
     // Day number arithmetic follows Howard Hinnant's days_from_civil, which counts from
     // 0000-03-01 in 400-year eras so that the leap day falls at the end of each year.
@@ -55,27 +57,43 @@ Date_Time date_time_now(void) {
     return moment;
 }
 
-// "1 hour ago", "2 hours ago".
+/**
+ * "1 hour ago", "2 hours ago".
+ */
 static void format_age_count(char *buffer, size_t buffer_size, int64_t count, const char *unit) {
     assert(count >= 1);
-    snprintf(buffer, buffer_size, "%" PRId64 " %s%s ago", count, unit, count == 1 ? "" : "s");
+    // Plural for every count but one.
+    const char *plural = "s";
+    if (count == 1) {
+        plural = "";
+    }
+    snprintf(buffer, buffer_size, "%" PRId64 " %s%s ago", count, unit, plural);
 }
 
-// Whole months from earlier to later: the day of the month counts, so 31 Jan to 28 Feb is not
-// yet a month.
+/**
+ * Whole months from earlier to later: the day of the month counts, so 31 Jan to 28 Feb is not
+ * yet a month.
+ */
 static int32_t months_between(Date earlier, Date later) {
     int32_t months = (later.year - earlier.year) * 12 + (later.month - earlier.month);
-    return later.day < earlier.day ? months - 1 : months;
+    if (later.day < earlier.day) {
+        return months - 1;
+    }
+    return months;
 }
 
-// Minutes and hours while the time of day matters, up to a quarter of a day; after that days,
-// weeks, months and years by the calendar, because "yesterday" is what people look for, and
-// "20 hours ago" would not tell them which day.
+/**
+ * Minutes and hours while the time of day matters, up to a quarter of a day; after that days,
+ * weeks, months and years by the calendar, because "yesterday" is what people look for, and
+ * "20 hours ago" would not tell them which day.
+ */
 void date_time_format_age(Date_Time created, Date_Time now, char *buffer, size_t buffer_size) {
     assert(date_is_valid(created.date));
     assert(date_is_valid(now.date));
-    assert(created.minute_of_day >= 0 && created.minute_of_day < MINUTES_PER_DAY);
-    assert(now.minute_of_day >= 0 && now.minute_of_day < MINUTES_PER_DAY);
+    assert(created.minute_of_day >= 0);
+    assert(created.minute_of_day < MINUTES_PER_DAY);
+    assert(now.minute_of_day >= 0);
+    assert(now.minute_of_day < MINUTES_PER_DAY);
     assert(buffer_size >= DATE_TIME_AGE_SIZE);
 
     const int64_t days = (int64_t)date_to_day_number(now.date) -
@@ -101,7 +119,7 @@ void date_time_format_age(Date_Time created, Date_Time now, char *buffer, size_t
         // At least 30 days is a month for the text, even when the day of the month says 29 days
         // and some hours: 1 Mar to 31 Mar.
         int32_t months = months_between(created.date, now.date);
-        months = months < 1 ? 1 : months;
+        months = int32_max(months, 1);
         if (months == 1) {
             snprintf(buffer, buffer_size, "last month");
         } else if (months < 12) {
@@ -148,12 +166,18 @@ int32_t days_in_month(int32_t year, int32_t month) {
 int32_t date_to_day_number(Date date) {
     assert(date_is_valid(date));
     // Years start in March, so January and February belong to the previous year.
-    int32_t year = date.year - (date.month <= 2 ? 1 : 0);
+    int32_t year = date.year;
+    if (date.month <= 2) {
+        year--;
+    }
     assert(year >= 0); // DATE_YEAR_MIN keeps the era non-negative, so division truncates safely.
 
     int32_t era = year / 400;
     int32_t year_of_era = year - era * 400;
-    int32_t month_from_march = date.month > 2 ? date.month - 3 : date.month + 9;
+    int32_t month_from_march = date.month + 9;
+    if (date.month > 2) {
+        month_from_march = date.month - 3;
+    }
     int32_t day_of_year = (153 * month_from_march + 2) / 5 + date.day - 1;
     int32_t day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     assert(day_of_era >= 0);
@@ -171,10 +195,18 @@ Date date_from_day_number(int32_t day_number) {
         (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
     int32_t day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     int32_t month_from_march = (5 * day_of_year + 2) / 153;
-    int32_t month = month_from_march < 10 ? month_from_march + 3 : month_from_march - 9;
+    int32_t month = month_from_march - 9;
+    if (month_from_march < 10) {
+        month = month_from_march + 3;
+    }
+    // January and February belong to the year after the one that started in March.
+    int32_t year = year_of_era + era * 400;
+    if (month <= 2) {
+        year++;
+    }
 
     Date date = {
-        .year = year_of_era + era * 400 + (month <= 2 ? 1 : 0),
+        .year = year,
         .month = month,
         .day = day_of_year - (153 * month_from_march + 2) / 5 + 1,
     };
@@ -325,7 +357,9 @@ static bool is_leap_year(int32_t year) {
     return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
 }
 
-// Parses exactly digit_count ASCII digits. Avoids strtol, which accepts signs and spaces.
+/**
+ * Parses exactly digit_count ASCII digits. Avoids strtol, which accepts signs and spaces.
+ */
 static bool parse_digits(const char *text, int32_t digit_count, int32_t *number) {
     assert(digit_count > 0);
     assert(digit_count <= 4); // Keeps the result far from int32_t overflow.
