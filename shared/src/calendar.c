@@ -192,6 +192,18 @@ int32_t date_weekday(Date date) {
     return weekday;
 }
 
+int32_t date_iso_week(Date date) {
+    assert(date_is_valid(date));
+    // The week belongs to the year its Thursday is in, and counts from that year's first one.
+    const int32_t thursday = date_to_day_number(date) - date_weekday(date) + 3;
+    const Date thursday_date = date_from_day_number(thursday);
+    const int32_t year_start = date_to_day_number((Date){ thursday_date.year, 1, 1 });
+    const int32_t week = (thursday - year_start) / 7 + 1;
+    assert(week >= 1);
+    assert(week <= 53);
+    return week;
+}
+
 Date date_add_days(Date date, int32_t days) {
     assert(date_is_valid(date));
     Date result = date_from_day_number(date_to_day_number(date) + days);

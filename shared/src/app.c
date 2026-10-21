@@ -27,6 +27,9 @@ enum {
     GRID_HEIGHT_PERCENT_PORTRAIT = 46,
     HEADER_HEIGHT_PIXELS = 40,
     WEEKDAY_HEIGHT_PIXELS = 32,
+    // Left of the month view's day cells, for each week's number: "53" and the "Wk" above them
+    // in the small font, with room to spare.
+    WEEK_NUMBER_GUTTER_WIDTH_PIXELS = 32,
     STATUS_HEIGHT_PIXELS = 28,
     PANEL_WIDTH_PIXELS = 400,
     BUTTON_HEIGHT_PIXELS = 36,
@@ -463,6 +466,9 @@ typedef struct Layout {
     Rectangle header;
     Rectangle range_bar;  // The Month/Week/Day selector; empty when not shown
     Rectangle weekdays;
+    // The week numbers left of the month's rows, with the day cells starting after them at
+    // grid.x; empty in a week or day.
+    Rectangle week_numbers;
     Rectangle grid;       // The day cells; in a week or day, the row above the timeline
     // The hours of a week or day below the day cells, with the hour labels in a gutter at the
     // left, so that the days start at grid.x; empty in a month.
@@ -515,6 +521,7 @@ static Date grid_first_date(Date month);
 static void draw_header(App *app, const Layout *layout);
 static void draw_weekdays(const Fonts *fonts, const Layout *layout, Date first);
 static void draw_grid(App *app, const Layout *layout);
+static void draw_week_numbers(const App *app, const Layout *layout);
 static void draw_grid_selection(const App *app, const Layout *layout, int32_t first_day);
 static void draw_timeline(App *app, const Layout *layout, int32_t first_day);
 static void draw_timeline_hours(const App *app, const Layout *layout, float top);
@@ -1301,6 +1308,17 @@ static void layout_set_grid(Layout *layout, int32_t range, int32_t untimed_count
     assert(layout->columns * layout->rows == range_day_count(range));
     if (range != RANGE_MONTH) {
         layout_set_grid_timeline(layout, untimed_count);
+    } else {
+        // Cut from the left of the grid and of the weekday names, so that each day stays above
+        // its column, as the timeline's gutter does.
+        const float gutter = (float)WEEK_NUMBER_GUTTER_WIDTH_PIXELS;
+        layout->week_numbers = (Rectangle){ layout->grid.x, layout->grid.y, gutter,
+                                            layout->grid.height };
+        layout->grid.x += gutter;
+        layout->grid.width -= gutter;
+        layout->weekdays.x += gutter;
+        layout->weekdays.width -= gutter;
+        assert(layout->grid.width > 0.0f);
     }
     layout->cell_width = layout->grid.width / (float)layout->columns;
     layout->cell_height = layout->grid.height / (float)layout->rows;
@@ -1429,6 +1447,12 @@ static void range_title(const App *app, char *buffer, size_t buffer_size) {
             snprintf(buffer, buffer_size, "%" PRId32 " %s %" PRId32 " - %" PRId32 " %s %" PRId32,
                      first.day, month_short_name(first.month), first.year, last.day,
                      month_short_name(last.month), last.year);
+        }
+        // The week's number after its dates, as calendar apps show it; the first day is a Monday.
+        {
+            const size_t length = strlen(buffer);
+            snprintf(buffer + length, buffer_size - length, ", week %" PRId32,
+                     date_iso_week(first));
         }
         return;
     case RANGE_DAY:
@@ -1576,8 +1600,34 @@ static void draw_grid(App *app, const Layout *layout) {
     if (layout->timeline.height > 0.0f) {
         draw_timeline(app, layout, first_day);
     }
+    draw_week_numbers(app, layout);
     // Last, so that neither the cells nor the timeline cover it.
     draw_grid_selection(app, layout, first_day);
+}
+
+// The number of each week of the month view left of its row, dimmed so that the days stand out,
+// with "Wk" above them. The numbers are the ISO 8601 ones, as the Monday-first weeks are.
+static void draw_week_numbers(const App *app, const Layout *layout) {
+    if (layout->week_numbers.width <= 0.0f) {
+        return;
+    }
+    assert(layout->rows > 1);
+    const Color color = style_color(TEXT_COLOR_DISABLED);
+    draw_text_centered(&app->fonts.small, "Wk",
+                       (Rectangle){ layout->week_numbers.x, layout->weekdays.y,
+                                    layout->week_numbers.width, layout->weekdays.height },
+                       color);
+    for (int32_t row = 0; row < layout->rows; row++) {
+        const Date monday = date_add_days(app->visible_first, row * GRID_COLUMN_COUNT);
+        assert(date_weekday(monday) == 0);
+        char number[4];
+        snprintf(number, sizeof(number), "%" PRId32, date_iso_week(monday));
+        // As tall as the day number's line in the row's first cell, so that they read together.
+        const Rectangle line = { layout->week_numbers.x,
+                                 layout->grid.y + (float)row * layout->cell_height + 7,
+                                 layout->week_numbers.width, (float)TEXT_SIZE_PIXELS };
+        draw_text_centered(&app->fonts.small, number, line, color);
+    }
 }
 
 // An accent outline around the selected day; in a week or day, down through its hours too.

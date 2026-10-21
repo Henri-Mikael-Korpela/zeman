@@ -49,6 +49,10 @@ Date date_from_day_number(int32_t day_number);
 // 0 = Monday ... 6 = Sunday.
 int32_t date_weekday(Date date);
 Date date_add_days(Date date, int32_t days);
+// The ISO 8601 week number, 1 ... 53, which the weeks of the Monday-first calendar follow: week 1
+// is the week with the year's first Thursday, so a week at the turn of the year may be week 52
+// or 53 of the old year, or week 1 of the new.
+int32_t date_iso_week(Date date);
 // The day is clamped to the length of the target month.
 Date date_add_months(Date date, int32_t months);
 // Parses exactly "YYYY-MM-DD". Returns false for malformed or impossible dates.
