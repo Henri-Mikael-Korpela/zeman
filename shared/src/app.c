@@ -92,6 +92,9 @@ enum {
     TIMELINE_MARK_ZOOM = 4,
     // The magnifier's circle: about half an hour either side of its middle at its scale.
     TIMELINE_MARK_ZOOM_RADIUS_PIXELS = 90,
+    // How far into an item's block from its top or bottom a press drags that edge rather than
+    // the whole item. The shortest block is 24 pixels, which leaves its middle 12 to move it by.
+    TIMELINE_EDGE_GRAB_PIXELS = 6,
     // Half the length of the line that shows, before a press, where a block would start:
     // short, so that it marks a point in time without hiding the items under it.
     TIMELINE_MARK_HOVER_HALF_PIXELS = 28,
@@ -358,6 +361,33 @@ typedef struct Minute_Range {
     int32_t minute_bottom;
 } Minute_Range;
 
+// The part of an item's block on the timeline the pointer is on: an edge, which a drag moves
+// to change that time, or the rest, which a drag moves to change the item's time or day.
+typedef enum Block_Part {
+    BLOCK_PART_NONE,
+    BLOCK_PART_TOP,
+    BLOCK_PART_BOTTOM,
+    BLOCK_PART_MIDDLE,
+} Block_Part;
+
+// The item block under the pointer on the timeline, found before anything there handles input.
+typedef struct Timeline_Hit {
+    int64_t event_id;    // 0 when the pointer is over no block
+    int32_t day_number;  // Day of the column the block is in
+    int32_t part;        // Block_Part
+} Timeline_Hit;
+
+// An item dragged on the timeline by an edge, to change that time, or by the rest, to move it.
+// Saved on release; until then only a preview shows where it goes.
+typedef struct Timeline_Drag {
+    int64_t event_id;    // 0 when nothing is dragged
+    float press_minute;  // Minute of day under the pointer at the press, not snapped
+    float press_y;       // Pointer y at the press, in layout pixels
+    int32_t press_day;   // Day of the column the press was in
+    int32_t part;        // Block_Part pressed
+    bool moved;          // Moved far enough to drag; a press that does not is a click
+} Timeline_Drag;
+
 // A block the user draws on the timeline with the mouse to make an event or task at its times.
 // It belongs to the day the press began on, whichever way the pointer goes after.
 typedef struct Timeline_Mark {
@@ -394,9 +424,10 @@ typedef struct App {
     Timeline_Mark timeline_mark;
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
-    // Set during app_frame when the pointer is over an item a click selects or opens, so that
-    // the desktop shows a hand there; see app_pointer_over_item.
-    bool pointer_over_item;
+    Timeline_Hit timeline_hit;
+    Timeline_Drag timeline_drag;
+    // Set during app_frame for what the pointer is over or dragging; see app_cursor.
+    int32_t cursor;
     // The focused item was just chosen in the calendar: the panel scrolls its card into sight.
     bool panel_reveal_focused;
     bool events_truncated;
@@ -512,8 +543,22 @@ static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float 
 static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute, Minute_Range range,
                                          Color color);
 static float circle_half_width(float radius, float offset_y);
-static int64_t draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
-                                 bool hovered);
+static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered);
+static Rectangle timeline_item_block(Rectangle day, const Timeline_Item *item);
+static int32_t timeline_day_items(const App *app, int32_t day_number, Timeline_Item *items);
+static Timeline_Hit timeline_hit_test(const App *app, const Layout *layout, float top,
+                                      int32_t first_day);
+static void timeline_drag_update(App *app, const Layout *layout, float top);
+static void timeline_drag_finish(App *app, const Layout *layout, float top);
+static Event timeline_drag_result(const Event *event, const Timeline_Drag *drag,
+                                  float pointer_minute, int32_t pointer_day, int32_t step);
+static int32_t timeline_drag_step(void);
+static Minute_Range event_time_range(const Event *event);
+static int32_t minute_snap(float minute, int32_t step_minutes);
+static int32_t timeline_column_nearest(const Layout *layout, float pointer_x);
+static void timeline_cursor_update(App *app);
+static void draw_timeline_drag(const App *app, const Layout *layout, float top,
+                               int32_t first_day);
 static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_t busy_bottom,
                                          bool hovered);
 static void draw_timeline_item(const App *app, const Event *event, Rectangle block,
@@ -662,7 +707,7 @@ void app_frame(App *app, Rectangle area) {
     // Layout pixels start at the area's corner: mouse positions, drawing and scissor
     // rectangles are all moved and scaled the same way, so raygui works unchanged.
     app->fonts.origin = (Vector2){ area.x, area.y };
-    app->pointer_over_item = false;
+    app->cursor = APP_CURSOR_DEFAULT;
     SetMouseScale(1.0f / scale, 1.0f / scale);
     Layout layout = layout_compute(area.width / scale, area.height / scale, app->form.open,
                                    app->range, app_untimed_count_max(app));
@@ -752,9 +797,11 @@ void app_discard_edits(App *app) {
     app->events_stale = true;
 }
 
-bool app_pointer_over_item(const App *app) {
+App_Cursor app_cursor(const App *app) {
     assert(app->created);
-    return app->pointer_over_item;
+    assert(app->cursor >= APP_CURSOR_DEFAULT);
+    assert(app->cursor <= APP_CURSOR_MOVE);
+    return (App_Cursor)app->cursor;
 }
 
 bool app_text_input_active(const App *app) {
@@ -833,8 +880,10 @@ static void app_handle_keys(App *app, const Layout *layout) {
             form_close(&app->form);
         }
         app->event_delete_id = 0;
-        // A block being drawn is dropped; the release then does nothing.
+        // A block being drawn, or an item being dragged, is dropped; the release then does
+        // nothing.
         app->timeline_mark = (Timeline_Mark){ .pressed = false };
+        app->timeline_drag = (Timeline_Drag){ .event_id = 0 };
         return;
     }
     if (app->form.field_active != FORM_FIELD_NONE) {
@@ -1559,7 +1608,10 @@ static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
     scroll_update(&app->timeline_scroll, timeline, (float)TIMELINE_HEIGHT_PIXELS, app->touch);
     // Where 00:00 is: above the timeline while it is scrolled down.
     const float top = timeline.y - app->timeline_scroll.offset_pixels;
+    app->timeline_hit = timeline_hit_test(app, layout, top, first_day);
     if (!app->touch) {
+        // Before the marking, so that a press on an item drags it rather than drawing a block.
+        timeline_drag_update(app, layout, top);
         timeline_mark_update(app, layout, top, first_day);
     }
     // Every drawing below, and the scissor rectangles of the labels, stays within the timeline.
@@ -1575,19 +1627,17 @@ static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
             app_select(app, date_from_day_number(first_day + column));
         }
         Rectangle day = { area.x, top, area.width, (float)TIMELINE_HEIGHT_PIXELS };
-        const int64_t item_id = draw_timeline_day(app, day, first_day + column, hovered);
-        if (item_id != 0) {
-            app->pointer_over_item = true;
-        }
-        // After app_select above, which clears the focus; a drag from the item draws a block
-        // as anywhere else, while the press alone selects it.
-        if (item_id != 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            app_focus_item(app, item_id);
-        }
+        draw_timeline_day(app, day, first_day + column, hovered);
         DrawRectangleLinesEx(area, 1, style_color(BORDER_COLOR_NORMAL));
     }
+    // After the columns, whose press selects the day and so clears the focus.
+    if (app->timeline_hit.event_id != 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        app_focus_item(app, app->timeline_hit.event_id);
+    }
+    timeline_cursor_update(app);
     draw_timeline_hours(app, layout, top);
     draw_timeline_ghost(app, layout, top, first_day);
+    draw_timeline_drag(app, layout, top, first_day);
     // Over the items and the ghost, so that the time now is never hidden, but under the block
     // being drawn, which the user is looking at.
     draw_timeline_now(app, layout, top, first_day);
@@ -1613,7 +1663,8 @@ static void timeline_mark_update(App *app, const Layout *layout, float top, int3
     const int32_t column = timeline_column_at(layout, pointer);
     // A new press always starts afresh, even over a block left pressed when its release came
     // while the timeline was not shown, as in the month view.
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && column >= 0 && !app->form.open) {
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && column >= 0 && !app->form.open &&
+        app->timeline_hit.event_id == 0) {
         assert(column < layout->columns);
         const bool zoomed = timeline_mark_ctrl_down();
         *mark = (Timeline_Mark){
@@ -1716,6 +1767,10 @@ static bool timeline_mark_ctrl_down(void) {
 // they never promise a block the press would not draw.
 static bool timeline_mark_can_start(const App *app) {
     if (app->timeline_mark.pressed) {
+        return false;
+    }
+    // A press there would drag an item rather than draw.
+    if (app->timeline_drag.event_id != 0 || app->timeline_hit.event_id != 0) {
         return false;
     }
     return !app->form.open;
@@ -2050,17 +2105,13 @@ static void draw_timeline_hours(const App *app, const Layout *layout, float top)
 }
 
 // day is the column from 00:00 to 24:00, which may reach outside the timeline that clips it.
-// Items that overlap share the day's width side by side. hovered says the pointer is over the
-// part of the day in sight. Returns the id of the item whose block the pointer is over, or 0.
-static int64_t draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
-                                 bool hovered) {
+// Items that overlap share the day's width side by side.
+static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered) {
     assert(day.width > 0.0f);
     assert(day.height == (float)TIMELINE_HEIGHT_PIXELS);
     // On the stack, because it is needed only while one day is drawn; about 10 KB.
     Timeline_Item items[EVENT_COUNT_MAX] = { 0 };
-    const int32_t count = timeline_items_collect(app, day_number, items);
-    timeline_items_sort(items, count);
-    timeline_items_assign_lanes(items, count);
+    const int32_t count = timeline_day_items(app, day_number, items);
 
     // The busy part of the day runs from the first item's start to the last one's end; sorted
     // by start, the first item starts first, but any item may end last.
@@ -2075,30 +2126,295 @@ static int64_t draw_timeline_day(const App *app, Rectangle day, int32_t day_numb
         }
     }
     draw_timeline_day_background(day, busy_top, busy_bottom, hovered);
-    // Blocks are drawn in order, so the last one under the pointer is the one on top.
-    int64_t hovered_id = 0;
+    for (int32_t i = 0; i < count; i++) {
+        draw_timeline_item(app, &app->events[items[i].event_index],
+                           timeline_item_block(day, &items[i]), day_number);
+    }
+}
 
+// The day's timed items in drawing order, with their lanes: the one layout that both drawing
+// and finding the block under the pointer use, so that they always agree. Returns how many.
+static int32_t timeline_day_items(const App *app, int32_t day_number, Timeline_Item *items) {
+    const int32_t count = timeline_items_collect(app, day_number, items);
+    timeline_items_sort(items, count);
+    timeline_items_assign_lanes(items, count);
+    return count;
+}
+
+// Where an item's block is in its day, from 00:00 at day.y.
+static Rectangle timeline_item_block(Rectangle day, const Timeline_Item *item) {
+    assert(item->lane < item->lane_count);
     const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
     // Kept free at the sides of the day, so that items do not touch the day's borders.
     const float inset = 2.0f;
+    const float lane_width = (day.width - 2 * inset) / (float)item->lane_count;
+    // One pixel less each way, so that neighbouring blocks of one color stay apart.
+    return (Rectangle){
+        day.x + inset + (float)item->lane * lane_width,
+        day.y + (float)item->minute_top * pixels_per_minute,
+        lane_width - 1,
+        (float)(item->minute_bottom - item->minute_top) * pixels_per_minute - 1,
+    };
+}
+
+// The block under the pointer and which part of it, within the timeline's visible part only,
+// since blocks scrolled out of it are clipped away. Blocks are drawn in order, so the last one
+// under the pointer is the one on top.
+static Timeline_Hit timeline_hit_test(const App *app, const Layout *layout, float top,
+                                      int32_t first_day) {
+    Timeline_Hit hit = { .event_id = 0, .day_number = 0, .part = BLOCK_PART_NONE };
+    const Vector2 pointer = GetMousePosition();
+    const int32_t column = timeline_column_at(layout, pointer);
+    if (column < 0) {
+        return hit;
+    }
+    const Rectangle day = { layout->grid.x + (float)column * layout->cell_width, top,
+                            layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
+    // On the stack, as when the day is drawn; about 10 KB.
+    Timeline_Item items[EVENT_COUNT_MAX] = { 0 };
+    const int32_t count = timeline_day_items(app, first_day + column, items);
+    const float grab = (float)TIMELINE_EDGE_GRAB_PIXELS;
     for (int32_t i = 0; i < count; i++) {
-        const Timeline_Item *item = &items[i];
-        assert(item->lane < item->lane_count);
-        float lane_width = (day.width - 2 * inset) / (float)item->lane_count;
-        // One pixel less each way, so that neighbouring blocks of one color stay apart.
-        Rectangle block = { day.x + inset + (float)item->lane * lane_width,
-                            day.y + (float)item->minute_top * pixels_per_minute,
-                            lane_width - 1,
-                            (float)(item->minute_bottom - item->minute_top) * pixels_per_minute -
-                                1 };
-        const Event *event = &app->events[item->event_index];
-        draw_timeline_item(app, event, block, day_number);
-        // Only within the timeline's visible part: blocks scrolled out of it are clipped away.
-        if (hovered && CheckCollisionPointRec(GetMousePosition(), block)) {
-            hovered_id = event->id;
+        const Rectangle block = timeline_item_block(day, &items[i]);
+        if (!CheckCollisionPointRec(pointer, block)) {
+            continue;
+        }
+        hit.event_id = app->events[items[i].event_index].id;
+        hit.day_number = first_day + column;
+        if (pointer.y < block.y + grab) {
+            hit.part = BLOCK_PART_TOP;
+        } else if (pointer.y >= block.y + block.height - grab) {
+            hit.part = BLOCK_PART_BOTTOM;
+        } else {
+            hit.part = BLOCK_PART_MIDDLE;
         }
     }
-    return hovered_id;
+    return hit;
+}
+
+// Starts a drag at a press on an item's block and saves it at the release. A press that does
+// not move stays a click, which selects the item. Not while a form is open, which may hold the
+// item's old times and would save them back over the drag.
+static void timeline_drag_update(App *app, const Layout *layout, float top) {
+    Timeline_Drag *drag = &app->timeline_drag;
+    const Timeline_Hit *hit = &app->timeline_hit;
+    const Vector2 pointer = GetMousePosition();
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && hit->event_id != 0 && !app->form.open) {
+        assert(hit->part != BLOCK_PART_NONE);
+        *drag = (Timeline_Drag){
+            .event_id = hit->event_id,
+            .press_minute = timeline_minute_at(pointer.y, top),
+            .press_y = pointer.y,
+            .press_day = hit->day_number,
+            .part = hit->part,
+            .moved = false,
+        };
+        return;
+    }
+    if (drag->event_id == 0) {
+        return;
+    }
+    const int32_t first_day = date_to_day_number(app->visible_first);
+    const int32_t pointer_day = first_day + timeline_column_nearest(layout, pointer.x);
+    if (fabsf(pointer.y - drag->press_y) > (float)LIST_DRAG_THRESHOLD_PIXELS) {
+        drag->moved = true;
+    }
+    // Only the middle moves an item to another day; an edge changes a time on its own day.
+    if (drag->part == BLOCK_PART_MIDDLE && pointer_day != drag->press_day) {
+        drag->moved = true;
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        if (drag->moved) {
+            timeline_drag_finish(app, layout, top);
+        }
+        *drag = (Timeline_Drag){ .event_id = 0 };
+        return;
+    }
+    // A release this frame never seen, as when the window lost the pointer, ends the drag.
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        *drag = (Timeline_Drag){ .event_id = 0 };
+    }
+}
+
+// Saves the item at the drag's place, after the checks the form makes, and selects its new day.
+// A repeating item moves as a whole, as editing it does.
+static void timeline_drag_finish(App *app, const Layout *layout, float top) {
+    const Timeline_Drag *drag = &app->timeline_drag;
+    assert(drag->event_id != 0);
+    assert(drag->moved);
+    // Gone when a reload meanwhile no longer has it, as after a phone deleted it.
+    const Event *event = app_event_find(app, drag->event_id);
+    if (event == NULL) {
+        return;
+    }
+    const Vector2 pointer = GetMousePosition();
+    const int32_t pointer_day = date_to_day_number(app->visible_first) +
+                                timeline_column_nearest(layout, pointer.x);
+    const Event moved = timeline_drag_result(event, drag, timeline_minute_at(pointer.y, top),
+                                             pointer_day, timeline_drag_step());
+    const char *mistake = form_parse_order(&moved);
+    if (mistake != NULL) {
+        snprintf(app->status, sizeof(app->status), "Not moved: %s", mistake);
+        return;
+    }
+    if (!backend_update(app->backend, &moved)) {
+        snprintf(app->status, sizeof(app->status), "Not moved: %s", backend_error(app->backend));
+        return;
+    }
+    app->events_stale = true;
+    const int32_t day_delta = drag->part == BLOCK_PART_MIDDLE ? pointer_day - drag->press_day : 0;
+    app_select(app, date_from_day_number(drag->press_day + day_delta));
+    app->event_focused_id = moved.id;
+    snprintf(app->status, sizeof(app->status), "Updated \"%s\".", moved.title);
+}
+
+// The item as the drag would leave it. An edge sets that time to the step nearest the pointer,
+// keeping at least one step before the other; the middle shifts both times, keeping the length,
+// and the dates by the days moved across. A time the item lacks stays missing when it is moved,
+// but an edge dragged sets both times, as the block the user sized has both.
+static Event timeline_drag_result(const Event *event, const Timeline_Drag *drag,
+                                  float pointer_minute, int32_t pointer_day, int32_t step) {
+    assert(event_is_timed(event));
+    assert(step > 0);
+    const Minute_Range range = event_time_range(event);
+    const float delta = pointer_minute - drag->press_minute;
+    // The last minute of the day stands for midnight, as for a drawn block.
+    const int32_t minute_last = MINUTES_PER_DAY - 1;
+    Event result = *event;
+    switch ((Block_Part)drag->part) {
+    case BLOCK_PART_TOP: {
+        int32_t top = minute_snap((float)range.minute_top + delta, step);
+        top = top > range.minute_bottom - step ? range.minute_bottom - step : top;
+        result.start_minute = top < 0 ? 0 : top;
+        result.end_minute = range.minute_bottom;
+        break;
+    }
+    case BLOCK_PART_BOTTOM: {
+        int32_t bottom = minute_snap((float)range.minute_bottom + delta, step);
+        bottom = bottom < range.minute_top + step ? range.minute_top + step : bottom;
+        result.start_minute = range.minute_top;
+        result.end_minute = bottom > minute_last ? minute_last : bottom;
+        break;
+    }
+    case BLOCK_PART_MIDDLE: {
+        const int32_t length = range.minute_bottom - range.minute_top;
+        int32_t top = minute_snap((float)range.minute_top + delta, step);
+        top = top > minute_last - length ? minute_last - length : top;
+        top = top < 0 ? 0 : top;
+        result.start_minute = event->start_minute == TIME_NONE ? TIME_NONE : top;
+        result.end_minute = event->end_minute == TIME_NONE ? TIME_NONE : top + length;
+        const int32_t day_delta = pointer_day - drag->press_day;
+        result.start_date = date_add_days(event->start_date, day_delta);
+        result.end_date = date_add_days(event->end_date, day_delta);
+        break;
+    }
+    case BLOCK_PART_NONE:
+        assert(false); // A drag always begins on a part of a block.
+        break;
+    }
+    assert(result.id == event->id);
+    return result;
+}
+
+// As when drawing a block: quarter hours, or five minutes with Ctrl held.
+static int32_t timeline_drag_step(void) {
+    return timeline_mark_ctrl_down() ? TIMELINE_MARK_ZOOM_STEP_MINUTES
+                                     : TIMELINE_MARK_STEP_MINUTES;
+}
+
+// The item's real times on its day. A missing time is the other one an hour away, as the block
+// is drawn; unlike the block, a short item is not lengthened, so a drag keeps its true length.
+static Minute_Range event_time_range(const Event *event) {
+    assert(event_is_timed(event));
+    int32_t top = event->start_minute;
+    int32_t bottom = event->end_minute;
+    if (top == TIME_NONE) {
+        top = bottom - TIMELINE_ITEM_MINUTES_DEFAULT;
+    }
+    if (bottom == TIME_NONE) {
+        bottom = top + TIMELINE_ITEM_MINUTES_DEFAULT;
+    }
+    top = top < 0 ? 0 : top;
+    bottom = bottom > MINUTES_PER_DAY - 1 ? MINUTES_PER_DAY - 1 : bottom;
+    assert(top <= bottom);
+    return (Minute_Range){ .minute_top = top, .minute_bottom = bottom };
+}
+
+// The whole step nearest to minute.
+static int32_t minute_snap(float minute, int32_t step_minutes) {
+    assert(step_minutes > 0);
+    return (int32_t)roundf(minute / (float)step_minutes) * step_minutes;
+}
+
+// The day column nearest the pointer, so that a drag past the first or last day stays on it.
+static int32_t timeline_column_nearest(const Layout *layout, float pointer_x) {
+    assert(layout->columns > 0);
+    const float position = (pointer_x - layout->grid.x) / layout->cell_width;
+    if (position < 0.0f) {
+        return 0;
+    }
+    const int32_t column = (int32_t)position;
+    return column < layout->columns ? column : layout->columns - 1;
+}
+
+// Arrows over an item's edges, which a drag resizes, and while dragging; a hand over the rest,
+// which a click selects. Without a drag to make, as on a touch screen or while a form is open,
+// every part is just clicked.
+static void timeline_cursor_update(App *app) {
+    const Timeline_Drag *drag = &app->timeline_drag;
+    if (drag->event_id != 0) {
+        if (drag->part != BLOCK_PART_MIDDLE) {
+            app->cursor = APP_CURSOR_RESIZE;
+        } else {
+            app->cursor = drag->moved ? APP_CURSOR_MOVE : APP_CURSOR_HAND;
+        }
+        return;
+    }
+    const Timeline_Hit *hit = &app->timeline_hit;
+    if (hit->event_id == 0) {
+        return;
+    }
+    const bool draggable = !app->touch && !app->form.open;
+    const bool edge = hit->part == BLOCK_PART_TOP || hit->part == BLOCK_PART_BOTTOM;
+    app->cursor = draggable && edge ? APP_CURSOR_RESIZE : APP_CURSOR_HAND;
+}
+
+// Where the dragged item will go: a block in its color with an accent outline and its new
+// times, in the column of its new day, over the item's old place, which stays until it is saved.
+static void draw_timeline_drag(const App *app, const Layout *layout, float top,
+                               int32_t first_day) {
+    const Timeline_Drag *drag = &app->timeline_drag;
+    if (drag->event_id == 0 || !drag->moved) {
+        return;
+    }
+    const Event *event = app_event_find(app, drag->event_id);
+    if (event == NULL) {
+        return;
+    }
+    const Vector2 pointer = GetMousePosition();
+    const int32_t pointer_day = first_day + timeline_column_nearest(layout, pointer.x);
+    const Event moved = timeline_drag_result(event, drag, timeline_minute_at(pointer.y, top),
+                                             pointer_day, timeline_drag_step());
+    const int32_t day_delta = drag->part == BLOCK_PART_MIDDLE ? pointer_day - drag->press_day : 0;
+    const int32_t column = drag->press_day + day_delta - first_day;
+    if (column < 0 || column >= layout->columns) {
+        return;
+    }
+    const Rectangle day = { layout->grid.x + (float)column * layout->cell_width, top,
+                            layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
+    // The same height the saved item will be drawn at, across the whole day.
+    const Timeline_Item item = timeline_item_make(&moved, 0);
+    const Rectangle block = timeline_item_block(day, &item);
+    DrawRectangleRec(block, Fade(event_color(event, app_now(app)), 0.75f));
+    DrawRectangleLinesEx(block, 2, style_color(BORDER_COLOR_PRESSED));
+    const Minute_Range range = event_time_range(&moved);
+    char start[TIME_TEXT_SIZE];
+    char end[TIME_TEXT_SIZE];
+    time_format(range.minute_top, start, sizeof(start));
+    time_format(range.minute_bottom, end, sizeof(end));
+    char label[2 * TIME_TEXT_SIZE + 4];
+    snprintf(label, sizeof(label), "%s - %s", start, end);
+    draw_text(&app->fonts.small_strong, label, block.x + 6, block.y + 4, WHITE);
 }
 
 // The free hours before the day's first item and after its last are darker, so that the busy
@@ -2320,7 +2636,7 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
     draw_grid_cell_creation_markers(app, cell, day_number, focused);
     const int64_t item_id = draw_grid_cell_events(app, cell, day_number, column);
     if (item_id != 0) {
-        app->pointer_over_item = true;
+        app->cursor = APP_CURSOR_HAND;
     }
     // A press selects the day, and the item under it too, whose card the panel then rings.
     if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -2762,7 +3078,7 @@ static void draw_panel_events_list(App *app, Rectangle list) {
             continue;
         }
         if (!locked && CheckCollisionPointRec(GetMousePosition(), card)) {
-            app->pointer_over_item = true;
+            app->cursor = APP_CURSOR_HAND;
         }
         // The card shows this day's occurrence, so its dates are for this day.
         Event occurrence = event_occurrence_at(event, start_day);

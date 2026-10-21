@@ -105,9 +105,9 @@ typedef struct Desktop {
     Redraw redraw;
     View view;
     bool client_mode;  // Without a database, server or navigation; see main
-    // The cursor shown is the hand, not the arrow. Kept so that it changes only when it must:
-    // raylib creates a new system cursor on every SetMouseCursor.
-    bool cursor_hand;
+    // The App_Cursor shown. Kept so that it changes only when it must: raylib creates a new
+    // system cursor on every SetMouseCursor.
+    int32_t cursor;
     char info[INFO_SIZE];
     char database_path[SETTINGS_PATH_SIZE];  // The database in use, or empty when none is open
 } Desktop;
@@ -131,6 +131,7 @@ static void desktop_frame(Desktop *desktop, App *app);
 static void desktop_draw(Desktop *desktop, App *app, float width, float height);
 static void desktop_window_refresh(GLFWwindow *window);
 static bool input_is_active(void);
+static int desktop_cursor_shape(App_Cursor cursor);
 static View navigation_draw(const App *app, View current, Rectangle area);
 static void info_update(const Server *server, App *app);
 
@@ -359,12 +360,29 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height) 
         assert(false); // Not a view.
         break;
     }
-    // A hand over the calendar's items, which a click selects or opens, as links show.
-    const bool hand = desktop->view == VIEW_CALENDAR && app_pointer_over_item(app);
-    if (hand != desktop->cursor_hand) {
-        SetMouseCursor(hand ? MOUSE_CURSOR_POINTING_HAND : MOUSE_CURSOR_DEFAULT);
-        desktop->cursor_hand = hand;
+    const App_Cursor cursor = desktop->view == VIEW_CALENDAR ? app_cursor(app)
+                                                              : APP_CURSOR_DEFAULT;
+    if ((int32_t)cursor != desktop->cursor) {
+        SetMouseCursor(desktop_cursor_shape(cursor));
+        desktop->cursor = (int32_t)cursor;
     }
+}
+
+// The system cursor for each of the app's: a hand as links show, and the arrows that window
+// systems use for resizing and moving.
+static int desktop_cursor_shape(App_Cursor cursor) {
+    switch (cursor) {
+    case APP_CURSOR_DEFAULT:
+        return MOUSE_CURSOR_DEFAULT;
+    case APP_CURSOR_HAND:
+        return MOUSE_CURSOR_POINTING_HAND;
+    case APP_CURSOR_RESIZE:
+        return MOUSE_CURSOR_RESIZE_NS;
+    case APP_CURSOR_MOVE:
+        return MOUSE_CURSOR_RESIZE_ALL;
+    }
+    assert(false); // Every App_Cursor is handled above.
+    return MOUSE_CURSOR_DEFAULT;
 }
 
 // Draws and shows a frame at the window's current size, from inside the resize loop. Not

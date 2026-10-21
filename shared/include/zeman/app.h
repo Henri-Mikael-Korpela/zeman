@@ -60,9 +60,16 @@ void app_set_status(App *app, const char *status);
 // waiting for confirmation and the focused item. For when the data underneath is replaced, as
 // when the desktop switches to another database, where the same ids are other items.
 void app_discard_edits(App *app);
-// True after app_frame when the pointer is over an item that a click selects or opens, in the
-// calendar or on the panel, so that the desktop can show a hand cursor there.
-bool app_pointer_over_item(const App *app);
+// The pointer's shape for what is under it, which the desktop shows; a touch screen has none.
+typedef enum App_Cursor {
+    APP_CURSOR_DEFAULT,
+    APP_CURSOR_HAND,    // Over an item that a click selects or opens
+    APP_CURSOR_RESIZE,  // Over, or dragging, the top or bottom edge of an item on the hours
+    APP_CURSOR_MOVE,    // Dragging an item on the hours to another time or day
+} App_Cursor;
+
+// The cursor for the pointer's place after app_frame.
+App_Cursor app_cursor(const App *app);
 // True while a form field is being typed into, so that Android can show its keyboard.
 bool app_text_input_active(const App *app);
 // With input off, app_frame still draws and loads but ignores the pointer and keys, for example
