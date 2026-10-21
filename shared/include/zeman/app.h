@@ -60,6 +60,9 @@ void app_set_status(App *app, const char *status);
 // waiting for confirmation and the focused item. For when the data underneath is replaced, as
 // when the desktop switches to another database, where the same ids are other items.
 void app_discard_edits(App *app);
+// True after app_frame when the pointer is over an item that a click selects or opens, in the
+// calendar or on the panel, so that the desktop can show a hand cursor there.
+bool app_pointer_over_item(const App *app);
 // True while a form field is being typed into, so that Android can show its keyboard.
 bool app_text_input_active(const App *app);
 // With input off, app_frame still draws and loads but ignores the pointer and keys, for example

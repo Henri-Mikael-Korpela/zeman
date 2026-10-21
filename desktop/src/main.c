@@ -105,6 +105,9 @@ typedef struct Desktop {
     Redraw redraw;
     View view;
     bool client_mode;  // Without a database, server or navigation; see main
+    // The cursor shown is the hand, not the arrow. Kept so that it changes only when it must:
+    // raylib creates a new system cursor on every SetMouseCursor.
+    bool cursor_hand;
     char info[INFO_SIZE];
     char database_path[SETTINGS_PATH_SIZE];  // The database in use, or empty when none is open
 } Desktop;
@@ -355,6 +358,12 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height) 
     case VIEW_COUNT:
         assert(false); // Not a view.
         break;
+    }
+    // A hand over the calendar's items, which a click selects or opens, as links show.
+    const bool hand = desktop->view == VIEW_CALENDAR && app_pointer_over_item(app);
+    if (hand != desktop->cursor_hand) {
+        SetMouseCursor(hand ? MOUSE_CURSOR_POINTING_HAND : MOUSE_CURSOR_DEFAULT);
+        desktop->cursor_hand = hand;
     }
 }
 

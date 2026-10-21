@@ -394,6 +394,11 @@ typedef struct App {
     Timeline_Mark timeline_mark;
     Form form;
     bool events_stale;              // Reload events[] even though the month is unchanged
+    // Set during app_frame when the pointer is over an item a click selects or opens, so that
+    // the desktop shows a hand there; see app_pointer_over_item.
+    bool pointer_over_item;
+    // The focused item was just chosen in the calendar: the panel scrolls its card into sight.
+    bool panel_reveal_focused;
     bool events_truncated;
     bool touch;                     // See App_Config
     bool input_enabled;             // See app_set_input_enabled
@@ -507,7 +512,8 @@ static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float 
 static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute, Minute_Range range,
                                          Color color);
 static float circle_half_width(float radius, float offset_y);
-static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered);
+static int64_t draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
+                                 bool hovered);
 static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_t busy_bottom,
                                          bool hovered);
 static void draw_timeline_item(const App *app, const Event *event, Rectangle block,
@@ -522,14 +528,15 @@ static int32_t timeline_lane_find(const int32_t *lane_bottoms, int32_t lane_coun
 static void timeline_items_set_lane_count(Timeline_Item *items, int32_t first_index,
                                           int32_t end_index, int32_t lane_count);
 static const Event *focused_event_find(const App *app);
+static void app_focus_item(App *app, int64_t id);
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
                            const Event *focused);
 static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date, bool in_month);
 static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int32_t day_number,
                                             const Event *focused);
-static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_number,
-                                  int32_t column);
-static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectangle bar_slot,
+static int64_t draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_number,
+                                     int32_t column);
+static bool draw_grid_cell_event_bar(const App *app, const Event *event, Rectangle bar_slot,
                                      int32_t day_number, int32_t start_day, int32_t column);
 static void draw_event_label(const App *app, const Event *event, const char *label,
                              Rectangle area, bool done);
@@ -539,6 +546,7 @@ static void draw_tick(Rectangle area, float thickness, Color color);
 static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
 static float draw_panel_events_height(const App *app, float card_width);
+static void draw_panel_events_reveal(App *app, Rectangle list);
 static void draw_panel_events_list(App *app, Rectangle list);
 static void scroll_update(Scroll *scroll, Rectangle list, float content_height,
                           bool drag_scrolls);
@@ -654,6 +662,7 @@ void app_frame(App *app, Rectangle area) {
     // Layout pixels start at the area's corner: mouse positions, drawing and scissor
     // rectangles are all moved and scaled the same way, so raygui works unchanged.
     app->fonts.origin = (Vector2){ area.x, area.y };
+    app->pointer_over_item = false;
     SetMouseScale(1.0f / scale, 1.0f / scale);
     Layout layout = layout_compute(area.width / scale, area.height / scale, app->form.open,
                                    app->range, app_untimed_count_max(app));
@@ -741,6 +750,11 @@ void app_discard_edits(App *app) {
     app->event_delete_id = 0;
     app->event_focused_id = 0;
     app->events_stale = true;
+}
+
+bool app_pointer_over_item(const App *app) {
+    assert(app->created);
+    return app->pointer_over_item;
 }
 
 bool app_text_input_active(const App *app) {
@@ -1561,7 +1575,15 @@ static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
             app_select(app, date_from_day_number(first_day + column));
         }
         Rectangle day = { area.x, top, area.width, (float)TIMELINE_HEIGHT_PIXELS };
-        draw_timeline_day(app, day, first_day + column, hovered);
+        const int64_t item_id = draw_timeline_day(app, day, first_day + column, hovered);
+        if (item_id != 0) {
+            app->pointer_over_item = true;
+        }
+        // After app_select above, which clears the focus; a drag from the item draws a block
+        // as anywhere else, while the press alone selects it.
+        if (item_id != 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            app_focus_item(app, item_id);
+        }
         DrawRectangleLinesEx(area, 1, style_color(BORDER_COLOR_NORMAL));
     }
     draw_timeline_hours(app, layout, top);
@@ -2028,8 +2050,10 @@ static void draw_timeline_hours(const App *app, const Layout *layout, float top)
 }
 
 // day is the column from 00:00 to 24:00, which may reach outside the timeline that clips it.
-// Items that overlap share the day's width side by side.
-static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered) {
+// Items that overlap share the day's width side by side. hovered says the pointer is over the
+// part of the day in sight. Returns the id of the item whose block the pointer is over, or 0.
+static int64_t draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
+                                 bool hovered) {
     assert(day.width > 0.0f);
     assert(day.height == (float)TIMELINE_HEIGHT_PIXELS);
     // On the stack, because it is needed only while one day is drawn; about 10 KB.
@@ -2051,6 +2075,8 @@ static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
         }
     }
     draw_timeline_day_background(day, busy_top, busy_bottom, hovered);
+    // Blocks are drawn in order, so the last one under the pointer is the one on top.
+    int64_t hovered_id = 0;
 
     const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
     // Kept free at the sides of the day, so that items do not touch the day's borders.
@@ -2065,8 +2091,14 @@ static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
                             lane_width - 1,
                             (float)(item->minute_bottom - item->minute_top) * pixels_per_minute -
                                 1 };
-        draw_timeline_item(app, &app->events[item->event_index], block, day_number);
+        const Event *event = &app->events[item->event_index];
+        draw_timeline_item(app, event, block, day_number);
+        // Only within the timeline's visible part: blocks scrolled out of it are clipped away.
+        if (hovered && CheckCollisionPointRec(GetMousePosition(), block)) {
+            hovered_id = event->id;
+        }
     }
+    return hovered_id;
 }
 
 // The free hours before the day's first item and after its last are darker, so that the busy
@@ -2276,9 +2308,6 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
     // shows its days alike.
     bool in_month = app->range != RANGE_MONTH || date.month == app->events_month.month;
     bool hovered = CheckCollisionPointRec(GetMousePosition(), cell);
-    if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        app_select(app, date);
-    }
 
     Color fill = style_color(in_month ? BASE_COLOR_NORMAL : BACKGROUND_COLOR);
     if (hovered) {
@@ -2289,7 +2318,28 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
 
     draw_grid_cell_day_number(app, cell, date, in_month);
     draw_grid_cell_creation_markers(app, cell, day_number, focused);
-    draw_grid_cell_events(app, cell, day_number, column);
+    const int64_t item_id = draw_grid_cell_events(app, cell, day_number, column);
+    if (item_id != 0) {
+        app->pointer_over_item = true;
+    }
+    // A press selects the day, and the item under it too, whose card the panel then rings.
+    if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        app_select(app, date);
+        if (item_id != 0) {
+            app_focus_item(app, item_id);
+        }
+    }
+}
+
+// Makes the item the focused one, as a click on its card would, and has the panel scroll the
+// card into sight. The item occurs on the selected day, so app_sync keeps it focused.
+static void app_focus_item(App *app, int64_t id) {
+    assert(id > 0);
+    assert(app_event_find(app, id) != NULL);
+    app->event_focused_id = id;
+    // A confirmation belongs to the card it was asked on.
+    app->event_delete_id = 0;
+    app->panel_reveal_focused = true;
 }
 
 static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date, bool in_month) {
@@ -2348,15 +2398,17 @@ static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int3
     }
 }
 
-static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_number,
-                                  int32_t column) {
+// Returns the id of the item whose bar the pointer is over, or 0.
+static int64_t draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_number,
+                                     int32_t column) {
     const float slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
     float top = cell.y + CELL_TOP_LINE_PIXELS;
     int32_t slot_count =
         (int32_t)((cell.y + cell.height - CELL_BOTTOM_MARGIN_PIXELS - top) / slot_height);
     if (slot_count <= 0) {
-        return;
+        return 0;
     }
+    int64_t hovered_id = 0;
 
     int32_t overlap_count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
@@ -2385,7 +2437,9 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
             if (event_occurrence_on_day(event, day_number, &start_day)) {
                 Rectangle slot = { cell.x, top + (float)bar_index * slot_height, cell.width,
                                    EVENT_BAR_HEIGHT_PIXELS };
-                draw_grid_cell_event_bar(app, event, slot, day_number, start_day, column);
+                if (draw_grid_cell_event_bar(app, event, slot, day_number, start_day, column)) {
+                    hovered_id = event->id;
+                }
                 bar_index++;
             }
         }
@@ -2396,10 +2450,12 @@ static void draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_nu
         draw_text(&app->fonts.small, more, cell.x + 6, top + (float)bar_count * slot_height + 2,
                   style_color(TEXT_COLOR_NORMAL));
     }
+    return hovered_id;
 }
 
-// start_day is the start of the occurrence that covers day_number.
-static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectangle bar_slot,
+// start_day is the start of the occurrence that covers day_number. Returns whether the pointer
+// is over the bar.
+static bool draw_grid_cell_event_bar(const App *app, const Event *event, Rectangle bar_slot,
                                      int32_t day_number, int32_t start_day, int32_t column) {
     assert(start_day <= day_number);
     const bool task = event->kind == EVENT_KIND_TASK;
@@ -2411,10 +2467,11 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
     float left = bar_slot.x + (starts_here ? 4.0f : 0.0f);
     float right = bar_slot.x + bar_slot.width - (ends_here ? 4.0f : 0.0f);
     Rectangle bar = { left, bar_slot.y, right - left, bar_slot.height };
+    const bool hovered = CheckCollisionPointRec(GetMousePosition(), bar);
     // A problem is one day long, so it is always labelled; the problems view draws it alike.
     if (event->kind == EVENT_KIND_PROBLEM) {
         app_draw_problem_bar(app, event->title, event->tasks_done, bar);
-        return;
+        return hovered;
     }
     if (task) {
         DrawRectangleRec(bar, Fade(color, done ? TASK_DONE_FILL_ALPHA : TASK_FILL_ALPHA));
@@ -2426,12 +2483,13 @@ static void draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
 
     // Label the first day and the start of each week, where the eye starts reading a row.
     if (!starts_here && column != 0) {
-        return;
+        return hovered;
     }
     char label[TEXT_LINE_SIZE];
     // The time only where the occurrence starts; later days' bars continue it.
     event_format_label(event, starts_here, app_now(app), label, sizeof(label));
     draw_event_label(app, event, label, bar, done);
+    return hovered;
 }
 
 // An item's label on a bar-high line at the top of area, clipped to area: after a checkbox for
@@ -2588,6 +2646,9 @@ static void draw_panel_events(App *app, Rectangle body) {
         draw_text(&app->fonts.ui, "Nothing on this day.", body.x, list_top,
                   style_color(TEXT_COLOR_DISABLED));
     } else if (list.height > 0.0f) {
+        if (app->panel_reveal_focused) {
+            draw_panel_events_reveal(app, list);
+        }
         scroll_update(&app->panel_scroll, list, content_height, true);
         draw_panel_events_list(app, list);
         draw_scrollbar(list, content_height, app->panel_scroll.offset_pixels);
@@ -2700,6 +2761,9 @@ static void draw_panel_events_list(App *app, Rectangle list) {
         if (!CheckCollisionRecs(card, list)) {
             continue;
         }
+        if (!locked && CheckCollisionPointRec(GetMousePosition(), card)) {
+            app->pointer_over_item = true;
+        }
         // The card shows this day's occurrence, so its dates are for this day.
         Event occurrence = event_occurrence_at(event, start_day);
         bool clicked = draw_panel_event_card(app, &occurrence, card);
@@ -2715,6 +2779,37 @@ static void draw_panel_events_list(App *app, Rectangle list) {
     EndScissorMode();
     if (locked && !locked_before) {
         GuiUnlock();
+    }
+}
+
+// Scrolls the list just enough that the focused card is in sight, laid out as
+// draw_panel_events_list lays the cards out; scroll_update clamps the result afterwards. A card
+// taller than the list shows from its top.
+static void draw_panel_events_reveal(App *app, Rectangle list) {
+    assert(app->panel_reveal_focused);
+    app->panel_reveal_focused = false;
+    const int32_t selected_day = date_to_day_number(app->selected);
+    float card_top = 0.0f;
+    for (int32_t i = 0; i < app->event_count; i++) {
+        const Event *event = &app->events[i];
+        int32_t start_day = 0;
+        if (!event_occurrence_on_day(event, selected_day, &start_day)) {
+            continue;
+        }
+        const float card_height = event_card_height(&app->fonts, event,
+                                                    event->id == app->event_delete_id,
+                                                    list.width);
+        if (event->id == app->event_focused_id) {
+            Scroll *scroll = &app->panel_scroll;
+            if (card_top + card_height > scroll->offset_pixels + list.height) {
+                scroll->offset_pixels = card_top + card_height - list.height;
+            }
+            if (card_top < scroll->offset_pixels) {
+                scroll->offset_pixels = card_top;
+            }
+            return;
+        }
+        card_top += card_height + EVENT_CARD_GAP_PIXELS;
     }
 }
 
