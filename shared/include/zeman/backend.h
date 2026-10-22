@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <zeman/array_slice.h>
 #include <zeman/event.h>
 
 // Where the calendar's data lives, as the user interface sees it. The desktop app reads and
@@ -11,14 +12,19 @@
 // Both implement these operations, so that one user interface serves both.
 //
 // Every operation reports failure through its return value, and error() then says why.
+//
+// The operations that load many items take a slice of the caller's array to fill: its count is
+// the room there is, and they return how many items they put in it. The type of its items is
+// in each operation's comment.
 typedef struct Backend_Ops {
-    // Loads events with an occurrence that may overlap [first, last], or created within it.
-    // Returns the count, or -1. Sets *truncated when more than event_count_max matched.
-    int32_t (*load_range)(void *context, Date first, Date last, Event *events,
-                          int32_t event_count_max, bool *truncated);
-    // Loads completions of task occurrences that may cover a day in [first, last].
-    int32_t (*load_completions)(void *context, Date first, Date last,
-                                Task_Completion *completions, int32_t completion_count_max,
+    // Loads events with an occurrence that may overlap [first, last], or created within it,
+    // into events, a slice of Event. Returns the count, or -1. Sets *truncated when more than
+    // events.count matched.
+    int32_t (*load_range)(void *context, Date first, Date last, Array_Slice events,
+                          bool *truncated);
+    // Loads completions of task occurrences that may cover a day in [first, last], into
+    // completions, a slice of Task_Completion.
+    int32_t (*load_completions)(void *context, Date first, Date last, Array_Slice completions,
                                 bool *truncated);
     // Returns the new id, or 0.
     int64_t (*insert)(void *context, const Event *event);
@@ -27,21 +33,22 @@ typedef struct Backend_Ops {
     bool (*set_task_done)(void *context, int64_t id, Date occurrence_start, bool done);
     // Returns the id of the location with this address and city, creating it if needed, or 0.
     int64_t (*location_find_or_create)(void *context, const char *address, const char *city);
-    // Loads the tasks linked to a link target, in start order. Returns the count, or -1. Sets
-    // *truncated when more than task_count_max are linked.
-    int32_t (*load_target_tasks)(void *context, int64_t target_id, Linked_Task *tasks,
-                                 int32_t task_count_max, bool *truncated);
+    // Loads the tasks linked to a link target, in start order, into tasks, a slice of
+    // Linked_Task. Returns the count, or -1. Sets *truncated when more than tasks.count are
+    // linked.
+    int32_t (*load_target_tasks)(void *context, int64_t target_id, Array_Slice tasks,
+                                 bool *truncated);
     // Loads the link targets a task can be linked to: those linked to task_id first, so that
     // they are never cut off, then the newest. task_id is 0 for a task not stored yet. With
-    // problems_only, opportunities are left out, for lists of problems alone. Returns the
-    // count, or -1, and sets *truncated as load_target_tasks does.
+    // problems_only, opportunities are left out, for lists of problems alone. They go into
+    // targets, a slice of Link_Target. Returns the count, or -1, and sets *truncated as
+    // load_target_tasks does.
     int32_t (*load_task_targets)(void *context, int64_t task_id, bool problems_only,
-                                 Link_Target *targets, int32_t target_count_max, bool *truncated);
-    // Makes target_ids the targets linked to the task, replacing its earlier links, all or
-    // nothing. With no ids it unlinks the entry from every target, which also suits an entry
-    // that is no longer a task.
-    bool (*set_task_targets)(void *context, int64_t task_id, const int64_t *target_ids,
-                             int32_t target_count);
+                                 Array_Slice targets, bool *truncated);
+    // Makes target_ids, a slice of int64_t, the targets linked to the task, replacing its
+    // earlier links, all or nothing. With no ids it unlinks the entry from every target, which
+    // also suits an entry that is no longer a task.
+    bool (*set_task_targets)(void *context, int64_t task_id, Array_Slice target_ids);
     // A number that changes whenever the data changes, from this program or another, so that
     // the user interface knows when to reload. 0 when unknown, for example while disconnected.
     uint64_t (*revision)(void *context);
@@ -53,17 +60,15 @@ typedef struct Backend {
     void *context;
 } Backend;
 
-static inline int32_t backend_load_range(Backend *backend, Date first, Date last, Event *events,
-                                         int32_t event_count_max, bool *truncated) {
-    return backend->ops->load_range(backend->context, first, last, events, event_count_max,
-                                    truncated);
+static inline int32_t backend_load_range(Backend *backend, Date first, Date last,
+                                         Array_Slice events, bool *truncated) {
+    return backend->ops->load_range(backend->context, first, last, events, truncated);
 }
 
 static inline int32_t backend_load_completions(Backend *backend, Date first, Date last,
-                                               Task_Completion *completions,
-                                               int32_t completion_count_max, bool *truncated) {
+                                               Array_Slice completions, bool *truncated) {
     return backend->ops->load_completions(backend->context, first, last, completions,
-                                          completion_count_max, truncated);
+                                          truncated);
 }
 
 static inline int64_t backend_insert(Backend *backend, const Event *event) {
@@ -89,22 +94,20 @@ static inline int64_t backend_location_find_or_create(Backend *backend, const ch
 }
 
 static inline int32_t backend_load_target_tasks(Backend *backend, int64_t target_id,
-                                                Linked_Task *tasks, int32_t task_count_max,
-                                                bool *truncated) {
-    return backend->ops->load_target_tasks(backend->context, target_id, tasks, task_count_max,
-                                           truncated);
+                                                Array_Slice tasks, bool *truncated) {
+    return backend->ops->load_target_tasks(backend->context, target_id, tasks, truncated);
 }
 
 static inline int32_t backend_load_task_targets(Backend *backend, int64_t task_id,
-                                                bool problems_only, Link_Target *targets,
-                                                int32_t target_count_max, bool *truncated) {
+                                                bool problems_only, Array_Slice targets,
+                                                bool *truncated) {
     return backend->ops->load_task_targets(backend->context, task_id, problems_only, targets,
-                                           target_count_max, truncated);
+                                           truncated);
 }
 
 static inline bool backend_set_task_targets(Backend *backend, int64_t task_id,
-                                            const int64_t *target_ids, int32_t target_count) {
-    return backend->ops->set_task_targets(backend->context, task_id, target_ids, target_count);
+                                            Array_Slice target_ids) {
+    return backend->ops->set_task_targets(backend->context, task_id, target_ids);
 }
 
 static inline uint64_t backend_revision(Backend *backend) {

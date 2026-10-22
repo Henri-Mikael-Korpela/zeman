@@ -8,10 +8,10 @@
 static void writer_bytes(Writer *writer, const void *bytes, size_t count);
 static bool reader_bytes(Reader *reader, void *bytes, size_t count);
 
-Writer writer_make(uint8_t *buffer, size_t size) {
-    assert(buffer != NULL);
-    assert(size > 0);
-    return (Writer){ .buffer = buffer, .size = size, .length = 0, .overflow = false };
+Writer writer_make(Array_Slice buffer) {
+    assert(buffer.items != NULL);
+    assert(buffer.count > 0);
+    return (Writer){ .buffer = buffer, .length = 0, .overflow = false };
 }
 
 void writer_u8(Writer *writer, uint8_t value) {
@@ -110,9 +110,9 @@ void writer_link_target(Writer *writer, const Link_Target *target) {
     writer_text(writer, target->title);
 }
 
-Reader reader_make(const uint8_t *buffer, size_t length) {
-    assert(buffer != NULL);
-    return (Reader){ .buffer = buffer, .length = length, .position = 0, .failed = false };
+Reader reader_make(Array_Slice buffer) {
+    assert(buffer.items != NULL);
+    return (Reader){ .buffer = buffer, .position = 0, .failed = false };
 }
 
 uint8_t reader_u8(Reader *reader) {
@@ -271,7 +271,7 @@ Link_Target reader_link_target(Reader *reader) {
 }
 
 bool reader_done(const Reader *reader) {
-    return !reader->failed && reader->position == reader->length;
+    return !reader->failed && reader->position == (size_t)reader->buffer.count;
 }
 
 void protocol_length_write(uint8_t *bytes, uint32_t length) {
@@ -287,21 +287,25 @@ uint32_t protocol_length_read(const uint8_t *bytes) {
 }
 
 static void writer_bytes(Writer *writer, const void *bytes, size_t count) {
-    if (writer->overflow || count > writer->size - writer->length) {
+    const size_t size = (size_t)writer->buffer.count;
+    if (writer->overflow || count > size - writer->length) {
         writer->overflow = true;
         return;
     }
-    memcpy(writer->buffer + writer->length, bytes, count);
+    uint8_t *items = writer->buffer.items;
+    memcpy(items + writer->length, bytes, count);
     writer->length += count;
 }
 
 static bool reader_bytes(Reader *reader, void *bytes, size_t count) {
-    if (reader->failed || count > reader->length - reader->position) {
+    const size_t length = (size_t)reader->buffer.count;
+    if (reader->failed || count > length - reader->position) {
         reader->failed = true;
         memset(bytes, 0, count);
         return false;
     }
-    memcpy(bytes, reader->buffer + reader->position, count);
+    const uint8_t *items = reader->buffer.items;
+    memcpy(bytes, items + reader->position, count);
     reader->position += count;
     return true;
 }

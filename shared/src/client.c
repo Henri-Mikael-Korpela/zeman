@@ -22,23 +22,20 @@ static bool client_response_done(Client *client, const Reader *response);
 static int32_t client_response_count(Client *client, const Reader *response, int32_t count);
 static int64_t client_response_id(Client *client, const Reader *response, int64_t id);
 
-static int32_t client_load_range(void *context, Date first, Date last, Event *events,
-                                 int32_t event_count_max, bool *truncated);
+static int32_t client_load_range(void *context, Date first, Date last, Array_Slice events,
+                                 bool *truncated);
 static int32_t client_load_completions(void *context, Date first, Date last,
-                                       Task_Completion *completions, int32_t completion_count_max,
-                                       bool *truncated);
+                                       Array_Slice completions, bool *truncated);
 static int64_t client_insert(void *context, const Event *event);
 static bool client_update(void *context, const Event *event);
 static bool client_remove(void *context, int64_t id);
 static bool client_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
 static int64_t client_location(void *context, const char *address, const char *city);
-static int32_t client_load_target_tasks(void *context, int64_t target_id, Linked_Task *tasks,
-                                        int32_t task_count_max, bool *truncated);
-static int32_t client_load_task_targets(void *context, int64_t task_id, bool problems_only,
-                                        Link_Target *targets, int32_t target_count_max,
+static int32_t client_load_target_tasks(void *context, int64_t target_id, Array_Slice tasks,
                                         bool *truncated);
-static bool client_set_task_targets(void *context, int64_t task_id, const int64_t *target_ids,
-                                    int32_t target_count);
+static int32_t client_load_task_targets(void *context, int64_t task_id, bool problems_only,
+                                        Array_Slice targets, bool *truncated);
+static bool client_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
 static uint64_t client_revision(void *context);
 static const char *client_error(const void *context);
 
@@ -91,51 +88,52 @@ Backend client_backend(Client *client) {
     return (Backend){ .ops = &client_ops, .context = client };
 }
 
-static int32_t client_load_range(void *context, Date first, Date last, Event *events,
-                                 int32_t event_count_max, bool *truncated) {
+static int32_t client_load_range(void *context, Date first, Date last, Array_Slice events,
+                                 bool *truncated) {
     Client *client = context;
-    assert(event_count_max > 0);
+    assert(events.count > 0);
+    Event *event_items = events.items;
     Writer request = client_request_begin(client, PROTOCOL_LOAD_RANGE);
     writer_date(&request, first);
     writer_date(&request, last);
-    writer_i32(&request, event_count_max);
+    writer_i32(&request, events.count);
     Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return -1;
     }
     *truncated = reader_u8(&response) != 0;
     int32_t count = reader_i32(&response);
-    if (count < 0 || count > event_count_max) {
+    if (count < 0 || count > events.count) {
         client_disconnect(client, "The desktop app sent an invalid answer.");
         return -1;
     }
     for (int32_t i = 0; i < count; i++) {
-        events[i] = reader_event(&response);
+        event_items[i] = reader_event(&response);
     }
     return client_response_count(client, &response, count);
 }
 
 static int32_t client_load_completions(void *context, Date first, Date last,
-                                       Task_Completion *completions, int32_t completion_count_max,
-                                       bool *truncated) {
+                                       Array_Slice completions, bool *truncated) {
     Client *client = context;
-    assert(completion_count_max > 0);
+    assert(completions.count > 0);
+    Task_Completion *completion_items = completions.items;
     Writer request = client_request_begin(client, PROTOCOL_LOAD_COMPLETIONS);
     writer_date(&request, first);
     writer_date(&request, last);
-    writer_i32(&request, completion_count_max);
+    writer_i32(&request, completions.count);
     Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return -1;
     }
     *truncated = reader_u8(&response) != 0;
     int32_t count = reader_i32(&response);
-    if (count < 0 || count > completion_count_max) {
+    if (count < 0 || count > completions.count) {
         client_disconnect(client, "The desktop app sent an invalid answer.");
         return -1;
     }
     for (int32_t i = 0; i < count; i++) {
-        completions[i] = reader_completion(&response);
+        completion_items[i] = reader_completion(&response);
     }
     return client_response_count(client, &response, count);
 }
@@ -191,71 +189,72 @@ static int64_t client_location(void *context, const char *address, const char *c
     return client_response_id(client, &response, id);
 }
 
-static int32_t client_load_target_tasks(void *context, int64_t target_id, Linked_Task *tasks,
-                                        int32_t task_count_max, bool *truncated) {
+static int32_t client_load_target_tasks(void *context, int64_t target_id, Array_Slice tasks,
+                                        bool *truncated) {
     Client *client = context;
     assert(target_id > 0);
-    assert(task_count_max > 0);
+    assert(tasks.count > 0);
+    Linked_Task *task_items = tasks.items;
     Writer request = client_request_begin(client, PROTOCOL_LOAD_TARGET_TASKS);
     writer_i64(&request, target_id);
-    writer_i32(&request, task_count_max);
+    writer_i32(&request, tasks.count);
     Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return -1;
     }
     *truncated = reader_u8(&response) != 0;
     int32_t count = reader_i32(&response);
-    if (count < 0 || count > task_count_max) {
+    if (count < 0 || count > tasks.count) {
         client_disconnect(client, "The desktop app sent an invalid answer.");
         return -1;
     }
     for (int32_t i = 0; i < count; i++) {
-        tasks[i] = reader_linked_task(&response);
+        task_items[i] = reader_linked_task(&response);
     }
     return client_response_count(client, &response, count);
 }
 
 static int32_t client_load_task_targets(void *context, int64_t task_id, bool problems_only,
-                                        Link_Target *targets, int32_t target_count_max,
-                                        bool *truncated) {
+                                        Array_Slice targets, bool *truncated) {
     Client *client = context;
     assert(task_id >= 0);
-    assert(target_count_max > 0);
+    assert(targets.count > 0);
+    Link_Target *target_items = targets.items;
     Writer request = client_request_begin(client, PROTOCOL_LOAD_TASK_TARGETS);
     writer_i64(&request, task_id);
     writer_u8(&request, (uint8_t)problems_only);
-    writer_i32(&request, target_count_max);
+    writer_i32(&request, targets.count);
     Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
         return -1;
     }
     *truncated = reader_u8(&response) != 0;
     int32_t count = reader_i32(&response);
-    if (count < 0 || count > target_count_max) {
+    if (count < 0 || count > targets.count) {
         client_disconnect(client, "The desktop app sent an invalid answer.");
         return -1;
     }
     for (int32_t i = 0; i < count; i++) {
-        targets[i] = reader_link_target(&response);
+        target_items[i] = reader_link_target(&response);
         // Asked for problems alone, an opportunity is an answer to another question.
-        if (problems_only && targets[i].kind != EVENT_KIND_PROBLEM) {
+        if (problems_only && target_items[i].kind != EVENT_KIND_PROBLEM) {
             response.failed = true;
         }
     }
     return client_response_count(client, &response, count);
 }
 
-static bool client_set_task_targets(void *context, int64_t task_id, const int64_t *target_ids,
-                                    int32_t target_count) {
+static bool client_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids) {
     Client *client = context;
     assert(task_id > 0);
-    assert(target_count >= 0);
-    assert(target_count <= LINK_COUNT_MAX);
+    assert(target_ids.count >= 0);
+    assert(target_ids.count <= LINK_COUNT_MAX);
+    const int64_t *ids = target_ids.items;
     Writer request = client_request_begin(client, PROTOCOL_SET_TASK_TARGETS);
     writer_i64(&request, task_id);
-    writer_i32(&request, target_count);
-    for (int32_t i = 0; i < target_count; i++) {
-        writer_i64(&request, target_ids[i]);
+    writer_i32(&request, target_ids.count);
+    for (int32_t i = 0; i < target_ids.count; i++) {
+        writer_i64(&request, ids[i]);
     }
     Reader response = { 0 };
     return client_call(client, &request, &response) && client_response_done(client, &response);
@@ -324,8 +323,9 @@ static bool client_connect(Client *client) {
     // In its own buffer: connecting happens inside a call whose request is already waiting in
     // client->request, and must not overwrite it.
     uint8_t hello[PROTOCOL_LENGTH_SIZE + 8] = { 0 };
-    Writer request = writer_make(hello + PROTOCOL_LENGTH_SIZE,
-                                 sizeof(hello) - PROTOCOL_LENGTH_SIZE);
+    Writer request = writer_make(
+        array_slice_make(hello + PROTOCOL_LENGTH_SIZE,
+                         (int32_t)sizeof(hello) - PROTOCOL_LENGTH_SIZE));
     writer_u8(&request, PROTOCOL_HELLO);
     writer_u32(&request, PROTOCOL_VERSION);
     Reader response = { 0 };
@@ -357,8 +357,8 @@ static void client_disconnect(Client *client, const char *reason) {
 static Writer client_request_begin(Client *client, Protocol_Operation operation) {
     assert(operation > 0);
     assert(operation < PROTOCOL_OPERATION_END);
-    Writer request = writer_make(client->request + PROTOCOL_LENGTH_SIZE,
-                                 PROTOCOL_REQUEST_SIZE_MAX);
+    Writer request = writer_make(
+        array_slice_make(client->request + PROTOCOL_LENGTH_SIZE, PROTOCOL_REQUEST_SIZE_MAX));
     writer_u8(&request, (uint8_t)operation);
     return request;
 }
@@ -373,15 +373,18 @@ static bool client_exchange(Client *client, const Writer *request, Reader *respo
     assert(client->connected);
     // Every request is far smaller than its buffer; overflowing it is a programmer error.
     assert(!request->overflow);
-    uint8_t *message = request->buffer - PROTOCOL_LENGTH_SIZE;
+    uint8_t *payload = request->buffer.items;
+    uint8_t *message = payload - PROTOCOL_LENGTH_SIZE;
     protocol_length_write(message, (uint32_t)request->length);
     int32_t message_size = (int32_t)(PROTOCOL_LENGTH_SIZE + request->length);
-    if (!net_send_all(client->socket, message, message_size, CLIENT_IO_TIMEOUT_MS)) {
+    if (!net_send_all(client->socket, array_slice_make(message, message_size),
+                      CLIENT_IO_TIMEOUT_MS)) {
         client_disconnect(client, "The connection to the desktop app was lost.");
         return false;
     }
     uint8_t prefix[PROTOCOL_LENGTH_SIZE] = { 0 };
-    if (!net_recv_all(client->socket, prefix, sizeof(prefix), CLIENT_IO_TIMEOUT_MS)) {
+    if (!net_recv_all(client->socket, array_slice_make(prefix, (int32_t)sizeof(prefix)),
+                      CLIENT_IO_TIMEOUT_MS)) {
         client_disconnect(client, "The connection to the desktop app was lost.");
         return false;
     }
@@ -390,12 +393,13 @@ static bool client_exchange(Client *client, const Writer *request, Reader *respo
         client_disconnect(client, "The desktop app sent an invalid answer.");
         return false;
     }
-    if (!net_recv_all(client->socket, client->response, (int32_t)length, CLIENT_IO_TIMEOUT_MS)) {
+    Array_Slice answer = array_slice_make(client->response, (int32_t)length);
+    if (!net_recv_all(client->socket, answer, CLIENT_IO_TIMEOUT_MS)) {
         client_disconnect(client, "The connection to the desktop app was lost.");
         return false;
     }
 
-    *response = reader_make(client->response, length);
+    *response = reader_make(answer);
     if (reader_u8(response) != PROTOCOL_OK) {
         reader_text(response, client->error, sizeof(client->error));
         if (response->failed) {

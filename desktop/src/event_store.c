@@ -299,7 +299,7 @@ static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_co
 static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Task *task);
 static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Target *target);
 static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_id,
-                                              const int64_t *target_ids, int32_t target_count);
+                                              Array_Slice target_ids);
 static bool event_store_migrate(Event_Store *store);
 static bool event_store_check_foreign_keys(Event_Store *store);
 static bool event_store_migrate_step(Event_Store *store, int32_t version);
@@ -464,11 +464,13 @@ int64_t event_store_location_find_or_create(Event_Store *store, const char *addr
     return id;
 }
 
-int32_t event_store_load_range(Event_Store *store, Date first, Date last,
-                               Event *events, int32_t event_count_max, bool *truncated) {
+int32_t event_store_load_range(Event_Store *store, Date first, Date last, Array_Slice events,
+                               bool *truncated) {
     assert(store != NULL);
-    assert(event_count_max > 0);
+    assert(events.count > 0);
     assert(truncated != NULL);
+    Event *event_items = events.items;
+    const int32_t event_count_max = events.count;
 
     sqlite3_stmt *statement = store->statements[STATEMENT_SELECT_RANGE];
     int result = bind_range(statement, first, last, event_count_max);
@@ -488,10 +490,10 @@ int32_t event_store_load_range(Event_Store *store, Date first, Date last,
             *truncated = true;
             break;
         }
-        if (!event_store_load_range_row(statement, &events[event_count])) {
+        if (!event_store_load_range_row(statement, &event_items[event_count])) {
             // SQLite has nothing to add here: the row is readable, but its text is not ours.
             snprintf(store->error, sizeof(store->error), "Invalid stored event, id %lld.",
-                     (long long)events[event_count].id);
+                     (long long)event_items[event_count].id);
             sqlite3_reset(statement);
             sqlite3_clear_bindings(statement);
             return -1;
@@ -510,11 +512,12 @@ int32_t event_store_load_range(Event_Store *store, Date first, Date last,
 }
 
 int32_t event_store_load_completions(Event_Store *store, Date first, Date last,
-                                     Task_Completion *completions, int32_t completion_count_max,
-                                     bool *truncated) {
+                                     Array_Slice completions, bool *truncated) {
     assert(store != NULL);
-    assert(completion_count_max > 0);
+    assert(completions.count > 0);
     assert(truncated != NULL);
+    Task_Completion *completion_items = completions.items;
+    const int32_t completion_count_max = completions.count;
 
     Date lookback = date_add_days(first, -COMPLETION_LOOKBACK_DAYS);
     sqlite3_stmt *statement = store->statements[STATEMENT_COMPLETION_SELECT_RANGE];
@@ -541,7 +544,7 @@ int32_t event_store_load_completions(Event_Store *store, Date first, Date last,
             result = SQLITE_MISMATCH;
             break;
         }
-        completions[completion_count] = (Task_Completion){
+        completion_items[completion_count] = (Task_Completion){
             .event_id = sqlite3_column_int64(statement, 0),
             .occurrence_start_day = date_to_day_number(occurrence_start),
         };
@@ -557,10 +560,12 @@ int32_t event_store_load_completions(Event_Store *store, Date first, Date last,
     return completion_count;
 }
 
-int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Linked_Task *tasks,
-                                      int32_t task_count_max, bool *truncated) {
+int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Array_Slice tasks,
+                                      bool *truncated) {
     assert(target_id > 0);
-    assert(task_count_max > 0);
+    assert(tasks.count > 0);
+    Linked_Task *task_items = tasks.items;
+    const int32_t task_count_max = tasks.count;
     sqlite3_stmt *statement = store->statements[STATEMENT_TARGET_TASKS];
     int result = bind_id_and_limit(statement, target_id, task_count_max);
     int32_t task_count = 0;
@@ -579,7 +584,7 @@ int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Lin
             *truncated = true;
             break;
         }
-        if (!event_store_load_target_tasks_row(statement, &tasks[task_count])) {
+        if (!event_store_load_target_tasks_row(statement, &task_items[task_count])) {
             result = SQLITE_MISMATCH;
             break;
         }
@@ -596,10 +601,11 @@ int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Lin
 }
 
 int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool problems_only,
-                                      Link_Target *targets, int32_t target_count_max,
-                                      bool *truncated) {
+                                      Array_Slice targets, bool *truncated) {
     assert(task_id >= 0);
-    assert(target_count_max > 0);
+    assert(targets.count > 0);
+    Link_Target *target_items = targets.items;
+    const int32_t target_count_max = targets.count;
     sqlite3_stmt *statement = store->statements[STATEMENT_TASK_TARGETS];
     // A task not stored yet has id 0, which no link has, so that no target comes back linked.
     int result = bind_id_and_limit(statement, task_id, target_count_max);
@@ -623,11 +629,11 @@ int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool 
             *truncated = true;
             break;
         }
-        if (!event_store_load_task_targets_row(statement, &targets[target_count])) {
+        if (!event_store_load_task_targets_row(statement, &target_items[target_count])) {
             result = SQLITE_MISMATCH;
             break;
         }
-        assert(!problems_only || targets[target_count].kind == EVENT_KIND_PROBLEM);
+        assert(!problems_only || target_items[target_count].kind == EVENT_KIND_PROBLEM);
         target_count++;
     }
     sqlite3_reset(statement);
@@ -644,15 +650,14 @@ int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool 
  * One transaction, so that a link that cannot be made leaves the task's earlier links as they
  * were rather than half replaced.
  */
-bool event_store_set_task_targets(Event_Store *store, int64_t task_id, const int64_t *target_ids,
-                                  int32_t target_count) {
+bool event_store_set_task_targets(Event_Store *store, int64_t task_id, Array_Slice target_ids) {
     assert(task_id > 0);
-    assert(target_count >= 0);
-    assert(target_count <= LINK_COUNT_MAX);
+    assert(target_ids.count >= 0);
+    assert(target_ids.count <= LINK_COUNT_MAX);
     if (sqlite3_exec(store->database, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
         return event_store_fail(store, "Cannot save the task's links");
     }
-    bool ok = event_store_set_task_targets_rows(store, task_id, target_ids, target_count);
+    bool ok = event_store_set_task_targets_rows(store, task_id, target_ids);
     if (ok) {
         if (sqlite3_exec(store->database, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
             ok = event_store_fail(store, "Cannot save the task's links");
@@ -669,7 +674,8 @@ bool event_store_set_task_targets(Event_Store *store, int64_t task_id, const int
  * Deletes the task's links, then inserts the new ones, inside the caller's transaction.
  */
 static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_id,
-                                              const int64_t *target_ids, int32_t target_count) {
+                                              Array_Slice target_ids) {
+    const int64_t *ids = target_ids.items;
     sqlite3_stmt *statement = store->statements[STATEMENT_LINK_DELETE];
     int result = sqlite3_bind_int64(statement, 1, task_id);
     // No row check: a task may have had no links.
@@ -677,12 +683,12 @@ static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_i
         return false;
     }
     statement = store->statements[STATEMENT_LINK_INSERT];
-    for (int32_t i = 0; i < target_count; i++) {
-        assert(target_ids[i] > 0);
+    for (int32_t i = 0; i < target_ids.count; i++) {
+        assert(ids[i] > 0);
         for (int32_t j = 0; j < i; j++) {
-            assert(target_ids[j] != target_ids[i]); // The caller sends each target once.
+            assert(ids[j] != ids[i]); // The caller sends each target once.
         }
-        result = sqlite3_bind_int64(statement, 1, target_ids[i]);
+        result = sqlite3_bind_int64(statement, 1, ids[i]);
         if (result == SQLITE_OK) {
             result = sqlite3_bind_int64(statement, 2, task_id);
         }

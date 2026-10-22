@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <zeman/array_slice.h>
+
 // TCP sockets over Winsock on Windows and BSD sockets elsewhere (Android), behind one small
 // interface. Only net.c includes the platform headers, because windows.h clashes with raylib.h.
 // Every socket is non-blocking; the *_all functions wait with a timeout instead of blocking.
@@ -35,13 +37,17 @@ bool net_listen(uint16_t port, Net_Socket *socket_out, char *error, size_t error
 Net_Socket net_accept(Net_Socket listener, bool *peer_is_local, char *peer_address,
                       size_t peer_address_size);
 /**
- * Return the bytes moved, 0 when the call would block, or -1 when the connection failed or
- * closed.
+ * Send or receive bytes, a slice of bytes: net_send sends all of it that the socket takes now,
+ * and net_recv fills as much of it as has arrived. Return the bytes moved, 0 when the call would
+ * block, or -1 when the connection failed or closed. The slice is not empty.
  */
-int32_t net_send(Net_Socket socket, const void *data, int32_t length);
-int32_t net_recv(Net_Socket socket, void *data, int32_t length);
-bool net_send_all(Net_Socket socket, const void *data, int32_t length, int32_t timeout_ms);
-bool net_recv_all(Net_Socket socket, void *data, int32_t length, int32_t timeout_ms);
+int32_t net_send(Net_Socket socket, Array_Slice bytes);
+int32_t net_recv(Net_Socket socket, Array_Slice bytes);
+/**
+ * Send all of the bytes, or fill the whole slice, waiting up to timeout_ms for the socket.
+ */
+bool net_send_all(Net_Socket socket, Array_Slice bytes, int32_t timeout_ms);
+bool net_recv_all(Net_Socket socket, Array_Slice bytes, int32_t timeout_ms);
 void net_close(Net_Socket socket);
 
 /**
@@ -52,13 +58,12 @@ bool net_udp_open(uint16_t port, Net_Socket *socket_out, char *error, size_t err
 /**
  * address is a dotted IPv4 address, such as "255.255.255.255" for everyone on the network.
  */
-bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, const void *data,
-                  int32_t length);
+bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, Array_Slice bytes);
 /**
  * Returns the bytes received, or 0 when nothing is waiting; fills in where they came from.
  */
-int32_t net_udp_recv(Net_Socket socket, void *data, int32_t size, char *address,
-                     size_t address_size, uint16_t *port);
+int32_t net_udp_recv(Net_Socket socket, Array_Slice bytes, char *address, size_t address_size,
+                     uint16_t *port);
 
 /**
  * True for addresses on a local network: private ranges (10/8, 172.16/12, 192.168/16),

@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <zeman/array_slice.h>
 #include <zeman/event.h>
 
 enum {
@@ -48,14 +49,14 @@ bool event_store_update(Event_Store *store, const Event *event);
 bool event_store_delete(Event_Store *store, int64_t id);
 
 /**
- * Loads events with an occurrence that may overlap [first, last], or created within it.
- * Repeating events that start before last are always included, because only the caller
- * works out which of their occurrences are visible.
- * Returns the number loaded, or -1 on failure. Sets *truncated when more than
- * event_count_max events matched, so that the caller can say that some are hidden.
+ * Loads events with an occurrence that may overlap [first, last], or created within it, into
+ * events, a slice of Event whose count is the room there is. Repeating events that start before
+ * last are always included, because only the caller works out which of their occurrences are
+ * visible. Returns the number loaded, or -1 on failure. Sets *truncated when more than
+ * events.count events matched, so that the caller can say that some are hidden.
  */
-int32_t event_store_load_range(Event_Store *store, Date first, Date last,
-                               Event *events, int32_t event_count_max, bool *truncated);
+int32_t event_store_load_range(Event_Store *store, Date first, Date last, Array_Slice events,
+                               bool *truncated);
 
 /**
  * Returns the id of the location with exactly this address and city, creating it if there is
@@ -72,34 +73,33 @@ bool event_store_set_task_done(Event_Store *store, int64_t id, Date occurrence_s
 
 /**
  * Loads the completions of occurrences that may cover a day in [first, last]: those starting
- * within it or up to a year before it. Returns the number loaded, or -1 on failure, and sets
- * *truncated as event_store_load_range does.
+ * within it or up to a year before it. They go into completions, a slice of Task_Completion.
+ * Returns the number loaded, or -1 on failure, and sets *truncated as event_store_load_range
+ * does.
  */
 int32_t event_store_load_completions(Event_Store *store, Date first, Date last,
-                                     Task_Completion *completions, int32_t completion_count_max,
-                                     bool *truncated);
+                                     Array_Slice completions, bool *truncated);
 
 /**
  * Loads the tasks linked to a link target, in start order, each with whether any occurrence is
- * done. Returns the number loaded, or -1, and sets *truncated as event_store_load_range does.
+ * done, into tasks, a slice of Linked_Task. Returns the number loaded, or -1, and sets
+ * *truncated as event_store_load_range does.
  */
-int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Linked_Task *tasks,
-                                      int32_t task_count_max, bool *truncated);
+int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Array_Slice tasks,
+                                      bool *truncated);
 
 /**
  * Loads every link target, or every problem with problems_only, with how many of its linked
  * tasks are done: the ones linked to task_id first, then the newest. task_id is 0 for a task
- * not stored yet.
+ * not stored yet. They go into targets, a slice of Link_Target.
  */
 int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool problems_only,
-                                      Link_Target *targets, int32_t target_count_max,
-                                      bool *truncated);
+                                      Array_Slice targets, bool *truncated);
 
 /**
- * Replaces the targets linked to the task with target_ids, each given once. Fails, changing
- * nothing, if one of them is not a link target or the task is not a task.
+ * Replaces the targets linked to the task with target_ids, a slice of int64_t with each given
+ * once. Fails, changing nothing, if one of them is not a link target or the task is not a task.
  */
-bool event_store_set_task_targets(Event_Store *store, int64_t task_id, const int64_t *target_ids,
-                                  int32_t target_count);
+bool event_store_set_task_targets(Event_Store *store, int64_t task_id, Array_Slice target_ids);
 
 #endif

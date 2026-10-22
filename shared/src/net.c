@@ -152,9 +152,10 @@ Net_Socket net_accept(Net_Socket listener, bool *peer_is_local, char *peer_addre
     return (Net_Socket)platform;
 }
 
-int32_t net_send(Net_Socket socket, const void *data, int32_t length) {
-    assert(length > 0);
-    int result = send((Platform_Socket)socket, (const char *)data, length, NET_SEND_FLAGS);
+int32_t net_send(Net_Socket socket, Array_Slice bytes) {
+    assert(bytes.count > 0);
+    int result = send((Platform_Socket)socket, (const char *)bytes.items, bytes.count,
+                      NET_SEND_FLAGS);
     if (result > 0) {
         return result;
     }
@@ -166,9 +167,9 @@ int32_t net_send(Net_Socket socket, const void *data, int32_t length) {
     return -1;
 }
 
-int32_t net_recv(Net_Socket socket, void *data, int32_t length) {
-    assert(length > 0);
-    int result = recv((Platform_Socket)socket, (char *)data, length, 0);
+int32_t net_recv(Net_Socket socket, Array_Slice bytes) {
+    assert(bytes.count > 0);
+    int result = recv((Platform_Socket)socket, (char *)bytes.items, bytes.count, 0);
     if (result > 0) {
         return result;
     }
@@ -181,13 +182,13 @@ int32_t net_recv(Net_Socket socket, void *data, int32_t length) {
     return -1;
 }
 
-bool net_send_all(Net_Socket socket, const void *data, int32_t length, int32_t timeout_ms) {
-    const uint8_t *bytes = data;
+bool net_send_all(Net_Socket socket, Array_Slice bytes, int32_t timeout_ms) {
+    uint8_t *items = bytes.items;
     int64_t deadline = net_monotonic_ms() + timeout_ms;
     int32_t sent = 0;
     // Bounded by the deadline: every pass either moves bytes or waits until it.
-    while (sent < length) {
-        int32_t result = net_send(socket, bytes + sent, length - sent);
+    while (sent < bytes.count) {
+        int32_t result = net_send(socket, array_slice_make(items + sent, bytes.count - sent));
         if (result < 0) {
             return false;
         }
@@ -202,13 +203,14 @@ bool net_send_all(Net_Socket socket, const void *data, int32_t length, int32_t t
     return true;
 }
 
-bool net_recv_all(Net_Socket socket, void *data, int32_t length, int32_t timeout_ms) {
-    uint8_t *bytes = data;
+bool net_recv_all(Net_Socket socket, Array_Slice bytes, int32_t timeout_ms) {
+    uint8_t *items = bytes.items;
     int64_t deadline = net_monotonic_ms() + timeout_ms;
     int32_t received = 0;
     // Bounded by the deadline, as in net_send_all.
-    while (received < length) {
-        int32_t result = net_recv(socket, bytes + received, length - received);
+    while (received < bytes.count) {
+        int32_t result = net_recv(socket,
+                                  array_slice_make(items + received, bytes.count - received));
         if (result < 0) {
             return false;
         }
@@ -258,26 +260,25 @@ bool net_udp_open(uint16_t port, Net_Socket *socket_out, char *error, size_t err
     return true;
 }
 
-bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, const void *data,
-                  int32_t length) {
-    assert(length > 0);
+bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, Array_Slice bytes) {
+    assert(bytes.count > 0);
     struct sockaddr_in target = { 0 };
     target.sin_family = AF_INET;
     target.sin_port = htons(port);
     if (inet_pton(AF_INET, address, &target.sin_addr) != 1) {
         return false;
     }
-    int sent = sendto((Platform_Socket)socket, (const char *)data, length, 0,
+    int sent = sendto((Platform_Socket)socket, (const char *)bytes.items, bytes.count, 0,
                       (struct sockaddr *)&target, sizeof(target));
-    return sent == length;
+    return sent == bytes.count;
 }
 
-int32_t net_udp_recv(Net_Socket socket, void *data, int32_t size, char *address,
-                     size_t address_size, uint16_t *port) {
-    assert(size > 0);
+int32_t net_udp_recv(Net_Socket socket, Array_Slice bytes, char *address, size_t address_size,
+                     uint16_t *port) {
+    assert(bytes.count > 0);
     struct sockaddr_in from = { 0 };
     socklen_t from_length = sizeof(from);
-    int received = recvfrom((Platform_Socket)socket, (char *)data, size, 0,
+    int received = recvfrom((Platform_Socket)socket, (char *)bytes.items, bytes.count, 0,
                             (struct sockaddr *)&from, &from_length);
     if (received <= 0) {
         return 0;

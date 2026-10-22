@@ -122,8 +122,10 @@ static void server_discovery_poll(Server *server) {
         char packet[PROTOCOL_DISCOVERY_SIZE_MAX] = "";
         char address[NET_ADDRESS_SIZE] = "";
         uint16_t port = 0;
-        int32_t length = net_udp_recv(server->discovery, packet, sizeof(packet) - 1, address,
-                                      sizeof(address), &port);
+        // One byte is kept for the terminator that makes the packet a string.
+        int32_t length = net_udp_recv(server->discovery,
+                                      array_slice_make(packet, (int32_t)sizeof(packet) - 1),
+                                      address, sizeof(address), &port);
         if (length == 0) {
             return;
         }
@@ -136,7 +138,8 @@ static void server_discovery_poll(Server *server) {
                                     (unsigned)server->port);
         assert(reply_length > 0);
         assert(reply_length < (int)sizeof(reply));
-        net_udp_send(server->discovery, address, port, reply, reply_length);
+        net_udp_send(server->discovery, address, port,
+                     array_slice_make(reply, (int32_t)reply_length));
     }
 }
 
@@ -160,8 +163,9 @@ static void server_client_poll(Server *server, Server_Client *client) {
     }
 
     if (client->request_length < PROTOCOL_LENGTH_SIZE) {
-        int32_t received = net_recv(client->socket, client->request + client->request_length,
-                                    PROTOCOL_LENGTH_SIZE - client->request_length);
+        int32_t received = net_recv(
+            client->socket, array_slice_make(client->request + client->request_length,
+                                             PROTOCOL_LENGTH_SIZE - client->request_length));
         if (received < 0) {
             server_client_drop(client);
             return;
@@ -178,8 +182,9 @@ static void server_client_poll(Server *server, Server_Client *client) {
     }
     int32_t total = PROTOCOL_LENGTH_SIZE + (int32_t)payload_length;
     if (client->request_length < total) {
-        int32_t received = net_recv(client->socket, client->request + client->request_length,
-                                    total - client->request_length);
+        int32_t received = net_recv(
+            client->socket, array_slice_make(client->request + client->request_length,
+                                             total - client->request_length));
         if (received < 0) {
             server_client_drop(client);
             return;
@@ -190,9 +195,10 @@ static void server_client_poll(Server *server, Server_Client *client) {
         }
     }
 
-    Reader request = reader_make(client->request + PROTOCOL_LENGTH_SIZE, payload_length);
-    Writer response = writer_make(client->response + PROTOCOL_LENGTH_SIZE,
-                                  PROTOCOL_RESPONSE_SIZE_MAX);
+    Reader request = reader_make(
+        array_slice_make(client->request + PROTOCOL_LENGTH_SIZE, (int32_t)payload_length));
+    Writer response = writer_make(
+        array_slice_make(client->response + PROTOCOL_LENGTH_SIZE, PROTOCOL_RESPONSE_SIZE_MAX));
     server_handle(server, &request, &response);
     // The largest response, a full range of events, fits with room to spare.
     assert(!response.overflow);
@@ -210,8 +216,9 @@ static bool server_client_flush(Server_Client *client) {
     if (client->response_length == 0) {
         return true;
     }
-    int32_t sent = net_send(client->socket, client->response + client->response_sent,
-                            client->response_length - client->response_sent);
+    int32_t sent = net_send(
+        client->socket, array_slice_make(client->response + client->response_sent,
+                                         client->response_length - client->response_sent));
     if (sent < 0) {
         server_client_drop(client);
         return false;
@@ -312,8 +319,8 @@ static void server_handle_load_range(Server *server, Reader *request, Writer *re
         count_max = PROTOCOL_EVENT_COUNT_MAX;
     }
     bool truncated = false;
-    int32_t count = backend_load_range(server->backend, first, last, server->events, count_max,
-                                       &truncated);
+    int32_t count = backend_load_range(server->backend, first, last,
+                                       array_slice_make(server->events, count_max), &truncated);
     if (count < 0) {
         server_fail(response, backend_error(server->backend));
         return;
@@ -338,8 +345,9 @@ static void server_handle_load_completions(Server *server, Reader *request, Writ
         count_max = PROTOCOL_COMPLETION_COUNT_MAX;
     }
     bool truncated = false;
-    int32_t count = backend_load_completions(server->backend, first, last, server->completions,
-                                             count_max, &truncated);
+    int32_t count = backend_load_completions(
+        server->backend, first, last, array_slice_make(server->completions, count_max),
+        &truncated);
     if (count < 0) {
         server_fail(response, backend_error(server->backend));
         return;
@@ -432,8 +440,9 @@ static void server_handle_load_target_tasks(Server *server, Reader *request, Wri
         count_max = LINK_COUNT_MAX;
     }
     bool truncated = false;
-    int32_t count = backend_load_target_tasks(server->backend, target_id, server->linked_tasks,
-                                              count_max, &truncated);
+    int32_t count = backend_load_target_tasks(
+        server->backend, target_id, array_slice_make(server->linked_tasks, count_max),
+        &truncated);
     if (count < 0) {
         server_fail(response, backend_error(server->backend));
         return;
@@ -461,8 +470,9 @@ static void server_handle_load_task_targets(Server *server, Reader *request, Wri
         count_max = LINK_COUNT_MAX;
     }
     bool truncated = false;
-    int32_t count = backend_load_task_targets(server->backend, task_id, problems_only == 1,
-                                              server->link_targets, count_max, &truncated);
+    int32_t count = backend_load_task_targets(
+        server->backend, task_id, problems_only == 1,
+        array_slice_make(server->link_targets, count_max), &truncated);
     if (count < 0) {
         server_fail(response, backend_error(server->backend));
         return;
@@ -498,7 +508,7 @@ static void server_handle_set_task_targets(Server *server, Reader *request, Writ
         server_fail(response, "Invalid request.");
         return;
     }
-    if (!backend_set_task_targets(server->backend, task_id, target_ids, count)) {
+    if (!backend_set_task_targets(server->backend, task_id, array_slice_make(target_ids, count))) {
         server_fail(response, backend_error(server->backend));
         return;
     }

@@ -6,23 +6,20 @@
 
 static bool local_available(Local_Backend *local);
 static void local_changed(Local_Backend *local);
-static int32_t local_load_range(void *context, Date first, Date last, Event *events,
-                                int32_t event_count_max, bool *truncated);
+static int32_t local_load_range(void *context, Date first, Date last, Array_Slice events,
+                                bool *truncated);
 static int32_t local_load_completions(void *context, Date first, Date last,
-                                      Task_Completion *completions, int32_t completion_count_max,
-                                      bool *truncated);
+                                      Array_Slice completions, bool *truncated);
 static int64_t local_insert(void *context, const Event *event);
 static bool local_update(void *context, const Event *event);
 static bool local_remove(void *context, int64_t id);
 static bool local_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
 static int64_t local_location(void *context, const char *address, const char *city);
-static int32_t local_load_target_tasks(void *context, int64_t target_id, Linked_Task *tasks,
-                                       int32_t task_count_max, bool *truncated);
-static int32_t local_load_task_targets(void *context, int64_t task_id, bool problems_only,
-                                       Link_Target *targets, int32_t target_count_max,
+static int32_t local_load_target_tasks(void *context, int64_t target_id, Array_Slice tasks,
                                        bool *truncated);
-static bool local_set_task_targets(void *context, int64_t task_id, const int64_t *target_ids,
-                                   int32_t target_count);
+static int32_t local_load_task_targets(void *context, int64_t task_id, bool problems_only,
+                                       Array_Slice targets, bool *truncated);
+static bool local_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
 static uint64_t local_revision(void *context);
 static const char *local_error(const void *context);
 
@@ -101,14 +98,13 @@ static void local_changed(Local_Backend *local) {
     local->revision++;
 }
 
-static int32_t local_load_range(void *context, Date first, Date last, Event *events,
-                                int32_t event_count_max, bool *truncated) {
+static int32_t local_load_range(void *context, Date first, Date last, Array_Slice events,
+                                bool *truncated) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
-    int32_t count = event_store_load_range(&local->store, first, last, events, event_count_max,
-                                           truncated);
+    int32_t count = event_store_load_range(&local->store, first, last, events, truncated);
     if (count < 0) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
     }
@@ -116,14 +112,13 @@ static int32_t local_load_range(void *context, Date first, Date last, Event *eve
 }
 
 static int32_t local_load_completions(void *context, Date first, Date last,
-                                      Task_Completion *completions, int32_t completion_count_max,
-                                      bool *truncated) {
+                                      Array_Slice completions, bool *truncated) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
     int32_t count = event_store_load_completions(&local->store, first, last, completions,
-                                                 completion_count_max, truncated);
+                                                 truncated);
     if (count < 0) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
     }
@@ -198,14 +193,13 @@ static int64_t local_location(void *context, const char *address, const char *ci
     return id;
 }
 
-static int32_t local_load_target_tasks(void *context, int64_t target_id, Linked_Task *tasks,
-                                       int32_t task_count_max, bool *truncated) {
+static int32_t local_load_target_tasks(void *context, int64_t target_id, Array_Slice tasks,
+                                       bool *truncated) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
-    int32_t count = event_store_load_target_tasks(&local->store, target_id, tasks,
-                                                  task_count_max, truncated);
+    int32_t count = event_store_load_target_tasks(&local->store, target_id, tasks, truncated);
     if (count < 0) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
     }
@@ -213,27 +207,25 @@ static int32_t local_load_target_tasks(void *context, int64_t target_id, Linked_
 }
 
 static int32_t local_load_task_targets(void *context, int64_t task_id, bool problems_only,
-                                       Link_Target *targets, int32_t target_count_max,
-                                       bool *truncated) {
+                                       Array_Slice targets, bool *truncated) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return -1;
     }
-    int32_t count = event_store_load_task_targets(&local->store, task_id, problems_only,
-                                                  targets, target_count_max, truncated);
+    int32_t count = event_store_load_task_targets(&local->store, task_id, problems_only, targets,
+                                                  truncated);
     if (count < 0) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
     }
     return count;
 }
 
-static bool local_set_task_targets(void *context, int64_t task_id, const int64_t *target_ids,
-                                   int32_t target_count) {
+static bool local_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return false;
     }
-    if (!event_store_set_task_targets(&local->store, task_id, target_ids, target_count)) {
+    if (!event_store_set_task_targets(&local->store, task_id, target_ids)) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
         return false;
     }

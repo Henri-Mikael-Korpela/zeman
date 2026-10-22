@@ -85,8 +85,9 @@ static void problems_view_load(Problems_View *view, Backend *backend, uint64_t r
     view->problem_count = 0;
     view->truncated = false;
     view->error[0] = '\0';
-    int32_t count = backend_load_task_targets(backend, 0, true, view->problems,
-                                              PROBLEMS_VIEW_COUNT_MAX, &view->truncated);
+    int32_t count = backend_load_task_targets(
+        backend, 0, true, array_slice_make(view->problems, PROBLEMS_VIEW_COUNT_MAX),
+        &view->truncated);
     // Marked loaded either way, so that a failure is retried at the next change, not every
     // frame, as the calendar does.
     view->loaded = true;

@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <zeman/array_slice.h>
 #include <zeman/event.h>
 
 // The conversation between the Android app (client) and the desktop app (server).
@@ -74,22 +75,23 @@ typedef enum Protocol_Status {
 // Writes into a fixed buffer. Writing past the end sets overflow rather than writing, so that
 // a message is built without checking every call, and checked once at the end.
 typedef struct Writer {
-    uint8_t *buffer;
-    size_t size;
-    size_t length;
+    Array_Slice buffer;  // The room for the message, in bytes
+    size_t length;       // Bytes written so far
     bool overflow;
 } Writer;
 
 // Reads from a fixed buffer. Reading past the end, or reading a value that breaks its rules,
 // sets failed and yields zeroes, so that a message is read without checking every call.
 typedef struct Reader {
-    const uint8_t *buffer;
-    size_t length;
-    size_t position;
+    Array_Slice buffer;  // The message, in bytes
+    size_t position;     // Bytes read so far
     bool failed;
 } Reader;
 
-Writer writer_make(uint8_t *buffer, size_t size);
+/**
+ * A writer into buffer, a slice of bytes that is not empty, and a reader of the message in it.
+ */
+Writer writer_make(Array_Slice buffer);
 void writer_u8(Writer *writer, uint8_t value);
 void writer_u32(Writer *writer, uint32_t value);
 void writer_i32(Writer *writer, int32_t value);
@@ -102,7 +104,7 @@ void writer_completion(Writer *writer, const Task_Completion *completion);
 void writer_linked_task(Writer *writer, const Linked_Task *task);
 void writer_link_target(Writer *writer, const Link_Target *target);
 
-Reader reader_make(const uint8_t *buffer, size_t length);
+Reader reader_make(Array_Slice buffer);
 uint8_t reader_u8(Reader *reader);
 uint32_t reader_u32(Reader *reader);
 int32_t reader_i32(Reader *reader);

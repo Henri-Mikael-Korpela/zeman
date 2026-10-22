@@ -126,6 +126,7 @@ static void desktop_database_open(Desktop *desktop);
 static void desktop_database_apply(Desktop *desktop, App *app);
 static const char *database_path(char *buffer, int32_t buffer_size);
 static bool desktop_redraw_needed(Desktop *desktop);
+static bool desktop_window_has_area(void);
 static void desktop_wait(void);
 static void desktop_frame(Desktop *desktop, App *app);
 static void desktop_draw(Desktop *desktop, App *app, float width, float height);
@@ -190,7 +191,9 @@ int main(int argc, char **argv) {
     // An intentionally unbounded loop: it runs until the window is closed.
     // Phones are served on every pass, whether or not rendering happens,
     // so that phones never wait for the window.
-    while (!WindowShouldClose()) {
+    // raylib learns of a close request only in the input poll at the end of a drawn frame, which
+    // a minimized window never has (see desktop_redraw_needed), so GLFW is asked directly too.
+    while (!WindowShouldClose() && !glfwWindowShouldClose(window)) {
         if (!desktop.client_mode) {
             server_poll(&desktop.server);
         }
@@ -361,14 +364,21 @@ static void desktop_frame(Desktop *desktop, App *app) {
 static void desktop_draw(Desktop *desktop, App *app, float width, float height) {
     assert(width > 0.0f);
     assert(height > 0.0f);
+
     ClearBackground(GetColor((unsigned int)GuiGetStyle(DEFAULT, BACKGROUND_COLOR)));
+
     Rectangle content = { 0, 0, width, height };
     if (!desktop->client_mode) {
         Rectangle navigation = { 0, 0, NAVIGATION_WIDTH_PIXELS, height };
         desktop->view = navigation_draw(app, desktop->view, navigation);
-        content = (Rectangle){ NAVIGATION_WIDTH_PIXELS, 0, width - NAVIGATION_WIDTH_PIXELS,
-                               height };
+        content = (Rectangle){
+            NAVIGATION_WIDTH_PIXELS,         // x
+            0,                               // y
+            width - NAVIGATION_WIDTH_PIXELS, // width
+            height                           // height
+        };
     }
+
     switch (desktop->view) {
     case VIEW_CALENDAR:
         app_frame(app, content);
@@ -386,9 +396,10 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height) 
         }
         break;
     case VIEW_COUNT:
-        assert(false); // Not a view.
+        assert(false); // Not a valid view.
         break;
     }
+
     App_Cursor cursor = APP_CURSOR_DEFAULT;
     if (desktop->view == VIEW_CALENDAR) {
         cursor = app_cursor(app);
@@ -414,6 +425,7 @@ static int desktop_cursor_shape(App_Cursor cursor) {
     case APP_CURSOR_MOVE:
         return MOUSE_CURSOR_RESIZE_ALL;
     }
+
     assert(false); // Every App_Cursor is handled above.
     return MOUSE_CURSOR_DEFAULT;
 }
@@ -426,6 +438,11 @@ static int desktop_cursor_shape(App_Cursor cursor) {
 static void desktop_window_refresh(GLFWwindow *window) {
     Desktop_Frame *frame = glfwGetWindowUserPointer(window);
     assert(frame != NULL);
+    // Windows also asks for a refresh of a window it has just minimized.
+    if (!desktop_window_has_area()) {
+        return;
+    }
+
     BeginDrawing();
     desktop_draw(frame->desktop, frame->app, (float)GetScreenWidth(),
                  (float)GetScreenHeight());
@@ -441,18 +458,17 @@ static bool desktop_redraw_needed(Desktop *desktop) {
     Redraw *redraw = &desktop->redraw;
     assert(redraw->frames_pending >= 0);
     assert(redraw->frames_pending <= REDRAW_FRAMES_AFTER_INPUT);
+
+    // A minimized window has nothing to draw into, and ending a frame in it would block in
+    // raylib until the window is restored, which would leave phones unanswered. Restoring it
+    // draws again: the new size is input_is_active's resize, and the refresh callback draws too.
+    if (!desktop_window_has_area()) {
+        return false;
+    }
     if (input_is_active()) {
         redraw->frames_pending = REDRAW_FRAMES_AFTER_INPUT;
     }
     if (redraw->frames_pending > 0) {
-        return true;
-    }
-    // raylib learns of a close request only in the input poll at the end of a frame, so one
-    // more frame lets the main loop see it. The window is GLFW's current context, raylib's only
-    // window; GetWindowHandle would not do, as on Windows it returns the HWND instead.
-    GLFWwindow *window = glfwGetCurrentContext();
-    assert(window != NULL);
-    if (glfwWindowShouldClose(window)) {
         return true;
     }
     if (GetTime() - redraw->drawn_at_seconds >= REDRAW_INTERVAL_SECONDS) {
@@ -470,6 +486,17 @@ static bool desktop_redraw_needed(Desktop *desktop) {
 }
 
 /**
+ * Whether the window has any area to draw into. A minimized window has none: Windows reports its
+ * client area as 0 by 0, and the layout cannot be made for that.
+ */
+static bool desktop_window_has_area(void) {
+    if (GetScreenWidth() <= 0) {
+        return false;
+    }
+    return GetScreenHeight() > 0;
+}
+
+/**
  * Sleeps until input arrives or IDLE_WAIT_SECONDS pass. raylib's own EnableEventWaiting has no
  * timeout, which would leave phones unanswered until the user moved the mouse. GLFW's callbacks
  * record the input into raylib's state on top of the last frame's poll, so the input functions
@@ -478,6 +505,7 @@ static bool desktop_redraw_needed(Desktop *desktop) {
 static void desktop_wait(void) {
     assert(IsWindowReady());
     assert(IDLE_WAIT_SECONDS > 0.0);
+
     glfwWaitEventsTimeout(IDLE_WAIT_SECONDS);
 }
 
@@ -564,6 +592,10 @@ static bool options_parse(int argc, char **argv, Options *options) {
     return port_parse(colon + 1, &options->connect_port) && options->connect_host[0] != '\0';
 }
 
+/**
+ * Parses port number.
+ * @returns True on success, false on failure.
+ */
 static bool port_parse(const char *text, uint16_t *port) {
     char *end = NULL;
     long value = strtol(text, &end, 10);

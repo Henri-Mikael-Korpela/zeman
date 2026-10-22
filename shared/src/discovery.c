@@ -47,18 +47,20 @@ bool discovery_poll(Discovery *discovery) {
     if (discovery->probe_sent_ms == 0 ||
         now - discovery->probe_sent_ms >= DISCOVERY_PROBE_INTERVAL_MS) {
         discovery->probe_sent_ms = now;
-        const char probe[] = PROTOCOL_DISCOVERY_PROBE;
+        char probe[] = PROTOCOL_DISCOVERY_PROBE;
         // The limited broadcast address reaches every device on this network and no further.
-        net_udp_send(discovery->socket, "255.255.255.255", PROTOCOL_DISCOVERY_PORT, probe,
-                     (int32_t)strlen(probe));
+        net_udp_send(discovery->socket, "255.255.255.255", PROTOCOL_DISCOVERY_PORT,
+                     array_slice_make(probe, (int32_t)strlen(probe)));
     }
 
     for (int32_t i = 0; i < DISCOVERY_ANSWERS_PER_POLL; i++) {
         char answer[PROTOCOL_DISCOVERY_SIZE_MAX] = "";
         char address[NET_ADDRESS_SIZE] = "";
         uint16_t from_port = 0;
-        int32_t length = net_udp_recv(discovery->socket, answer, sizeof(answer) - 1, address,
-                                      sizeof(address), &from_port);
+        // One byte is kept for the terminator that makes the answer a string.
+        int32_t length = net_udp_recv(discovery->socket,
+                                      array_slice_make(answer, (int32_t)sizeof(answer) - 1),
+                                      address, sizeof(address), &from_port);
         if (length == 0) {
             break;
         }

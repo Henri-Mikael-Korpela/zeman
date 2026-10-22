@@ -7,6 +7,7 @@
 #include "raygui.h"
 
 #include <zeman/app.h>
+#include <zeman/array_slice.h>
 #include <zeman/bound.h>
 #include <zeman/text_box.h>
 
@@ -554,7 +555,7 @@ static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute, Mi
 static float circle_half_width(float radius, float offset_y);
 static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered);
 static Rectangle timeline_item_block(Rectangle day, const Timeline_Item *item);
-static int32_t timeline_day_items(const App *app, int32_t day_number, Timeline_Item *items);
+static int32_t timeline_day_items(const App *app, int32_t day_number, Array_Slice items);
 static Timeline_Hit timeline_hit_test(const App *app, const Layout *layout, float top,
                                       int32_t first_day);
 static void timeline_drag_update(App *app, const Layout *layout, float top);
@@ -574,14 +575,13 @@ static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_
                                          bool hovered);
 static void draw_timeline_item(const App *app, const Event *event, Rectangle block,
                                int32_t day_number);
-static int32_t timeline_items_collect(const App *app, int32_t day_number, Timeline_Item *items);
+static int32_t timeline_items_collect(const App *app, int32_t day_number, Array_Slice items);
 static Timeline_Item timeline_item_make(const Event *event, int32_t event_index);
-static void timeline_items_sort(Timeline_Item *items, int32_t count);
+static void timeline_items_sort(Array_Slice items);
 static bool timeline_item_is_before(const Timeline_Item *a, const Timeline_Item *b);
-static void timeline_items_assign_lanes(Timeline_Item *items, int32_t count);
-static int32_t timeline_lane_find(const int32_t *lane_bottoms, int32_t lane_count,
-                                  int32_t minute_top);
-static void timeline_items_set_lane_count(Timeline_Item *items, int32_t first_index,
+static void timeline_items_assign_lanes(Array_Slice items);
+static int32_t timeline_lane_find(Array_Slice lanes, int32_t minute_top);
+static void timeline_items_set_lane_count(Array_Slice items, int32_t first_index,
                                           int32_t end_index, int32_t lane_count);
 static const Event *focused_event_find(const App *app);
 static void app_focus_item(App *app, int64_t id);
@@ -1036,7 +1036,8 @@ static void app_load_events(App *app, Date month, uint64_t revision) {
 
     Date first = grid_first_date(month);
     Date last = date_add_days(first, GRID_CELL_COUNT - 1);
-    int32_t count = backend_load_range(app->backend, first, last, app->events, EVENT_COUNT_MAX,
+    int32_t count = backend_load_range(app->backend, first, last,
+                                       array_slice_make(app->events, EVENT_COUNT_MAX),
                                        &app->events_truncated);
     if (count < 0) {
         snprintf(app->status, sizeof(app->status), "%s", backend_error(app->backend));
@@ -1046,8 +1047,9 @@ static void app_load_events(App *app, Date month, uint64_t revision) {
     app->event_count = count;
 
     bool completions_truncated = false;
-    count = backend_load_completions(app->backend, first, last, app->completions,
-                                     COMPLETION_COUNT_MAX, &completions_truncated);
+    count = backend_load_completions(app->backend, first, last,
+                                     array_slice_make(app->completions, COMPLETION_COUNT_MAX),
+                                     &completions_truncated);
     if (count < 0) {
         snprintf(app->status, sizeof(app->status), "%s", backend_error(app->backend));
         return;
@@ -1245,12 +1247,14 @@ static void app_form_load_links(App *app) {
     form->target_count = 0;
     int32_t count = 0;
     if (event_kind_is_target(form->kind) && form->editing_id != 0) {
-        count = backend_load_target_tasks(app->backend, form->editing_id, form->tasks,
-                                          LINK_COUNT_MAX, &form->links_truncated);
+        count = backend_load_target_tasks(app->backend, form->editing_id,
+                                          array_slice_make(form->tasks, LINK_COUNT_MAX),
+                                          &form->links_truncated);
         form->task_count = int32_max(count, 0);
     } else {
-        count = backend_load_task_targets(app->backend, form->editing_id, false, form->targets,
-                                          LINK_COUNT_MAX, &form->links_truncated);
+        count = backend_load_task_targets(app->backend, form->editing_id, false,
+                                          array_slice_make(form->targets, LINK_COUNT_MAX),
+                                          &form->links_truncated);
         form->target_count = int32_max(count, 0);
     }
     if (count < 0) {
@@ -1292,7 +1296,8 @@ static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserte
     } else {
         assert(target_count == 0);
     }
-    if (!backend_set_task_targets(app->backend, id, target_ids, target_count)) {
+    if (!backend_set_task_targets(app->backend, id,
+                                  array_slice_make(target_ids, target_count))) {
         snprintf(app->form.error, sizeof(app->form.error), "%s", backend_error(app->backend));
         return false;
     }
@@ -2318,7 +2323,8 @@ static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
     assert(day.height == (float)TIMELINE_HEIGHT_PIXELS);
     // On the stack, because it is needed only while one day is drawn; about 10 KB.
     Timeline_Item items[EVENT_COUNT_MAX] = { 0 };
-    const int32_t count = timeline_day_items(app, day_number, items);
+    const int32_t count = timeline_day_items(app, day_number,
+                                             array_slice_make(items, EVENT_COUNT_MAX));
 
     // The busy part of the day runs from the first item's start to the last one's end; sorted
     // by start, the first item starts first, but any item may end last.
@@ -2343,10 +2349,12 @@ static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
  * The day's timed items in drawing order, with their lanes: the one layout that both drawing
  * and finding the block under the pointer use, so that they always agree. Returns how many.
  */
-static int32_t timeline_day_items(const App *app, int32_t day_number, Timeline_Item *items) {
+static int32_t timeline_day_items(const App *app, int32_t day_number, Array_Slice items) {
     const int32_t count = timeline_items_collect(app, day_number, items);
-    timeline_items_sort(items, count);
-    timeline_items_assign_lanes(items, count);
+    // Only the items collected are put in order, and given lanes.
+    const Array_Slice collected = array_slice_make(items.items, count);
+    timeline_items_sort(collected);
+    timeline_items_assign_lanes(collected);
     return count;
 }
 
@@ -2385,7 +2393,8 @@ static Timeline_Hit timeline_hit_test(const App *app, const Layout *layout, floa
                             layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
     // On the stack, as when the day is drawn; about 10 KB.
     Timeline_Item items[EVENT_COUNT_MAX] = { 0 };
-    const int32_t count = timeline_day_items(app, first_day + column, items);
+    const int32_t count = timeline_day_items(app, first_day + column,
+                                             array_slice_make(items, EVENT_COUNT_MAX));
     const float grab = (float)TIMELINE_EDGE_GRAB_PIXELS;
     for (int32_t i = 0; i < count; i++) {
         const Rectangle block = timeline_item_block(day, &items[i]);
@@ -2740,13 +2749,16 @@ static void draw_timeline_item(const App *app, const Event *event, Rectangle blo
 /**
  * The items with a time that occur on day_number, in App.events' order. Returns how many.
  */
-static int32_t timeline_items_collect(const App *app, int32_t day_number, Timeline_Item *items) {
+static int32_t timeline_items_collect(const App *app, int32_t day_number, Array_Slice items) {
     assert(app->event_count <= EVENT_COUNT_MAX);
+    // Room for every event, as in the worst case every one of them is on the day.
+    assert(items.count >= app->event_count);
+    Timeline_Item *timeline_items = items.items;
     int32_t count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
         const Event *event = &app->events[i];
         if (event_is_timed(event) && event_occurs_on_day(event, day_number)) {
-            items[count] = timeline_item_make(event, i);
+            timeline_items[count] = timeline_item_make(event, i);
             count++;
         }
     }
@@ -2791,18 +2803,19 @@ static Timeline_Item timeline_item_make(const Event *event, int32_t event_index)
  * Insertion sort, because a day holds few items and they mostly come in order already, by
  * start; a stable sort also keeps App.events' order for items that start together.
  */
-static void timeline_items_sort(Timeline_Item *items, int32_t count) {
-    assert(count >= 0);
-    assert(count <= EVENT_COUNT_MAX);
-    for (int32_t i = 1; i < count; i++) {
-        const Timeline_Item item = items[i];
+static void timeline_items_sort(Array_Slice items) {
+    assert(items.count >= 0);
+    assert(items.count <= EVENT_COUNT_MAX);
+    Timeline_Item *timeline_items = items.items;
+    for (int32_t i = 1; i < items.count; i++) {
+        const Timeline_Item item = timeline_items[i];
         int32_t j = i;
         // Bounded by i, which j counts down from.
-        while (j > 0 && timeline_item_is_before(&item, &items[j - 1])) {
-            items[j] = items[j - 1];
+        while (j > 0 && timeline_item_is_before(&item, &timeline_items[j - 1])) {
+            timeline_items[j] = timeline_items[j - 1];
             j--;
         }
-        items[j] = item;
+        timeline_items[j] = item;
     }
 }
 
@@ -2822,22 +2835,24 @@ static bool timeline_item_is_before(const Timeline_Item *a, const Timeline_Item 
  * items that overlap, directly or through others, shares its lane count, so that the group
  * divides the day's width evenly and its lanes line up.
  */
-static void timeline_items_assign_lanes(Timeline_Item *items, int32_t count) {
-    assert(count >= 0);
+static void timeline_items_assign_lanes(Array_Slice items) {
+    assert(items.count >= 0);
+    Timeline_Item *timeline_items = items.items;
     int32_t lane_bottoms[TIMELINE_LANE_COUNT_MAX] = { 0 };  // Minute each lane is free from
     int32_t lane_count = 0;
     int32_t group_first_index = 0;
     int32_t group_bottom = 0;  // Minute the group's last item ends
-    for (int32_t i = 0; i < count; i++) {
-        Timeline_Item *item = &items[i];
-        assert(i == 0 || !timeline_item_is_before(item, &items[i - 1]));
+    for (int32_t i = 0; i < items.count; i++) {
+        Timeline_Item *item = &timeline_items[i];
+        assert(i == 0 || !timeline_item_is_before(item, &timeline_items[i - 1]));
         if (item->minute_top >= group_bottom) {
             // Nothing before overlaps this item, so the group before it is complete.
             timeline_items_set_lane_count(items, group_first_index, i, lane_count);
             group_first_index = i;
             lane_count = 0;
         }
-        const int32_t lane = timeline_lane_find(lane_bottoms, lane_count, item->minute_top);
+        const int32_t lane = timeline_lane_find(array_slice_make(lane_bottoms, lane_count),
+                                                item->minute_top);
         if (lane == lane_count) {
             lane_count++;
         }
@@ -2853,15 +2868,16 @@ static void timeline_items_assign_lanes(Timeline_Item *items, int32_t count) {
             group_bottom = item->minute_bottom;
         }
     }
-    timeline_items_set_lane_count(items, group_first_index, count, lane_count);
+    timeline_items_set_lane_count(items, group_first_index, items.count, lane_count);
 }
 
 /**
  * The leftmost of the first lane_count lanes that is free at minute_top; else a new lane,
  * lane_count, while there may be more; else the lane that frees up first.
  */
-static int32_t timeline_lane_find(const int32_t *lane_bottoms, int32_t lane_count,
-                                  int32_t minute_top) {
+static int32_t timeline_lane_find(Array_Slice lanes, int32_t minute_top) {
+    const int32_t *lane_bottoms = lanes.items;
+    const int32_t lane_count = lanes.count;
     assert(lane_count >= 0);
     assert(lane_count <= TIMELINE_LANE_COUNT_MAX);
     for (int32_t lane = 0; lane < lane_count; lane++) {
@@ -2884,13 +2900,15 @@ static int32_t timeline_lane_find(const int32_t *lane_bottoms, int32_t lane_coun
 /**
  * Items first_index up to, but not including, end_index form one group.
  */
-static void timeline_items_set_lane_count(Timeline_Item *items, int32_t first_index,
+static void timeline_items_set_lane_count(Array_Slice items, int32_t first_index,
                                           int32_t end_index, int32_t lane_count) {
     assert(first_index <= end_index);
+    assert(end_index <= items.count);
+    Timeline_Item *timeline_items = items.items;
     // A group of items has a lane for each; only the empty group before the first has none.
     assert((lane_count > 0) == (first_index < end_index));
     for (int32_t i = first_index; i < end_index; i++) {
-        items[i].lane_count = lane_count;
+        timeline_items[i].lane_count = lane_count;
     }
 }
 
