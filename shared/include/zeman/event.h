@@ -167,6 +167,6 @@ Target_Status target_status(int32_t task_count, int32_t task_done_count);
 /**
  * "No planned tasks", "Planned", "Partly completed" or "Completed".
  */
-const char *target_status_name(Target_Status status);
+Str target_status_name(Target_Status status);
 
 #endif

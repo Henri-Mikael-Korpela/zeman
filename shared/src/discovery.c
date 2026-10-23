@@ -12,7 +12,7 @@ enum {
     DISCOVERY_ANSWERS_PER_POLL = 8,
 };
 
-static bool discovery_parse_answer(const char *answer, uint16_t *port);
+static bool discovery_parse_answer(Str answer, uint16_t *port);
 
 bool discovery_start(Discovery *discovery) {
     *discovery = (Discovery){ .socket = NET_SOCKET_INVALID };
@@ -64,9 +64,10 @@ bool discovery_poll(Discovery *discovery) {
         if (length == 0) {
             break;
         }
-        answer[length] = '\0';
         uint16_t port = 0;
-        if (net_address_is_local(address) && discovery_parse_answer(answer, &port)) {
+        // The datagram has a length of its own, so it needs no terminator to be read.
+        const Str answer_text = str_make(answer, (size_t)length);
+        if (net_address_is_local(address) && discovery_parse_answer(answer_text, &port)) {
             snprintf(discovery->found_address, sizeof(discovery->found_address), "%s", address);
             discovery->found_port = port;
             discovery->found = true;
@@ -79,16 +80,16 @@ bool discovery_poll(Discovery *discovery) {
 /**
  * "ZEMAN-SERVER 1 47800": the reply prefix, then a port of digits only.
  */
-static bool discovery_parse_answer(const char *answer, uint16_t *port) {
-    const size_t prefix_length = strlen(PROTOCOL_DISCOVERY_REPLY);
-    if (strncmp(answer, PROTOCOL_DISCOVERY_REPLY, prefix_length) != 0) {
+static bool discovery_parse_answer(Str answer, uint16_t *port) {
+    const Str prefix = str_from_cstr(PROTOCOL_DISCOVERY_REPLY);
+    if (!str_starts_with(answer, prefix)) {
         return false;
     }
-    const char *digits = answer + prefix_length;
-    if (digits[0] == '\0' || strspn(digits, "0123456789") != strlen(digits)) {
+    // str_to_u64 takes digits only, so a sign, a space or an empty port are all refused.
+    uint64_t value = 0;
+    if (!str_to_u64(str_slice(answer, prefix.length, answer.length), &value)) {
         return false;
     }
-    long value = strtol(digits, NULL, 10);
     if (value < 1 || value > UINT16_MAX) {
         return false;
     }

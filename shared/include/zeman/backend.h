@@ -6,6 +6,7 @@
 
 #include <zeman/array_slice.h>
 #include <zeman/event.h>
+#include <zeman/str.h>
 
 // Where the calendar's data lives, as the user interface sees it. The desktop app reads and
 // writes its SQLite database directly; the Android app asks the desktop app over the network.
@@ -32,7 +33,7 @@ typedef struct Backend_Ops {
     bool (*remove)(void *context, int64_t id);
     bool (*set_task_done)(void *context, int64_t id, Date occurrence_start, bool done);
     // Returns the id of the location with this address and city, creating it if needed, or 0.
-    int64_t (*location_find_or_create)(void *context, const char *address, const char *city);
+    int64_t (*location_find_or_create)(void *context, Str address, Str city);
     // Loads the tasks linked to a link target, in start order, into tasks, a slice of
     // Linked_Task. Returns the count, or -1. Sets *truncated when more than tasks.count are
     // linked.
@@ -52,7 +53,7 @@ typedef struct Backend_Ops {
     // A number that changes whenever the data changes, from this program or another, so that
     // the user interface knows when to reload. 0 when unknown, for example while disconnected.
     uint64_t (*revision)(void *context);
-    const char *(*error)(const void *context);
+    Str (*error)(const void *context);
 } Backend_Ops;
 
 typedef struct Backend {
@@ -88,8 +89,7 @@ static inline bool backend_set_task_done(Backend *backend, int64_t id, Date occu
     return backend->ops->set_task_done(backend->context, id, occurrence_start, done);
 }
 
-static inline int64_t backend_location_find_or_create(Backend *backend, const char *address,
-                                                      const char *city) {
+static inline int64_t backend_location_find_or_create(Backend *backend, Str address, Str city) {
     return backend->ops->location_find_or_create(backend->context, address, city);
 }
 
@@ -114,8 +114,16 @@ static inline uint64_t backend_revision(Backend *backend) {
     return backend->ops->revision(backend->context);
 }
 
-static inline const char *backend_error(const Backend *backend) {
+static inline Str backend_error(const Backend *backend) {
     return backend->ops->error(backend->context);
+}
+
+/**
+ * Copies the error text into buffer, cut at a whole character when it does not fit: the callers
+ * keep it in a fixed field of a form or a view, where a shortened message is better than none.
+ */
+static inline void backend_error_copy(const Backend *backend, char *buffer, size_t buffer_size) {
+    (void)str_copy_truncated(backend_error(backend), buffer, buffer_size);
 }
 
 #endif

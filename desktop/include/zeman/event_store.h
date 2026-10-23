@@ -62,8 +62,7 @@ int32_t event_store_load_range(Event_Store *store, Date first, Date last, Array_
  * Returns the id of the location with exactly this address and city, creating it if there is
  * none, or 0 on failure. Either text may be empty, but not both.
  */
-int64_t event_store_location_find_or_create(Event_Store *store, const char *address,
-                                            const char *city);
+int64_t event_store_location_find_or_create(Event_Store *store, Str address, Str city);
 
 /**
  * Marks one occurrence of a task, identified by its start date, as done or not done.

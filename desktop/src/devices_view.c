@@ -23,7 +23,8 @@ void devices_view_init(Devices_View *view, const Server *server) {
     if (!server->listening) {
         return;
     }
-    protocol_link_format(view->link, sizeof(view->link), server->address, server->port);
+    protocol_link_format(view->link, sizeof(view->link), str_from_cstr(server->address),
+                         server->port);
     uint8_t scratch[qrcodegen_BUFFER_LEN_FOR_VERSION(DEVICES_VIEW_QR_VERSION_MAX)];
     // Medium error correction, which survives glare and a partly hidden code on a screen.
     view->qr_ready = qrcodegen_encodeText(view->link, scratch, view->qr, qrcodegen_Ecc_MEDIUM,
@@ -37,16 +38,16 @@ void devices_view_draw(const Devices_View *view, const Server *server, const App
                        Rectangle area) {
     const float x = area.x + MARGIN_PIXELS;
     float y = area.y + MARGIN_PIXELS;
-    app_draw_text(app, APP_TEXT_HEADING, "Connected Devices", x, y);
+    app_draw_text(app, APP_TEXT_HEADING, STR("Connected Devices"), x, y);
     y += 2 * LINE_PIXELS;
 
     char text[TEXT_SIZE] = "";
     if (!server->listening || !view->qr_ready) {
         snprintf(text, sizeof(text), "Phone access is off: %s", server->error);
-        app_draw_text(app, APP_TEXT_NORMAL, text, x, y);
+        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(text), x, y);
         return;
     }
-    app_draw_text(app, APP_TEXT_NORMAL, "Scan this code with the Zeman app on your phone:",
+    app_draw_text(app, APP_TEXT_NORMAL, STR("Scan this code with the Zeman app on your phone:"),
                   x, y);
     y += LINE_PIXELS + 8;
     float qr_size = devices_view_draw_qr(view, x, y);
@@ -54,16 +55,16 @@ void devices_view_draw(const Devices_View *view, const Server *server, const App
     // Beside the code: the address to type instead, and who is connected.
     const float side_x = x + qr_size + MARGIN_PIXELS;
     float side_y = y;
-    app_draw_text(app, APP_TEXT_DIM, "Or type this address in the app:", side_x, side_y);
+    app_draw_text(app, APP_TEXT_DIM, STR("Or type this address in the app:"), side_x, side_y);
     side_y += LINE_PIXELS;
     if (server->port == PROTOCOL_PORT_DEFAULT) {
         snprintf(text, sizeof(text), "%s", server->address);
     } else {
         snprintf(text, sizeof(text), "%s:%u", server->address, (unsigned)server->port);
     }
-    app_draw_text(app, APP_TEXT_HEADING, text, side_x, side_y);
+    app_draw_text(app, APP_TEXT_HEADING, str_from_cstr(text), side_x, side_y);
     side_y += 2 * LINE_PIXELS;
-    app_draw_text(app, APP_TEXT_DIM, "The phone must be on the same Wi-Fi network.", side_x,
+    app_draw_text(app, APP_TEXT_DIM, STR("The phone must be on the same Wi-Fi network."), side_x,
                   side_y);
     side_y += 2 * LINE_PIXELS;
     devices_view_draw_clients(server, app, side_x, side_y);
@@ -92,7 +93,7 @@ static float devices_view_draw_qr(const Devices_View *view, float x, float y) {
 }
 
 static void devices_view_draw_clients(const Server *server, const App *app, float x, float y) {
-    app_draw_text(app, APP_TEXT_NORMAL, "Connected now", x, y);
+    app_draw_text(app, APP_TEXT_NORMAL, STR("Connected now"), x, y);
     y += LINE_PIXELS + 4;
     int32_t shown = 0;
     for (int32_t i = 0; i < SERVER_CLIENT_COUNT_MAX; i++) {
@@ -108,11 +109,11 @@ static void devices_view_draw_clients(const Server *server, const App *app, floa
         }
         char text[TEXT_SIZE] = "";
         snprintf(text, sizeof(text), "%s, since %s", client->address, since);
-        app_draw_text(app, APP_TEXT_NORMAL, text, x, y);
+        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(text), x, y);
         y += LINE_PIXELS;
         shown++;
     }
     if (shown == 0) {
-        app_draw_text(app, APP_TEXT_DIM, "No phone is connected.", x, y);
+        app_draw_text(app, APP_TEXT_DIM, STR("No phone is connected."), x, y);
     }
 }

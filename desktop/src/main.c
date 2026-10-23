@@ -171,9 +171,9 @@ int main(int argc, char **argv) {
         .touch = false,
     };
     App *app = app_create(&desktop.backend, &config);
-    app_set_info(app, desktop.info);
+    app_set_info(app, str_from_cstr(desktop.info));
     if (!desktop.client_mode && !desktop.local.store_open) {
-        app_set_status(app, desktop.settings_view.message);
+        app_set_status(app, str_from_cstr(desktop.settings_view.message));
     }
 
     // Windows runs its own loop while the user drags a window edge, in which the main loop below
@@ -220,7 +220,8 @@ static void desktop_open(Desktop *desktop, const Options *options) {
     problems_view_init(&desktop->problems);
     if (desktop->client_mode) {
         client_init(&desktop->client);
-        client_set_server(&desktop->client, options->connect_host, options->connect_port);
+        client_set_server(&desktop->client, str_from_cstr(options->connect_host),
+                          options->connect_port);
         desktop->backend = client_backend(&desktop->client);
         snprintf(desktop->info, sizeof(desktop->info), "Client of %s:%u", options->connect_host,
                  (unsigned)options->connect_port);
@@ -249,7 +250,7 @@ static void desktop_database_open(Desktop *desktop) {
     if (!settings_load(&desktop->settings, GetApplicationDirectory())) {
         settings_view_init(view, "");
         snprintf(message, sizeof(message), "No database opened: %s", desktop->settings.error);
-        settings_view_set_message(view, message);
+        settings_view_set_message(view, str_from_cstr(message));
         return;
     }
     const bool configured = desktop->settings.database_path[0] != '\0';
@@ -261,7 +262,7 @@ static void desktop_database_open(Desktop *desktop) {
     settings_view_init(view, path);
     if (!local_backend_switch(&desktop->local, path, !configured)) {
         snprintf(message, sizeof(message), "No database opened: %s", desktop->local.error);
-        settings_view_set_message(view, message);
+        settings_view_set_message(view, str_from_cstr(message));
         return;
     }
     snprintf(desktop->database_path, sizeof(desktop->database_path), "%s", path);
@@ -274,13 +275,13 @@ static void desktop_database_open(Desktop *desktop) {
 static void desktop_database_apply(Desktop *desktop, App *app) {
     Settings_View *view = &desktop->settings_view;
     if (view->path[0] == '\0') {
-        settings_view_set_message(view, "Enter the path of a database file.");
+        settings_view_set_message(view, STR("Enter the path of a database file."));
         return;
     }
     char message[SETTINGS_VIEW_MESSAGE_SIZE] = "";
     if (!local_backend_switch(&desktop->local, view->path, false)) {
         snprintf(message, sizeof(message), "Not changed: %s", desktop->local.error);
-        settings_view_set_message(view, message);
+        settings_view_set_message(view, str_from_cstr(message));
         return;
     }
     assert(desktop->local.store_open);
@@ -288,17 +289,17 @@ static void desktop_database_apply(Desktop *desktop, App *app) {
     // The calendar and problems reload on the new revision, but the open form and the focused
     // item hold ids of the old database, which would name other items in the new one.
     app_discard_edits(app);
-    app_set_status(app, "");
+    app_set_status(app, STR(""));
     snprintf(desktop->settings.database_path, sizeof(desktop->settings.database_path), "%s",
              view->path);
     if (!settings_save(&desktop->settings, GetApplicationDirectory())) {
         snprintf(message, sizeof(message),
                  "Switched, but the next start will not remember it: %s",
                  desktop->settings.error);
-        settings_view_set_message(view, message);
+        settings_view_set_message(view, str_from_cstr(message));
         return;
     }
-    settings_view_set_message(view, "Switched to this database.");
+    settings_view_set_message(view, STR("Switched to this database."));
 }
 
 /**
@@ -562,7 +563,7 @@ static View navigation_draw(const App *app, View current, Rectangle area) {
             DrawRectangleRec(item, GetColor((unsigned int)GuiGetStyle(DEFAULT,
                                                                        BASE_COLOR_FOCUSED)));
         }
-        app_draw_text(app, APP_TEXT_NORMAL, view_names[i], item.x + 20, item.y + 12);
+        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(view_names[i]), item.x + 20, item.y + 12);
         if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             chosen = (View)i;
         }
@@ -621,5 +622,5 @@ static void info_update(const Server *server, App *app) {
         snprintf(info, sizeof(info), "Phone access: %s, %d connected", server->address,
                  (int)count);
     }
-    app_set_info(app, info);
+    app_set_info(app, str_from_cstr(info));
 }

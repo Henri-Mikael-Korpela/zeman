@@ -41,17 +41,18 @@ bool settings_view_draw(Settings_View *view, const App *app, const char *databas
     assert(settings_directory != NULL);
     const float x = area.x + MARGIN_PIXELS;
     float y = area.y + MARGIN_PIXELS;
-    app_draw_text(app, APP_TEXT_HEADING, "Settings", x, y);
+    app_draw_text(app, APP_TEXT_HEADING, STR("Settings"), x, y);
     y += 2 * LINE_PIXELS;
-    app_draw_text(app, APP_TEXT_NORMAL, "Database file", x, y);
+    app_draw_text(app, APP_TEXT_NORMAL, STR("Database file"), x, y);
     y += LINE_PIXELS;
     app_draw_text(app, APP_TEXT_DIM,
-                  "The SQLite file that holds the calendar and problems. It must exist already.",
+                  STR("The SQLite file that holds the calendar and problems. "
+                      "It must exist already."),
                   x, y);
     y += LINE_PIXELS;
     app_draw_text(app, APP_TEXT_DIM,
-                  "In Explorer, Shift+right-click the file and choose Copy as path, then paste "
-                  "it here with Ctrl+V.",
+                  STR("In Explorer, Shift+right-click the file and choose Copy as path, then paste "
+                  "it here with Ctrl+V."),
                   x, y);
     y += LINE_PIXELS + 4;
 
@@ -68,14 +69,14 @@ bool settings_view_draw(Settings_View *view, const App *app, const char *databas
 
     char text[LABEL_SIZE] = "";
     snprintf(text, sizeof(text), "In use: %s", database_path[0] != '\0' ? database_path : "none");
-    app_draw_text(app, APP_TEXT_DIM, text, x, y);
+    app_draw_text(app, APP_TEXT_DIM, str_from_cstr(text), x, y);
     y += LINE_PIXELS;
     if (view->message[0] != '\0') {
-        app_draw_text(app, APP_TEXT_NORMAL, view->message, x, y);
+        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(view->message), x, y);
     }
     y += 2 * LINE_PIXELS;
     snprintf(text, sizeof(text), "Settings are saved in %ssettings.ini.", settings_directory);
-    app_draw_text(app, APP_TEXT_DIM, text, x, y);
+    app_draw_text(app, APP_TEXT_DIM, str_from_cstr(text), x, y);
 
     if (apply) {
         view->editing = false;
@@ -84,9 +85,9 @@ bool settings_view_draw(Settings_View *view, const App *app, const char *databas
     return apply;
 }
 
-void settings_view_set_message(Settings_View *view, const char *message) {
-    assert(message != NULL);
-    snprintf(view->message, sizeof(view->message), "%s", message);
+void settings_view_set_message(Settings_View *view, Str message) {
+    // A message that does not fit is cut at a whole character, which beats showing none.
+    (void)str_copy_truncated(message, view->message, sizeof(view->message));
 }
 
 /**
@@ -134,7 +135,7 @@ static void settings_view_paste(Settings_View *view) {
         cursor_index = length; // raygui clamps it only when it next draws the box.
     }
     text_box_cursor_index_set(text_box_paste(view->path, (int32_t)sizeof(view->path),
-                                             cursor_index, clipboard));
+                                             cursor_index, str_from_cstr(clipboard)));
 }
 
 /**
@@ -142,19 +143,11 @@ static void settings_view_paste(Settings_View *view) {
  * Explorer's "Copy as path" adds and which no Windows file name can hold.
  */
 static void settings_view_path_clean(char *path) {
-    size_t start = 0;
-    size_t length = strlen(path);
-    while (start < length && path[start] == ' ') {
-        start++;
+    Str cleaned = str_trim_any(str_from_cstr(path), STR(" "));
+    if (cleaned.length >= 2 && cleaned.data[0] == '"' && cleaned.data[cleaned.length - 1] == '"') {
+        cleaned = str_slice(cleaned, 1, cleaned.length - 1);
     }
-    while (length > start && path[length - 1] == ' ') {
-        length--;
-    }
-    if (length - start >= 2 && path[start] == '"' && path[length - 1] == '"') {
-        start++;
-        length--;
-    }
-    assert(start <= length);
-    memmove(path, path + start, length - start);
-    path[length - start] = '\0';
+    // The cleaned text lies within path and is never longer, so it moves down in place.
+    memmove(path, cleaned.data, cleaned.length);
+    path[cleaned.length] = '\0';
 }

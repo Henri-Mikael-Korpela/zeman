@@ -64,6 +64,7 @@ add_executable(zeman
     "${SHARED_DIR}/event.c"
     "${SHARED_DIR}/net.c"
     "${SHARED_DIR}/protocol.c"
+    "${SHARED_DIR}/str.c"
     "${SHARED_DIR}/text_box.c"
     "${QRCODEGEN_DIR}/qrcodegen.c"
 )
@@ -135,3 +136,32 @@ endif()
 # the database, which local_backend_open() creates next to the executable on first run.
 install(TARGETS zeman RUNTIME DESTINATION .)
 install(DIRECTORY "${FONTS_DIR}/" DESTINATION fonts)
+
+# Tests of shared code that need no window and no database. They are built and run on request:
+#   cmake --build <build directory> --target str_test wire_test
+# and then str_test and wire_test in the build directory. Assertions stay on, as for the application.
+add_executable(str_test EXCLUDE_FROM_ALL
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tests/str_test.c"
+    "${SHARED_DIR}/str.c"
+)
+target_include_directories(str_test PRIVATE "${SHARED_INCLUDE_DIR}")
+if(MSVC)
+    target_compile_options(str_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+    target_compile_options(str_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+
+add_executable(wire_test EXCLUDE_FROM_ALL
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tests/wire_test.c"
+    "${SHARED_DIR}/calendar.c"
+    "${SHARED_DIR}/event.c"
+    "${SHARED_DIR}/protocol.c"
+    "${SHARED_DIR}/str.c"
+    "${SHARED_DIR}/text_box.c"
+)
+target_include_directories(wire_test PRIVATE "${SHARED_INCLUDE_DIR}")
+if(MSVC)
+    target_compile_options(wire_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+    target_compile_options(wire_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()

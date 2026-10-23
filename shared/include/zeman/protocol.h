@@ -7,6 +7,7 @@
 
 #include <zeman/array_slice.h>
 #include <zeman/event.h>
+#include <zeman/str.h>
 
 // The conversation between the Android app (client) and the desktop app (server).
 //
@@ -97,7 +98,7 @@ void writer_u32(Writer *writer, uint32_t value);
 void writer_i32(Writer *writer, int32_t value);
 void writer_u64(Writer *writer, uint64_t value);
 void writer_i64(Writer *writer, int64_t value);
-void writer_text(Writer *writer, const char *text);
+void writer_text(Writer *writer, Str text);
 void writer_date(Writer *writer, Date date);
 void writer_event(Writer *writer, const Event *event);
 void writer_completion(Writer *writer, const Task_Completion *completion);
@@ -114,6 +115,12 @@ int64_t reader_i64(Reader *reader);
  * Copies the text with a terminator; a text that does not fit fails the reader.
  */
 void reader_text(Reader *reader, char *text, size_t text_size);
+/**
+ * The same text without a copy: a Str over the reader's own buffer, valid while that buffer is.
+ * A text with an embedded terminator, or one cut short by the end of the message, fails the
+ * reader and is empty.
+ */
+Str reader_str(Reader *reader);
 /**
  * A date that is not a real date fails the reader.
  */
@@ -137,13 +144,13 @@ bool reader_done(const Reader *reader);
 /**
  * Writes the link to the desktop app at address and port, as the QR code holds it.
  */
-void protocol_link_format(char *link, size_t link_size, const char *address, uint16_t port);
+void protocol_link_format(char *link, size_t link_size, Str address, uint16_t port);
 /**
  * Reads address and port from a link, or from "address" or "address:port" typed without the
  * prefix, the port then being PROTOCOL_PORT_DEFAULT. Returns false for anything else; whether
- * the address is local is left to the caller.
+ * the address is local is left to the caller. The address is a slice of link, not a copy.
  */
-bool protocol_link_parse(const char *link, char *address, size_t address_size, uint16_t *port);
+bool protocol_link_parse(Str link, Str *address, uint16_t *port);
 
 /**
  * Little-endian length prefix of a message.

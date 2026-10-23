@@ -283,6 +283,18 @@ static void phone_desktop_set(Phone *phone, const char *address) {
 }
 
 /**
+ * Reads the host and port out of a link, "address" or "address:port", through protocol_link_parse.
+ * The host is copied into a C string because the network functions take one.
+ */
+static bool link_parse_host(const char *link, char *host, size_t host_size, uint16_t *port) {
+    Str address = str_make("", 0);
+    if (!protocol_link_parse(str_from_cstr(link), &address, port)) {
+        return false;
+    }
+    return str_to_cstr(address, host, host_size);
+}
+
+/**
  * One line on the connection, for the drawer and the connection settings.
  */
 static void phone_status(const Phone *phone, char *text, size_t text_size) {
@@ -290,7 +302,7 @@ static void phone_status(const Phone *phone, char *text, size_t text_size) {
     char host[CLIENT_HOST_SIZE] = "";
     uint16_t port = 0;
     // Saved and chosen addresses are checked first, so only an empty one fails to parse.
-    if (!protocol_link_parse(phone->address, host, sizeof(host), &port)) {
+    if (!link_parse_host(phone->address, host, sizeof(host), &port)) {
         assert(phone->address[0] == '\0');
         snprintf(text, text_size, "No desktop chosen yet.");
     } else if (client_is_connected(&phone->client)) {
@@ -306,13 +318,13 @@ static void phone_status(const Phone *phone, char *text, size_t text_size) {
 static void desktop_choose(Client *client, App *app, const char *address) {
     char host[CLIENT_HOST_SIZE] = "";
     uint16_t port = 0;
-    bool parsed = protocol_link_parse(address, host, sizeof(host), &port);
+    bool parsed = link_parse_host(address, host, sizeof(host), &port);
     assert(parsed);
     (void)parsed; // Unused when assertions are compiled out.
-    client_set_server(client, host, port);
+    client_set_server(client, str_from_cstr(host), port);
     char info[INFO_SIZE] = "";
     snprintf(info, sizeof(info), "Desktop %s", host);
-    app_set_info(app, info);
+    app_set_info(app, str_from_cstr(info));
 }
 
 static void settings_path(char *path, size_t path_size) {
@@ -341,7 +353,7 @@ static bool settings_load(char *address, size_t address_size) {
     address[strcspn(address, "\r\n")] = '\0';
     char host[CLIENT_HOST_SIZE] = "";
     uint16_t port = 0;
-    if (!protocol_link_parse(address, host, sizeof(host), &port)) {
+    if (!link_parse_host(address, host, sizeof(host), &port)) {
         address[0] = '\0';  // Empty means no desktop chosen, see Phone.address.
         return false;
     }
@@ -489,7 +501,7 @@ static void drawer_draw(const Drawer *drawer, const App *app, View current, cons
     DrawRectangleRec((Rectangle){ x, 0, DRAWER_WIDTH_PIXELS, height },
                      GetColor((unsigned int)GuiGetStyle(DEFAULT, BACKGROUND_COLOR)));
     DrawRectangleRec((Rectangle){ x + DRAWER_WIDTH_PIXELS - 1, 0, 1, height }, border);
-    app_draw_text(app, APP_TEXT_HEADING, "Menu", x + 20, 24);
+    app_draw_text(app, APP_TEXT_HEADING, STR("Menu"), x + 20, 24);
 
     for (int32_t i = 0; i < VIEW_COUNT; i++) {
         Rectangle item = drawer_item(i, x);
@@ -500,10 +512,10 @@ static void drawer_draw(const Drawer *drawer, const App *app, View current, cons
             DrawRectangleRec((Rectangle){ item.x, item.y, 4, item.height },
                              GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_PRESSED)));
         }
-        app_draw_text(app, APP_TEXT_NORMAL, view_names[i], item.x + 20, item.y + 16);
+        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(view_names[i]), item.x + 20, item.y + 16);
     }
-    app_draw_text(app, APP_TEXT_DIM, "Desktop", x + 20, height - 64);
-    app_draw_text(app, APP_TEXT_SMALL, status, x + 20, height - 40);
+    app_draw_text(app, APP_TEXT_DIM, STR("Desktop"), x + 20, height - 64);
+    app_draw_text(app, APP_TEXT_SMALL, str_from_cstr(status), x + 20, height - 40);
 }
 
 /**
@@ -589,7 +601,7 @@ static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *ap
     const float content_width = width - 2 * MARGIN_PIXELS;
     float y = 24;
     // A heading in the calendar's style, as the desktop's Connected Devices view has.
-    app_draw_text(app, APP_TEXT_HEADING, "Connection settings", x, y);
+    app_draw_text(app, APP_TEXT_HEADING, STR("Connection settings"), x, y);
     y += 44;
     GuiLabel((Rectangle){ x, y, content_width, LINE_PIXELS }, status);
     y += 2 * LINE_PIXELS;
@@ -635,7 +647,8 @@ static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float 
         GuiLabel((Rectangle){ x, *y, content_width - 110, LINE_PIXELS }, text);
         if (GuiButton((Rectangle){ x + content_width - 100, *y - 6, 100, 40 }, "Use it")) {
             protocol_link_format(screen->address, sizeof(screen->address),
-                                 discovery->found_address, discovery->found_port);
+                                 str_from_cstr(discovery->found_address),
+                                 discovery->found_port);
             result = CONNECT_CHOSEN;
         }
         *y += 2 * LINE_PIXELS;
@@ -662,7 +675,7 @@ static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float 
         char host[CLIENT_HOST_SIZE] = "";
         uint16_t port = 0;
         screen->editing = false;
-        if (!protocol_link_parse(screen->address, host, sizeof(host), &port)) {
+        if (!link_parse_host(screen->address, host, sizeof(host), &port)) {
             snprintf(screen->message, sizeof(screen->message), "Type an address such as "
                                                                "192.168.1.20.");
         } else if (!net_address_is_local(host)) {
@@ -746,7 +759,7 @@ static bool scan_screen_read(Scan_Screen *scan, char *address, size_t address_si
     char host[CLIENT_HOST_SIZE] = "";
     uint16_t port = 0;
     bool is_link = strncmp(text, PROTOCOL_LINK_PREFIX, strlen(PROTOCOL_LINK_PREFIX)) == 0;
-    if (!is_link || !protocol_link_parse(text, host, sizeof(host), &port)) {
+    if (!is_link || !link_parse_host(text, host, sizeof(host), &port)) {
         snprintf(scan->message, sizeof(scan->message), "That code is not the desktop app's.");
         return false;
     }

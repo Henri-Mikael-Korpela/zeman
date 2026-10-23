@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include <zeman/str.h>
+
 enum {
     // The largest text box text_box_paste fills, terminator included: room for a long file path
     // in UTF-8, and well above the longest calendar field.
@@ -23,7 +25,6 @@ void text_box_cursor_index_set(int32_t index);
  * are left out. What does not fit is cut at a whole character. Returns the index after the
  * pasted text. Defined in shared/src/text_box.c, for every app.
  */
-int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index,
-                       const char *clipboard);
+int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str clipboard);
 
 #endif

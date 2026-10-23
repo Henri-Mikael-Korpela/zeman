@@ -37,12 +37,12 @@ void writer_i64(Writer *writer, int64_t value) {
     writer_u64(writer, (uint64_t)value);
 }
 
-void writer_text(Writer *writer, const char *text) {
-    size_t length = strlen(text);
-    assert(length <= UINT16_MAX);
-    uint8_t prefix[2] = { (uint8_t)(length & 0xFF), (uint8_t)(length >> 8) };
+void writer_text(Writer *writer, Str text) {
+    // The prefix has two bytes, so a longer text cannot be told to the reader.
+    assert(text.length <= UINT16_MAX);
+    uint8_t prefix[2] = { (uint8_t)(text.length & 0xFF), (uint8_t)(text.length >> 8) };
     writer_bytes(writer, prefix, sizeof(prefix));
-    writer_bytes(writer, text, length);
+    writer_bytes(writer, text.data, text.length);
 }
 
 void writer_date(Writer *writer, Date date) {
@@ -57,8 +57,8 @@ void writer_date(Writer *writer, Date date) {
 void writer_event(Writer *writer, const Event *event) {
     writer_i64(writer, event->id);
     writer_i64(writer, event->location.id);
-    writer_text(writer, event->location.address);
-    writer_text(writer, event->location.city);
+    writer_text(writer, str_from_cstr(event->location.address));
+    writer_text(writer, str_from_cstr(event->location.city));
     writer_date(writer, event->start_date);
     writer_date(writer, event->end_date);
     // A new event has no creation time yet; zeroes stand for it.
@@ -81,8 +81,8 @@ void writer_event(Writer *writer, const Event *event) {
     writer_i32(writer, event->kind);
     writer_u8(writer, (uint8_t)event->repeat_has_end);
     writer_u8(writer, (uint8_t)event->tasks_done);
-    writer_text(writer, event->title);
-    writer_text(writer, event->description);
+    writer_text(writer, str_from_cstr(event->title));
+    writer_text(writer, str_from_cstr(event->description));
 }
 
 void writer_completion(Writer *writer, const Task_Completion *completion) {
@@ -93,7 +93,7 @@ void writer_completion(Writer *writer, const Task_Completion *completion) {
 void writer_linked_task(Writer *writer, const Linked_Task *task) {
     writer_i64(writer, task->task_id);
     writer_u8(writer, (uint8_t)task->done);
-    writer_text(writer, task->title);
+    writer_text(writer, str_from_cstr(task->title));
 }
 
 /**
@@ -107,7 +107,7 @@ void writer_link_target(Writer *writer, const Link_Target *target) {
     writer_i32(writer, target->task_done_count);
     writer_i32(writer, target->kind);
     writer_u8(writer, (uint8_t)target->linked);
-    writer_text(writer, target->title);
+    writer_text(writer, str_from_cstr(target->title));
 }
 
 Reader reader_make(Array_Slice buffer) {
@@ -160,6 +160,28 @@ void reader_text(Reader *reader, char *text, size_t text_size) {
             reader->failed = true;
         }
     }
+}
+
+Str reader_str(Reader *reader) {
+    uint8_t prefix[2] = { 0, 0 };
+    if (!reader_bytes(reader, prefix, sizeof(prefix))) {
+        return str_make("", 0);
+    }
+    const size_t length = (size_t)prefix[0] | ((size_t)prefix[1] << 8);
+    const size_t available = (size_t)reader->buffer.count - reader->position;
+    if (length > available) {
+        reader->failed = true;
+        return str_make("", 0);
+    }
+    const char *items = reader->buffer.items;
+    const Str text = str_make(items + reader->position, length);
+    reader->position += length;
+    // An embedded terminator would make the text shorter than it claims to be, as in reader_text.
+    if (memchr(text.data, '\0', length) != NULL) {
+        reader->failed = true;
+        return str_make("", 0);
+    }
+    return text;
 }
 
 Date reader_date(Reader *reader) {
@@ -310,42 +332,40 @@ static bool reader_bytes(Reader *reader, void *bytes, size_t count) {
     return true;
 }
 
-void protocol_link_format(char *link, size_t link_size, const char *address, uint16_t port) {
-    int written = snprintf(link, link_size, "%s%s:%u", PROTOCOL_LINK_PREFIX, address,
-                           (unsigned)port);
+void protocol_link_format(char *link, size_t link_size, Str address, uint16_t port) {
+    int written = snprintf(link, link_size, "%s%.*s:%u", PROTOCOL_LINK_PREFIX,
+                           (int)address.length, address.data, (unsigned)port);
     assert(written > 0);
     assert((size_t)written < link_size);
 }
 
-bool protocol_link_parse(const char *link, char *address, size_t address_size, uint16_t *port) {
-    assert(address_size > 0);
-    const size_t prefix_length = strlen(PROTOCOL_LINK_PREFIX);
-    if (strncmp(link, PROTOCOL_LINK_PREFIX, prefix_length) == 0) {
-        link += prefix_length;
+bool protocol_link_parse(Str link, Str *address, uint16_t *port) {
+    assert(address != NULL);
+    assert(port != NULL);
+    const Str prefix = str_from_cstr(PROTOCOL_LINK_PREFIX);
+    if (str_starts_with(link, prefix)) {
+        link = str_slice(link, prefix.length, link.length);
     }
     // Only the characters of a numeric address and port, so that anything else in a scanned
     // code, such as a web address, is refused rather than half read.
-    if (link[0] == '\0' || strspn(link, "0123456789.:") != strlen(link)) {
+    if (link.length == 0 || str_find_not_any(link, STR("0123456789.:")) != STR_NOT_FOUND) {
         return false;
     }
-    const char *colon = strchr(link, ':');
-    size_t address_length = strlen(link);
-    if (colon != NULL) {
-        address_length = (size_t)(colon - link);
-    }
-    if (address_length == 0 || address_length >= address_size) {
+    Str host = link;
+    Str port_digits = str_make("", 0);
+    const bool has_port = str_split_once(link, STR(":"), &host, &port_digits);
+    if (host.length == 0) {
         return false;
     }
     *port = PROTOCOL_PORT_DEFAULT;
-    if (colon != NULL) {
-        char *end = NULL;
-        long value = strtol(colon + 1, &end, 10);
-        if (end == colon + 1 || *end != '\0' || value < 1 || value > UINT16_MAX) {
+    if (has_port) {
+        // The digits alone, so a second colon, which the character check allows, fails here.
+        uint64_t value = 0;
+        if (!str_to_u64(port_digits, &value) || value < 1 || value > UINT16_MAX) {
             return false;
         }
         *port = (uint16_t)value;
     }
-    memcpy(address, link, address_length);
-    address[address_length] = '\0';
+    *address = host;
     return true;
 }

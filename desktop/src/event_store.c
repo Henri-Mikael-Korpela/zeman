@@ -310,6 +310,7 @@ static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event);
 static int bind_time(sqlite3_stmt *statement, int index, int32_t minute_of_day);
 static int bind_date(sqlite3_stmt *statement, int index, Date date);
 static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event);
+static Str column_text(sqlite3_stmt *statement, int column);
 static bool column_parse_date(sqlite3_stmt *statement, int column, Date *date);
 static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minute_of_day);
 static bool column_parse_repeat(sqlite3_stmt *statement, Event *event);
@@ -434,17 +435,17 @@ bool event_store_set_task_done(Event_Store *store, int64_t id, Date occurrence_s
     return event_store_write(store, statement, result, "Cannot update task", false);
 }
 
-int64_t event_store_location_find_or_create(Event_Store *store, const char *address,
-                                            const char *city) {
+int64_t event_store_location_find_or_create(Event_Store *store, Str address, Str city) {
     assert(store != NULL);
-    assert(strlen(address) < LOCATION_ADDRESS_SIZE);
-    assert(strlen(city) < LOCATION_CITY_SIZE);
-    assert(address[0] != '\0' || city[0] != '\0');
+    assert(address.length < LOCATION_ADDRESS_SIZE);
+    assert(city.length < LOCATION_CITY_SIZE);
+    assert(address.length > 0 || city.length > 0);
 
     sqlite3_stmt *statement = store->statements[STATEMENT_LOCATION_UPSERT];
-    int result = sqlite3_bind_text(statement, 1, address, -1, SQLITE_TRANSIENT);
+    int result = sqlite3_bind_text(statement, 1, address.data, (int)address.length,
+                                   SQLITE_TRANSIENT);
     if (result == SQLITE_OK) {
-        result = sqlite3_bind_text(statement, 2, city, -1, SQLITE_TRANSIENT);
+        result = sqlite3_bind_text(statement, 2, city.data, (int)city.length, SQLITE_TRANSIENT);
     }
     int64_t id = 0;
     if (result == SQLITE_OK) {
@@ -914,19 +915,16 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
         return false;
     }
 
-    // created_at is "YYYY-MM-DD HH:MM:SS"; split it into the date and the "HH:MM" part.
-    const char *created_at = (const char *)sqlite3_column_text(statement, COLUMN_CREATED_AT);
-    if (created_at == NULL || strlen(created_at) < 16) {
+    // "YYYY-MM-DD HH:MM:SS": the date is its first ten bytes and the time the five after the
+    // space. SQLite tells the length of what it gives, so nothing here looks for a terminator.
+    const Str created_at = column_text(statement, COLUMN_CREATED_AT);
+    if (created_at.length < 16) {
         return false;
     }
-    char created_date[DATE_ISO_SIZE] = "";
-    char created_time[TIME_TEXT_SIZE] = "";
-    snprintf(created_date, sizeof(created_date), "%.10s", created_at);
-    snprintf(created_time, sizeof(created_time), "%.5s", created_at + 11);
-    if (!date_parse_iso(created_date, &event->created_date)) {
+    if (!date_parse_iso(str_slice(created_at, 0, 10), &event->created_date)) {
         return false;
     }
-    if (!time_parse(created_time, &event->created_minute)) {
+    if (!time_parse(str_slice(created_at, 11, 16), &event->created_minute)) {
         return false;
     }
     if (date_to_day_number(event->end_date) < date_to_day_number(event->start_date)) {
@@ -995,21 +993,32 @@ static bool column_parse_location(sqlite3_stmt *statement, Event *event) {
     return event->location.id > 0;
 }
 
-static bool column_parse_date(sqlite3_stmt *statement, int column, Date *date) {
+/**
+ * The text of a column as a Str over SQLite's own copy, which is valid until the statement is
+ * stepped or reset again. NULL, and the empty text, are the empty Str; a caller that must tell
+ * them apart asks sqlite3_column_type first.
+ */
+static Str column_text(sqlite3_stmt *statement, int column) {
     const char *text = (const char *)sqlite3_column_text(statement, column);
     if (text == NULL) {
+        return str_make("", 0);
+    }
+    return str_make(text, (size_t)sqlite3_column_bytes(statement, column));
+}
+
+static bool column_parse_date(sqlite3_stmt *statement, int column, Date *date) {
+    if (sqlite3_column_type(statement, column) == SQLITE_NULL) {
         return false;
     }
-    return date_parse_iso(text, date);
+    return date_parse_iso(column_text(statement, column), date);
 }
 
 static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minute_of_day) {
-    const char *text = (const char *)sqlite3_column_text(statement, column);
-    if (text == NULL) {
+    if (sqlite3_column_type(statement, column) == SQLITE_NULL) {
         *minute_of_day = TIME_NONE;
         return true;
     }
-    return time_parse(text, minute_of_day);
+    return time_parse(column_text(statement, column), minute_of_day);
 }
 
 /**

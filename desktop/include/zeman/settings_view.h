@@ -30,6 +30,6 @@ void settings_view_init(Settings_View *view, const char *database_path);
  */
 bool settings_view_draw(Settings_View *view, const App *app, const char *database_path,
                         const char *settings_directory, Rectangle area);
-void settings_view_set_message(Settings_View *view, const char *message);
+void settings_view_set_message(Settings_View *view, Str message);
 
 #endif

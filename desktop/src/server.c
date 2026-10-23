@@ -28,7 +28,7 @@ static void server_handle_load_target_tasks(Server *server, Reader *request, Wri
 static void server_handle_load_task_targets(Server *server, Reader *request, Writer *response);
 static void server_handle_set_task_targets(Server *server, Reader *request, Writer *response);
 static bool server_range_is_valid(Date first, Date last);
-static void server_fail(Writer *response, const char *message);
+static void server_fail(Writer *response, Str message);
 
 bool server_start(Server *server, Backend *backend, uint16_t port) {
     assert(backend != NULL);
@@ -242,7 +242,7 @@ static void server_handle(Server *server, Reader *request, Writer *response) {
     // The byte comes from the network, so values that are no operation are answered, not
     // asserted; the switch below then names every operation, so that a new one cannot be missed.
     if (operation < PROTOCOL_HELLO || operation >= PROTOCOL_OPERATION_END) {
-        server_fail(response, "Unknown request: update the desktop app.");
+        server_fail(response, STR("Unknown request: update the desktop app."));
         return;
     }
     switch ((Protocol_Operation)operation) {
@@ -255,7 +255,7 @@ static void server_handle(Server *server, Reader *request, Writer *response) {
     }
     case PROTOCOL_REVISION:
         if (!reader_done(request)) {
-            server_fail(response, "Invalid request.");
+            server_fail(response, STR("Invalid request."));
             return;
         }
         writer_u8(response, PROTOCOL_OK);
@@ -276,7 +276,7 @@ static void server_handle(Server *server, Reader *request, Writer *response) {
     case PROTOCOL_DELETE: {
         int64_t id = reader_i64(request);
         if (!reader_done(request) || id <= 0) {
-            server_fail(response, "Invalid request.");
+            server_fail(response, STR("Invalid request."));
             return;
         }
         if (!backend_remove(server->backend, id)) {
@@ -312,7 +312,7 @@ static void server_handle_load_range(Server *server, Reader *request, Writer *re
     Date last = reader_date(request);
     int32_t count_max = reader_i32(request);
     if (!reader_done(request) || !server_range_is_valid(first, last) || count_max < 1) {
-        server_fail(response, "Invalid request.");
+        server_fail(response, STR("Invalid request."));
         return;
     }
     if (count_max > PROTOCOL_EVENT_COUNT_MAX) {
@@ -338,7 +338,7 @@ static void server_handle_load_completions(Server *server, Reader *request, Writ
     Date last = reader_date(request);
     int32_t count_max = reader_i32(request);
     if (!reader_done(request) || !server_range_is_valid(first, last) || count_max < 1) {
-        server_fail(response, "Invalid request.");
+        server_fail(response, STR("Invalid request."));
         return;
     }
     if (count_max > PROTOCOL_COMPLETION_COUNT_MAX) {
@@ -366,12 +366,12 @@ static void server_handle_load_completions(Server *server, Reader *request, Writ
 static void server_handle_insert(Server *server, Reader *request, Writer *response) {
     Event event = reader_event(request);
     if (!reader_done(request) || event.id != 0) {
-        server_fail(response, "Invalid event.");
+        server_fail(response, STR("Invalid event."));
         return;
     }
     // Problems fall on the day they are created, which is today on this computer.
     if (event.kind == EVENT_KIND_PROBLEM && !date_equal(event.start_date, date_today())) {
-        server_fail(response, "A problem can only be added for today.");
+        server_fail(response, STR("A problem can only be added for today."));
         return;
     }
     int64_t id = backend_insert(server->backend, &event);
@@ -386,7 +386,7 @@ static void server_handle_insert(Server *server, Reader *request, Writer *respon
 static void server_handle_update(Server *server, Reader *request, Writer *response) {
     Event event = reader_event(request);
     if (!reader_done(request) || event.id <= 0) {
-        server_fail(response, "Invalid event.");
+        server_fail(response, STR("Invalid event."));
         return;
     }
     if (!backend_update(server->backend, &event)) {
@@ -401,7 +401,7 @@ static void server_handle_set_task_done(Server *server, Reader *request, Writer 
     Date occurrence_start = reader_date(request);
     uint8_t done = reader_u8(request);
     if (!reader_done(request) || id <= 0 || done > 1) {
-        server_fail(response, "Invalid request.");
+        server_fail(response, STR("Invalid request."));
         return;
     }
     if (!backend_set_task_done(server->backend, id, occurrence_start, done == 1)) {
@@ -412,12 +412,12 @@ static void server_handle_set_task_done(Server *server, Reader *request, Writer 
 }
 
 static void server_handle_location(Server *server, Reader *request, Writer *response) {
-    char address[LOCATION_ADDRESS_SIZE] = "";
-    char city[LOCATION_CITY_SIZE] = "";
-    reader_text(request, address, sizeof(address));
-    reader_text(request, city, sizeof(city));
-    if (!reader_done(request) || (address[0] == '\0' && city[0] == '\0')) {
-        server_fail(response, "Invalid location.");
+    // Views over the request, which outlives this call; the limits are the event's own.
+    const Str address = reader_str(request);
+    const Str city = reader_str(request);
+    const bool fits = address.length < LOCATION_ADDRESS_SIZE && city.length < LOCATION_CITY_SIZE;
+    if (!reader_done(request) || !fits || (address.length == 0 && city.length == 0)) {
+        server_fail(response, STR("Invalid location."));
         return;
     }
     int64_t id = backend_location_find_or_create(server->backend, address, city);
@@ -433,7 +433,7 @@ static void server_handle_load_target_tasks(Server *server, Reader *request, Wri
     int64_t target_id = reader_i64(request);
     int32_t count_max = reader_i32(request);
     if (!reader_done(request) || target_id <= 0 || count_max < 1) {
-        server_fail(response, "Invalid request.");
+        server_fail(response, STR("Invalid request."));
         return;
     }
     if (count_max > LINK_COUNT_MAX) {
@@ -463,7 +463,7 @@ static void server_handle_load_task_targets(Server *server, Reader *request, Wri
     uint8_t problems_only = reader_u8(request);
     int32_t count_max = reader_i32(request);
     if (!reader_done(request) || task_id < 0 || problems_only > 1 || count_max < 1) {
-        server_fail(response, "Invalid request.");
+        server_fail(response, STR("Invalid request."));
         return;
     }
     if (count_max > LINK_COUNT_MAX) {
@@ -492,7 +492,7 @@ static void server_handle_set_task_targets(Server *server, Reader *request, Writ
     int64_t task_id = reader_i64(request);
     int32_t count = reader_i32(request);
     if (task_id <= 0 || count < 0 || count > LINK_COUNT_MAX) {
-        server_fail(response, "Invalid request.");
+        server_fail(response, STR("Invalid request."));
         return;
     }
     int64_t target_ids[LINK_COUNT_MAX] = { 0 };
@@ -505,7 +505,7 @@ static void server_handle_set_task_targets(Server *server, Reader *request, Writ
         }
     }
     if (!reader_done(request) || !valid) {
-        server_fail(response, "Invalid request.");
+        server_fail(response, STR("Invalid request."));
         return;
     }
     if (!backend_set_task_targets(server->backend, task_id, array_slice_make(target_ids, count))) {
@@ -526,7 +526,7 @@ static bool server_range_is_valid(Date first, Date last) {
 /**
  * Replaces anything written so far with a failure and its message.
  */
-static void server_fail(Writer *response, const char *message) {
+static void server_fail(Writer *response, Str message) {
     response->length = 0;
     response->overflow = false;
     writer_u8(response, PROTOCOL_FAILED);

@@ -44,16 +44,17 @@ void problems_view_draw(Problems_View *view, Backend *backend, const App *app, R
     const float x = area.x + PADDING_PIXELS;
     const float width = area.width - 2 * PADDING_PIXELS;
     float y = area.y + PADDING_PIXELS;
-    app_draw_text(app, APP_TEXT_HEADING, "Problems", x, y + 4);
+    app_draw_text(app, APP_TEXT_HEADING, STR("Problems"), x, y + 4);
     if (view->error[0] != '\0') {
-        app_draw_text(app, APP_TEXT_NORMAL, view->error, x, y + HEADER_HEIGHT_PIXELS + 8);
+        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(view->error), x,
+                      y + HEADER_HEIGHT_PIXELS + 8);
         return;
     }
     if (view->truncated) {
         char text[LABEL_SIZE] = "";
         snprintf(text, sizeof(text), "Showing the newest %d problems.", PROBLEMS_VIEW_COUNT_MAX);
-        float text_width = app_measure_text(app, APP_TEXT_DIM, text);
-        app_draw_text(app, APP_TEXT_DIM, text, x + width - text_width, y + 10);
+        float text_width = app_measure_text(app, APP_TEXT_DIM, str_from_cstr(text));
+        app_draw_text(app, APP_TEXT_DIM, str_from_cstr(text), x + width - text_width, y + 10);
     }
     y += HEADER_HEIGHT_PIXELS + PADDING_PIXELS / 2;
 
@@ -92,7 +93,7 @@ static void problems_view_load(Problems_View *view, Backend *backend, uint64_t r
     // frame, as the calendar does.
     view->loaded = true;
     if (count < 0) {
-        snprintf(view->error, sizeof(view->error), "%s", backend_error(backend));
+        backend_error_copy(backend, view->error, sizeof(view->error));
         return;
     }
     assert(count <= PROBLEMS_VIEW_COUNT_MAX);
@@ -109,9 +110,11 @@ static void problems_view_draw_column(const Problems_View *view, const App *app,
     assert(count >= 0);
     assert(count <= view->problem_count);
     char text[LABEL_SIZE] = "";
-    snprintf(text, sizeof(text), "%s (%" PRId32 ")", target_status_name(status), count);
-    float text_width = app_measure_text(app, APP_TEXT_NORMAL, text);
-    app_draw_text(app, APP_TEXT_NORMAL, text, header.x + (header.width - text_width) / 2,
+    const Str status_name = target_status_name(status);
+    snprintf(text, sizeof(text), "%.*s (%" PRId32 ")", STR_ARGUMENTS(status_name), count);
+    const Str label = str_from_cstr(text);
+    float text_width = app_measure_text(app, APP_TEXT_NORMAL, label);
+    app_draw_text(app, APP_TEXT_NORMAL, label, header.x + (header.width - text_width) / 2,
                   header.y + 4);
     DrawRectangleRec(cell, GetColor((unsigned int)GuiGetStyle(DEFAULT, BASE_COLOR_NORMAL)));
     DrawRectangleLinesEx(cell, 1, GetColor((unsigned int)GuiGetStyle(DEFAULT,
@@ -137,12 +140,12 @@ static void problems_view_draw_column(const Problems_View *view, const App *app,
         // Inset as a one-day bar is in its day cell.
         Rectangle bar = { cell.x + 4, top + (float)bar_index * slot_height, cell.width - 8,
                           APP_BAR_HEIGHT_PIXELS };
-        app_draw_problem_bar(app, problem->title, status == TARGET_STATUS_DONE, bar);
+        app_draw_problem_bar(app, str_from_cstr(problem->title), status == TARGET_STATUS_DONE, bar);
         bar_index++;
     }
     if (count > bar_count) {
         snprintf(text, sizeof(text), "+%" PRId32 " more", count - bar_count);
-        app_draw_text(app, APP_TEXT_SMALL, text, cell.x + 6,
+        app_draw_text(app, APP_TEXT_SMALL, str_from_cstr(text), cell.x + 6,
                       top + (float)bar_count * slot_height + 2);
     }
 }

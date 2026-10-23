@@ -14,14 +14,14 @@ static int64_t local_insert(void *context, const Event *event);
 static bool local_update(void *context, const Event *event);
 static bool local_remove(void *context, int64_t id);
 static bool local_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
-static int64_t local_location(void *context, const char *address, const char *city);
+static int64_t local_location(void *context, Str address, Str city);
 static int32_t local_load_target_tasks(void *context, int64_t target_id, Array_Slice tasks,
                                        bool *truncated);
 static int32_t local_load_task_targets(void *context, int64_t task_id, bool problems_only,
                                        Array_Slice targets, bool *truncated);
 static bool local_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
 static uint64_t local_revision(void *context);
-static const char *local_error(const void *context);
+static Str local_error(const void *context);
 
 static const Backend_Ops local_ops = {
     .load_range = local_load_range,
@@ -180,7 +180,7 @@ static bool local_set_task_done(void *context, int64_t id, Date occurrence_start
     return true;
 }
 
-static int64_t local_location(void *context, const char *address, const char *city) {
+static int64_t local_location(void *context, Str address, Str city) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return 0;
@@ -239,7 +239,7 @@ static uint64_t local_revision(void *context) {
     return local->revision;
 }
 
-static const char *local_error(const void *context) {
+static Str local_error(const void *context) {
     const Local_Backend *local = context;
-    return local->error;
+    return str_from_cstr(local->error);
 }

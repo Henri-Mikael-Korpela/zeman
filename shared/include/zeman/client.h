@@ -35,7 +35,7 @@ void client_deinit(Client *client);
 /**
  * Sets where the desktop app is and drops any connection to the previous one.
  */
-void client_set_server(Client *client, const char *host, uint16_t port);
+void client_set_server(Client *client, Str host, uint16_t port);
 bool client_is_connected(const Client *client);
 Backend client_backend(Client *client);
 

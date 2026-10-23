@@ -30,14 +30,14 @@ static int64_t client_insert(void *context, const Event *event);
 static bool client_update(void *context, const Event *event);
 static bool client_remove(void *context, int64_t id);
 static bool client_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
-static int64_t client_location(void *context, const char *address, const char *city);
+static int64_t client_location(void *context, Str address, Str city);
 static int32_t client_load_target_tasks(void *context, int64_t target_id, Array_Slice tasks,
                                         bool *truncated);
 static int32_t client_load_task_targets(void *context, int64_t task_id, bool problems_only,
                                         Array_Slice targets, bool *truncated);
 static bool client_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
 static uint64_t client_revision(void *context);
-static const char *client_error(const void *context);
+static Str client_error(const void *context);
 
 static const Backend_Ops client_ops = {
     .load_range = client_load_range,
@@ -70,10 +70,11 @@ void client_deinit(Client *client) {
     }
 }
 
-void client_set_server(Client *client, const char *host, uint16_t port) {
-    assert(host != NULL);
+void client_set_server(Client *client, Str host, uint16_t port) {
+    assert(host.length > 0);
     client_disconnect(client, "");
-    snprintf(client->host, sizeof(client->host), "%s", host);
+    // A host that does not fit is cut, as the connect then fails with a message of its own.
+    (void)str_copy_truncated(host, client->host, sizeof(client->host));
     client->port = port;
     // Connect at the next request rather than after the reconnect interval.
     client->connect_attempt_ms = 0;
@@ -176,7 +177,7 @@ static bool client_set_task_done(void *context, int64_t id, Date occurrence_star
     return client_call(client, &request, &response) && client_response_done(client, &response);
 }
 
-static int64_t client_location(void *context, const char *address, const char *city) {
+static int64_t client_location(void *context, Str address, Str city) {
     Client *client = context;
     Writer request = client_request_begin(client, PROTOCOL_LOCATION);
     writer_text(&request, address);
@@ -286,9 +287,9 @@ static uint64_t client_revision(void *context) {
     return revision;
 }
 
-static const char *client_error(const void *context) {
+static Str client_error(const void *context) {
     const Client *client = context;
-    return client->error;
+    return str_from_cstr(client->error);
 }
 
 static bool client_connect(Client *client) {

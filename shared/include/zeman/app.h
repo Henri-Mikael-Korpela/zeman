@@ -6,6 +6,7 @@
 #include "raylib.h"
 
 #include <zeman/backend.h>
+#include <zeman/str.h>
 
 // The calendar's user interface, shared by the desktop and Android apps. Each app opens its own
 // window and backend, then calls app_frame once per frame.
@@ -53,21 +54,21 @@ void app_frame(App *app, Rectangle area);
  * Draws text in one of the calendar's styles, at a position in screen pixels divided by the
  * scale (layout pixels), outside app_frame.
  */
-void app_draw_text(const App *app, App_Text style, const char *text, float x, float y);
-float app_measure_text(const App *app, App_Text style, const char *text);
+void app_draw_text(const App *app, App_Text style, Str text, float x, float y);
+float app_measure_text(const App *app, App_Text style, Str text);
 /**
  * Draws a problem as the calendar does in its day cells, in layout pixels outside app_frame:
  * red with a "!" while open, green with a check mark once done.
  */
-void app_draw_problem_bar(const App *app, const char *title, bool done, Rectangle bar);
+void app_draw_problem_bar(const App *app, Str title, bool done, Rectangle bar);
 /**
  * Shown first in the status bar for as long as the app runs, for example where phones connect.
  */
-void app_set_info(App *app, const char *info);
+void app_set_info(App *app, Str info);
 /**
  * Shown in the status bar until the user moves to another day.
  */
-void app_set_status(App *app, const char *status);
+void app_set_status(App *app, Str status);
 /**
  * Drops, without saving, what the user was doing with the loaded items: the open form, a delete
  * waiting for confirmation and the focused item. For when the data underneath is replaced, as

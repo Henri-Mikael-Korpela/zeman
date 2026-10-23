@@ -288,21 +288,21 @@ Target_Status target_status(int32_t task_count, int32_t task_done_count) {
     return TARGET_STATUS_DONE;
 }
 
-const char *target_status_name(Target_Status status) {
+Str target_status_name(Target_Status status) {
     switch (status) {
     case TARGET_STATUS_NO_TASKS:
-        return "No planned tasks";
+        return STR("No planned tasks");
     case TARGET_STATUS_PLANNED:
-        return "Planned";
+        return STR("Planned");
     case TARGET_STATUS_PARTLY_DONE:
-        return "Partly completed";
+        return STR("Partly completed");
     case TARGET_STATUS_DONE:
-        return "Completed";
+        return STR("Completed");
     case TARGET_STATUS_COUNT:
         break;
     }
     assert(false); // Not a Target_Status.
-    return "";
+    return STR("");
 }
 
 static bool minute_is_valid(int32_t minute_of_day) {

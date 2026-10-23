@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <zeman/str.h>
+
 enum {
     DATE_YEAR_MIN = 1,
     DATE_YEAR_MAX = 9999,
@@ -70,16 +72,16 @@ Date date_add_months(Date date, int32_t months);
 /**
  * Parses exactly "YYYY-MM-DD". Returns false for malformed or impossible dates.
  */
-bool date_parse_iso(const char *text, Date *date);
+bool date_parse_iso(Str text, Date *date);
 void date_format_iso(Date date, char *buffer, size_t buffer_size);
 /**
  * Parses exactly "HH:MM". Returns false for malformed or out-of-range times.
  */
-bool time_parse(const char *text, int32_t *minute_of_day);
+bool time_parse(Str text, int32_t *minute_of_day);
 void time_format(int32_t minute_of_day, char *buffer, size_t buffer_size);
-const char *month_name(int32_t month);
-const char *month_short_name(int32_t month);
-const char *weekday_name(int32_t weekday);
-const char *weekday_short_name(int32_t weekday);
+Str month_name(int32_t month);
+Str month_short_name(int32_t month);
+Str weekday_name(int32_t weekday);
+Str weekday_short_name(int32_t weekday);
 
 #endif

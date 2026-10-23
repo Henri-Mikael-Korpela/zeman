@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <zeman/str.h>
+
 enum {
     // settings.ini holds one short line per setting, so a file near this size is not ours, and
     // the whole file fits in one buffer on the stack.
@@ -19,10 +21,9 @@ static const char FILE_NAME[] = "settings.ini";
 static const char KEY_DATABASE_PATH[] = "database_path";
 
 static bool settings_file_path(char *buffer, size_t buffer_size, const char *directory);
-static bool settings_parse(Settings *settings, char *text);
-static bool settings_parse_line(Settings *settings, char *line);
-static bool settings_line_is_skipped(const char *line);
-static char *text_trim(char *text);
+static bool settings_parse(Settings *settings, Str text);
+static bool settings_parse_line(Settings *settings, Str line);
+static bool settings_line_is_skipped(Str line);
 
 bool settings_load(Settings *settings, const char *directory) {
     assert(settings != NULL);
@@ -42,8 +43,7 @@ bool settings_load(Settings *settings, const char *directory) {
                  strerror(errno));
         return false;
     }
-    // One byte for the terminator, so that the text can be parsed as a string.
-    char text[SETTINGS_FILE_SIZE_MAX + 1] = "";
+    char text[SETTINGS_FILE_SIZE_MAX] = "";
     const size_t size = fread(text, 1, SETTINGS_FILE_SIZE_MAX, file);
     const bool failed = ferror(file) != 0;
     // A full buffer may hide more: one byte more tells.
@@ -60,8 +60,7 @@ bool settings_load(Settings *settings, const char *directory) {
         return false;
     }
     assert(size <= SETTINGS_FILE_SIZE_MAX);
-    text[size] = '\0';
-    return settings_parse(settings, text);
+    return settings_parse(settings, str_make(text, size));
 }
 
 bool settings_save(Settings *settings, const char *directory) {
@@ -106,25 +105,23 @@ static bool settings_file_path(char *buffer, size_t buffer_size, const char *dir
     return written > 0 && (size_t)written < buffer_size;
 }
 
-static bool settings_parse(Settings *settings, char *text) {
-    char *line = text;
+static bool settings_parse(Settings *settings, Str text) {
     // Notepad may start a file it saves with a UTF-8 byte order mark, which is no part of the
     // first key.
-    if (strncmp(line, "\xEF\xBB\xBF", 3) == 0) {
-        line += 3;
+    const Str byte_order_mark = STR("\xEF\xBB\xBF");
+    if (str_starts_with(text, byte_order_mark)) {
+        text = str_slice(text, byte_order_mark.length, text.length);
     }
+    Str rest = text;
     for (int32_t i = 0; i < SETTINGS_LINE_COUNT_MAX; i++) {
-        char *end = strchr(line, '\n');
-        if (end != NULL) {
-            *end = '\0';
-        }
+        Str line = rest;
+        const bool has_more = str_split_once(rest, STR("\n"), &line, &rest);
         if (!settings_parse_line(settings, line)) {
             return false;
         }
-        if (end == NULL) {
+        if (!has_more) {
             return true;
         }
-        line = end + 1;
     }
     assert(false); // Each line takes at least one byte, so the text ends within the bound.
     return true;
@@ -134,55 +131,50 @@ static bool settings_parse(Settings *settings, char *text) {
  * Reads one "key=value" line. Keys this version does not know are skipped, so that settings
  * written by a later version still let this one start.
  */
-static bool settings_parse_line(Settings *settings, char *line) {
-    char *trimmed = text_trim(line);
+static bool settings_parse_line(Settings *settings, Str line) {
+    // Spaces, tabs and the carriage return of a Windows line break are not part of any text.
+    const Str blanks = STR(" \t\r");
+    const Str trimmed = str_trim_any(line, blanks);
     if (settings_line_is_skipped(trimmed)) {
         return true;
     }
-    char *equals = strchr(trimmed, '=');
-    if (equals == NULL) {
+    Str key = trimmed;
+    Str value = trimmed;
+    if (!str_split_once(trimmed, STR("="), &key, &value)) {
+        // At most 60 bytes of the line, so that a long one cannot fill the message.
+        int32_t shown_length = 60;
+        if (trimmed.length < 60) {
+            shown_length = (int32_t)trimmed.length;
+        }
         snprintf(settings->error, sizeof(settings->error),
-                 "%s has a line without \"=\": %.60s", FILE_NAME, trimmed);
+                 "%s has a line without \"=\": %.*s", FILE_NAME, shown_length, trimmed.data);
         return false;
     }
-    *equals = '\0';
-    const char *key = text_trim(trimmed);
-    const char *value = text_trim(equals + 1);
-    if (strcmp(key, KEY_DATABASE_PATH) != 0) {
+    key = str_trim_any(key, blanks);
+    value = str_trim_any(value, blanks);
+    if (!str_eq(key, str_from_cstr(KEY_DATABASE_PATH))) {
         return true;
     }
-    if (strlen(value) >= sizeof(settings->database_path)) {
+    if (value.length >= sizeof(settings->database_path)) {
         snprintf(settings->error, sizeof(settings->error), "%s: %s is too long.", FILE_NAME,
                  KEY_DATABASE_PATH);
         return false;
     }
-    snprintf(settings->database_path, sizeof(settings->database_path), "%s", value);
+    // Fits, as just checked, so nothing is cut.
+    const bool copied = str_to_cstr(value, settings->database_path,
+                                    sizeof(settings->database_path));
+    assert(copied);
+    (void)copied; // Unused when assertions are compiled out
     return true;
 }
 
 /**
  * Blank lines, comments and [section] headers, which INI files may have, hold no setting.
  */
-static bool settings_line_is_skipped(const char *line) {
-    if (line[0] == '\0') {
+static bool settings_line_is_skipped(Str line) {
+    if (line.length == 0) {
         return true;
     }
     // Any other character starts a key.
-    return strchr(";#[", line[0]) != NULL;
-}
-
-/**
- * Strips spaces, tabs and the carriage return of a Windows line break from both ends, in place.
- */
-static char *text_trim(char *text) {
-    size_t length = strlen(text);
-    size_t start = 0;
-    while (start < length && strchr(" \t\r", text[start]) != NULL) {
-        start++;
-    }
-    while (length > start && strchr(" \t\r", text[length - 1]) != NULL) {
-        length--;
-    }
-    text[length] = '\0';
-    return text + start;
+    return str_find_char(STR(";#["), line.data[0]) != STR_NOT_FOUND;
 }

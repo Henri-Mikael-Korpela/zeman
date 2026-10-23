@@ -65,6 +65,13 @@
 - Struct and type names are in the order of the most significant part first.
 - Do not overload names with different meanings. Do not use the name `data`, `info`, `value` or `tmp` when a precise name exists.
 
+## Strings
+
+- Prefer length-based strings, `Str` from `<zeman/str.h>`, over C strings (`char *`, `const char *`): pass text as a `Str`, return it as a `Str`, and slice, trim, split, compare and parse it with the `str_` functions, which cannot run past the end because they never look for a terminator. A `Str` does not own its bytes; it is a view into a literal (`STR("text")`), a buffer or a message.
+- Use a C string only where something outside the project requires one: raylib, raygui, SQLite, the C library and the operating system (paths for `fopen`, host names for `getaddrinfo`, text that is formatted with `snprintf` or drawn on screen). Convert at that boundary, once, with `str_from_cstr` on the way in and `str_to_cstr` or `str_copy_truncated` on the way out, and do not let the C string travel further into the program than the call that needs it.
+- A fixed `char` array that a library writes into or reads from, such as a raygui text box's buffer, stays a `char` array, and is turned into a `Str` as soon as the program reads it.
+- Build text in a `Str_Builder` over a buffer the caller owns, rather than with `strcat` or by hand with `strlen` arithmetic.
+
 ## Variables
 
 - Initialize every variable at declaration.

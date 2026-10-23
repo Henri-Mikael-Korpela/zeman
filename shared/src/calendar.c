@@ -17,25 +17,30 @@ enum {
     UNIX_EPOCH_WEEKDAY = 3,
 };
 
-static const char *const month_names[12] = {
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
+static const Str month_names[12] = {
+    STR_INIT("January"), STR_INIT("February"), STR_INIT("March"), STR_INIT("April"),
+    STR_INIT("May"), STR_INIT("June"), STR_INIT("July"), STR_INIT("August"),
+    STR_INIT("September"), STR_INIT("October"), STR_INIT("November"), STR_INIT("December"),
 };
 
-static const char *const month_short_names[12] = {
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+static const Str month_short_names[12] = {
+    STR_INIT("Jan"), STR_INIT("Feb"), STR_INIT("Mar"), STR_INIT("Apr"), STR_INIT("May"),
+    STR_INIT("Jun"), STR_INIT("Jul"), STR_INIT("Aug"), STR_INIT("Sep"), STR_INIT("Oct"),
+    STR_INIT("Nov"), STR_INIT("Dec"),
 };
 
-static const char *const weekday_names[7] = {
-    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+static const Str weekday_names[7] = {
+    STR_INIT("Monday"), STR_INIT("Tuesday"), STR_INIT("Wednesday"), STR_INIT("Thursday"),
+    STR_INIT("Friday"), STR_INIT("Saturday"), STR_INIT("Sunday"),
 };
 
-static const char *const weekday_short_names[7] = {
-    "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+static const Str weekday_short_names[7] = {
+    STR_INIT("Mon"), STR_INIT("Tue"), STR_INIT("Wed"), STR_INIT("Thu"), STR_INIT("Fri"),
+    STR_INIT("Sat"), STR_INIT("Sun"),
 };
 
 static bool is_leap_year(int32_t year);
-static bool parse_digits(const char *text, int32_t digit_count, int32_t *number);
+static bool parse_digits(Str digits, int32_t *number);
 
 Date date_today(void) {
     return date_time_now().date;
@@ -258,25 +263,24 @@ Date date_add_months(Date date, int32_t months) {
     return result;
 }
 
-bool date_parse_iso(const char *text, Date *date) {
-    assert(text != NULL);
+bool date_parse_iso(Str text, Date *date) {
     assert(date != NULL);
     // Require the fixed-width form so that stored dates also sort correctly as text.
-    if (strlen(text) != DATE_ISO_SIZE - 1) {
+    if (text.length != DATE_ISO_SIZE - 1) {
         return false;
     }
-    if (text[4] != '-' || text[7] != '-') {
+    if (text.data[4] != '-' || text.data[7] != '-') {
         return false;
     }
 
     Date parsed = { 0, 0, 0 };
-    if (!parse_digits(text, 4, &parsed.year)) {
+    if (!parse_digits(str_slice(text, 0, 4), &parsed.year)) {
         return false;
     }
-    if (!parse_digits(text + 5, 2, &parsed.month)) {
+    if (!parse_digits(str_slice(text, 5, 7), &parsed.month)) {
         return false;
     }
-    if (!parse_digits(text + 8, 2, &parsed.day)) {
+    if (!parse_digits(str_slice(text, 8, 10), &parsed.day)) {
         return false;
     }
     if (!date_is_valid(parsed)) {
@@ -294,22 +298,21 @@ void date_format_iso(Date date, char *buffer, size_t buffer_size) {
     assert(written == DATE_ISO_SIZE - 1);
 }
 
-bool time_parse(const char *text, int32_t *minute_of_day) {
-    assert(text != NULL);
+bool time_parse(Str text, int32_t *minute_of_day) {
     assert(minute_of_day != NULL);
-    if (strlen(text) != TIME_TEXT_SIZE - 1) {
+    if (text.length != TIME_TEXT_SIZE - 1) {
         return false;
     }
-    if (text[2] != ':') {
+    if (text.data[2] != ':') {
         return false;
     }
 
     int32_t hour = 0;
     int32_t minute = 0;
-    if (!parse_digits(text, 2, &hour)) {
+    if (!parse_digits(str_slice(text, 0, 2), &hour)) {
         return false;
     }
-    if (!parse_digits(text + 3, 2, &minute)) {
+    if (!parse_digits(str_slice(text, 3, 5), &minute)) {
         return false;
     }
     if (hour > 23 || minute > 59) {
@@ -329,25 +332,25 @@ void time_format(int32_t minute_of_day, char *buffer, size_t buffer_size) {
     assert(written == TIME_TEXT_SIZE - 1);
 }
 
-const char *month_name(int32_t month) {
+Str month_name(int32_t month) {
     assert(month >= 1);
     assert(month <= 12);
     return month_names[month - 1];
 }
 
-const char *month_short_name(int32_t month) {
+Str month_short_name(int32_t month) {
     assert(month >= 1);
     assert(month <= 12);
     return month_short_names[month - 1];
 }
 
-const char *weekday_name(int32_t weekday) {
+Str weekday_name(int32_t weekday) {
     assert(weekday >= 0);
     assert(weekday < 7);
     return weekday_names[weekday];
 }
 
-const char *weekday_short_name(int32_t weekday) {
+Str weekday_short_name(int32_t weekday) {
     assert(weekday >= 0);
     assert(weekday < 7);
     return weekday_short_names[weekday];
@@ -360,16 +363,13 @@ static bool is_leap_year(int32_t year) {
 /**
  * Parses exactly digit_count ASCII digits. Avoids strtol, which accepts signs and spaces.
  */
-static bool parse_digits(const char *text, int32_t digit_count, int32_t *number) {
-    assert(digit_count > 0);
-    assert(digit_count <= 4); // Keeps the result far from int32_t overflow.
-    int32_t result = 0;
-    for (int32_t i = 0; i < digit_count; i++) {
-        if (text[i] < '0' || text[i] > '9') {
-            return false;
-        }
-        result = result * 10 + (text[i] - '0');
+static bool parse_digits(Str digits, int32_t *number) {
+    assert(digits.length > 0);
+    assert(digits.length <= 4); // Keeps the result far from int32_t overflow.
+    uint64_t value = 0;
+    if (!str_to_u64(digits, &value)) {
+        return false;
     }
-    *number = result;
+    *number = (int32_t)value;
     return true;
 }

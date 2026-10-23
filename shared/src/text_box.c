@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <zeman/bound.h>
+#include <zeman/str.h>
 
 enum {
     // Pasting reads at most this many bytes of the clipboard: far more than the largest text
@@ -15,10 +16,9 @@ enum {
 static_assert((int32_t)CLIPBOARD_READ_SIZE_MAX >= (int32_t)TEXT_BOX_SIZE_MAX,
               "A paste can fill any text box.");
 
-static int32_t utf8_sequence_size(const char *text);
+static int32_t utf8_sequence_size(Str text);
 
-int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index,
-                       const char *clipboard) {
+int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str clipboard) {
     const int32_t length = (int32_t)strlen(text);
     assert(length < text_size);
     assert(text_size <= TEXT_BOX_SIZE_MAX);
@@ -27,10 +27,16 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index,
     char pasted[TEXT_BOX_SIZE_MAX] = "";
     int32_t pasted_length = 0;
     const int32_t room = text_size - 1 - length;
+    // Bounded by the read limit as well as the length, so that a huge clipboard is read in part.
+    int32_t read_count = CLIPBOARD_READ_SIZE_MAX;
+    if (clipboard.length < (size_t)read_count) {
+        read_count = (int32_t)clipboard.length;
+    }
     int32_t i = 0;
-    while (i < CLIPBOARD_READ_SIZE_MAX && clipboard[i] != '\0' && pasted_length < room) {
-        const unsigned char byte = (unsigned char)clipboard[i];
-        const int32_t size = utf8_sequence_size(clipboard + i);
+    while (i < read_count && pasted_length < room) {
+        const Str rest = str_slice(clipboard, (size_t)i, (size_t)read_count);
+        const unsigned char byte = (unsigned char)rest.data[0];
+        const int32_t size = utf8_sequence_size(rest);
         if (byte == '\n' || byte == '\t') {
             pasted[pasted_length] = ' ';
             pasted_length++;
@@ -38,7 +44,7 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index,
             if (pasted_length + size > room) {
                 break; // A character that does not fit whole is left out, and the rest with it.
             }
-            memcpy(pasted + pasted_length, clipboard + i, (size_t)size);
+            memcpy(pasted + pasted_length, rest.data, (size_t)size);
             pasted_length += size;
         }
         // Anything else, such as the carriage return of a Windows line break, is skipped.
@@ -57,9 +63,9 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index,
  * Bytes in the UTF-8 character that text starts with, or 0 when it is not valid UTF-8 there,
  * such as a stray continuation byte or a sequence cut short by the end of the text.
  */
-static int32_t utf8_sequence_size(const char *text) {
-    const unsigned char first = (unsigned char)text[0];
-    assert(first != 0);
+static int32_t utf8_sequence_size(Str text) {
+    assert(text.length > 0);
+    const unsigned char first = (unsigned char)text.data[0];
     int32_t size = 0;
     if (first < 0x80) {
         size = 1;
@@ -72,9 +78,12 @@ static int32_t utf8_sequence_size(const char *text) {
     } else {
         return 0;
     }
-    // Stops at the terminator too, which is no continuation byte.
+    // A sequence cut short by the end of the text is not valid either.
+    if ((size_t)size > text.length) {
+        return 0;
+    }
     for (int32_t i = 1; i < size; i++) {
-        if (((unsigned char)text[i] & 0xC0) != 0x80) {
+        if (((unsigned char)text.data[i] & 0xC0) != 0x80) {
             return 0;
         }
     }
