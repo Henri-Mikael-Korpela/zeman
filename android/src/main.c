@@ -240,6 +240,7 @@ static void phone_frame(Phone *phone) {
 static void phone_frame_scan(Phone *phone) {
     assert(phone->view == VIEW_CONNECTION);
     assert(phone->connect.open);
+
     char chosen[ADDRESS_TEXT_SIZE] = "";
     Connect_Result result = scan_screen_frame(&phone->scan, phone->scale, chosen, sizeof(chosen));
     if (result == CONNECT_CANCELLED) {
@@ -257,6 +258,7 @@ static void phone_frame_scan(Phone *phone) {
 static void phone_view_set(Phone *phone, View view) {
     assert(view >= 0);
     assert(view < VIEW_COUNT);
+
     if (view == phone->view) {
         return;
     }
@@ -274,6 +276,7 @@ static void phone_view_set(Phone *phone, View view) {
  */
 static void phone_desktop_set(Phone *phone, const char *address) {
     assert(address[0] != '\0');
+
     char copy[ADDRESS_TEXT_SIZE] = "";
     snprintf(copy, sizeof(copy), "%s", address);  // address may be the connection screen's
     snprintf(phone->address, sizeof(phone->address), "%s", copy);
@@ -299,6 +302,7 @@ static bool link_parse_host(const char *link, char *host, size_t host_size, uint
  */
 static void phone_status(const Phone *phone, char *text, size_t text_size) {
     assert(text_size > 0);
+
     char host[CLIENT_HOST_SIZE] = "";
     uint16_t port = 0;
     // Saved and chosen addresses are checked first, so only an empty one fails to parse.
@@ -381,6 +385,7 @@ static void settings_save(const char *address) {
 static View drawer_update(Drawer *drawer, View current) {
     assert(drawer->open_fraction >= 0.0f);
     assert(drawer->open_fraction <= 1.0f);
+
     const Vector2 pointer = GetMousePosition();
     if (drawer->open && IsKeyPressed(KEY_BACK)) {
         drawer->open = false;
@@ -479,6 +484,7 @@ static bool drawer_is_closed(const Drawer *drawer) {
 static Rectangle drawer_item(int32_t index, float x) {
     assert(index >= 0);
     assert(index < VIEW_COUNT);
+
     return (Rectangle){ x, DRAWER_ITEMS_TOP_PIXELS + (float)(index * DRAWER_ITEM_HEIGHT_PIXELS),
                         DRAWER_WIDTH_PIXELS - 1, DRAWER_ITEM_HEIGHT_PIXELS };
 }
@@ -491,6 +497,7 @@ static void drawer_draw(const Drawer *drawer, const App *app, View current, cons
                         float width, float height) {
     assert(width > 0.0f);
     assert(height > 0.0f);
+
     if (drawer->open_fraction == 0.0f) {
         return;
     }
@@ -524,6 +531,7 @@ static void drawer_draw(const Drawer *drawer, const App *app, View current, cons
  */
 static void gutter_draw(float height) {
     assert(height > 0.0f);
+
     const Color border = GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_NORMAL));
     const Color accent = GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_PRESSED));
     const float middle = height / 2;
@@ -560,6 +568,7 @@ static void screen_end(void) {
 
 static void connect_screen_open(Connect_Screen *screen, const char *address) {
     assert(!screen->open);
+
     // Searching the network starts at once; without it, the code or the address still work.
     bool searching = discovery_start(&screen->discovery);
     (void)searching;
@@ -586,6 +595,7 @@ static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *ap
                                            const char *status, bool input) {
     assert(screen->open);
     assert(scale > 0.0f);
+
     discovery_poll(&screen->discovery);
     // Layout pixels start right of the strip: drawing and touches move and scale the same way.
     const float offset = GUTTER_WIDTH_PIXELS * scale;

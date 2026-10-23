@@ -31,6 +31,7 @@ void settings_view_init(Settings_View *view, const char *database_path) {
     assert(view != NULL);
     assert(database_path != NULL);
     assert(strlen(database_path) < sizeof(view->path));
+
     *view = (Settings_View){ .editing = false };
     snprintf(view->path, sizeof(view->path), "%s", database_path);
 }
@@ -39,6 +40,7 @@ bool settings_view_draw(Settings_View *view, const App *app, const char *databas
                         const char *settings_directory, Rectangle area) {
     assert(database_path != NULL);
     assert(settings_directory != NULL);
+
     const float x = area.x + MARGIN_PIXELS;
     float y = area.y + MARGIN_PIXELS;
     app_draw_text(app, APP_TEXT_HEADING, STR("Settings"), x, y);
@@ -118,6 +120,7 @@ static bool settings_view_edit(Settings_View *view, Rectangle box) {
  */
 static void settings_view_paste(Settings_View *view) {
     assert(view->editing);
+
     if (!IsKeyDown(KEY_LEFT_CONTROL) && !IsKeyDown(KEY_RIGHT_CONTROL)) {
         return;
     }

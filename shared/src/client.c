@@ -72,6 +72,7 @@ void client_deinit(Client *client) {
 
 void client_set_server(Client *client, Str host, uint16_t port) {
     assert(host.length > 0);
+
     client_disconnect(client, "");
     // A host that does not fit is cut, as the connect then fails with a message of its own.
     (void)str_copy_truncated(host, client->host, sizeof(client->host));
@@ -294,6 +295,7 @@ static Str client_error(const void *context) {
 
 static bool client_connect(Client *client) {
     assert(!client->connected);
+
     if (!client->net_started) {
         return false;
     }
@@ -358,6 +360,7 @@ static void client_disconnect(Client *client, const char *reason) {
 static Writer client_request_begin(Client *client, Protocol_Operation operation) {
     assert(operation > 0);
     assert(operation < PROTOCOL_OPERATION_END);
+
     Writer request = writer_make(
         array_slice_make(client->request + PROTOCOL_LENGTH_SIZE, PROTOCOL_REQUEST_SIZE_MAX));
     writer_u8(&request, (uint8_t)operation);
@@ -374,6 +377,7 @@ static bool client_exchange(Client *client, const Writer *request, Reader *respo
     assert(client->connected);
     // Every request is far smaller than its buffer; overflowing it is a programmer error.
     assert(!request->overflow);
+
     uint8_t *payload = request->buffer.items;
     uint8_t *message = payload - PROTOCOL_LENGTH_SIZE;
     protocol_length_write(message, (uint32_t)request->length);
@@ -435,6 +439,7 @@ static bool client_response_done(Client *client, const Reader *response) {
  */
 static int32_t client_response_count(Client *client, const Reader *response, int32_t count) {
     assert(count >= 0);
+
     if (client_response_done(client, response)) {
         return count;
     }

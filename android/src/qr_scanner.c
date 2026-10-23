@@ -26,6 +26,7 @@ static void on_session_state(void *context, ACameraCaptureSession *session);
 
 bool qr_scanner_start(QR_Scanner *scanner) {
     assert(!scanner->running);
+
     scanner->error[0] = '\0';
     scanner->has_frame = false;
     scanner->manager = ACameraManager_create();
@@ -115,6 +116,7 @@ void qr_scanner_stop(QR_Scanner *scanner) {
 
 bool qr_scanner_poll(QR_Scanner *scanner, char *text, size_t text_size) {
     assert(text_size > 0);
+
     if (!scanner->running) {
         return false;
     }

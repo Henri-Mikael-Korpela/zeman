@@ -321,6 +321,7 @@ static bool column_parse_location(sqlite3_stmt *statement, Event *event);
 bool event_store_open(Event_Store *store, const char *path, bool create) {
     assert(store != NULL);
     assert(path != NULL);
+
     *store = (Event_Store){ 0 };
 
     // SQLite takes the path as UTF-8, as the user types it, which the C library's fopen on
@@ -369,6 +370,7 @@ bool event_store_open(Event_Store *store, const char *path, bool create) {
 
 void event_store_close(Event_Store *store) {
     assert(store != NULL);
+
     // sqlite3_finalize and sqlite3_close accept NULL, so a partly opened store closes too.
     for (int32_t i = 0; i < STATEMENT_COUNT; i++) {
         sqlite3_finalize(store->statements[i]);
@@ -414,6 +416,7 @@ bool event_store_update(Event_Store *store, const Event *event) {
 bool event_store_delete(Event_Store *store, int64_t id) {
     assert(store != NULL);
     assert(id > 0);
+
     sqlite3_stmt *statement = store->statements[STATEMENT_DELETE];
     int result = sqlite3_bind_int64(statement, 1, id);
     return event_store_write(store, statement, result, "Cannot delete", true);
@@ -422,6 +425,7 @@ bool event_store_delete(Event_Store *store, int64_t id) {
 bool event_store_set_task_done(Event_Store *store, int64_t id, Date occurrence_start, bool done) {
     assert(store != NULL);
     assert(id > 0);
+
     Statement which = STATEMENT_COMPLETION_DELETE;
     if (done) {
         which = STATEMENT_COMPLETION_INSERT;
@@ -470,6 +474,7 @@ int32_t event_store_load_range(Event_Store *store, Date first, Date last, Array_
     assert(store != NULL);
     assert(events.count > 0);
     assert(truncated != NULL);
+
     Event *event_items = events.items;
     const int32_t event_count_max = events.count;
 
@@ -517,6 +522,7 @@ int32_t event_store_load_completions(Event_Store *store, Date first, Date last,
     assert(store != NULL);
     assert(completions.count > 0);
     assert(truncated != NULL);
+
     Task_Completion *completion_items = completions.items;
     const int32_t completion_count_max = completions.count;
 
@@ -565,6 +571,7 @@ int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Arr
                                       bool *truncated) {
     assert(target_id > 0);
     assert(tasks.count > 0);
+
     Linked_Task *task_items = tasks.items;
     const int32_t task_count_max = tasks.count;
     sqlite3_stmt *statement = store->statements[STATEMENT_TARGET_TASKS];
@@ -605,6 +612,7 @@ int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool 
                                       Array_Slice targets, bool *truncated) {
     assert(task_id >= 0);
     assert(targets.count > 0);
+
     Link_Target *target_items = targets.items;
     const int32_t target_count_max = targets.count;
     sqlite3_stmt *statement = store->statements[STATEMENT_TASK_TARGETS];
@@ -655,6 +663,7 @@ bool event_store_set_task_targets(Event_Store *store, int64_t task_id, Array_Sli
     assert(task_id > 0);
     assert(target_ids.count >= 0);
     assert(target_ids.count <= LINK_COUNT_MAX);
+
     if (sqlite3_exec(store->database, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
         return event_store_fail(store, "Cannot save the task's links");
     }
@@ -710,6 +719,7 @@ static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_i
 static bool event_store_fail(Event_Store *store, const char *context) {
     assert(store != NULL);
     assert(context != NULL);
+
     // sqlite3_errmsg accepts NULL and reports out of memory, which is what a NULL handle means.
     snprintf(store->error, sizeof(store->error), "%s: %s", context,
              sqlite3_errmsg(store->database));
@@ -746,6 +756,7 @@ static bool event_store_write(Event_Store *store, sqlite3_stmt *statement, int r
 static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_count_max) {
     assert(id >= 0);
     assert(row_count_max > 0);
+
     int result = sqlite3_bind_int64(statement, 1, id);
     if (result == SQLITE_OK) {
         result = sqlite3_bind_int(statement, 2, row_count_max + 1);
@@ -805,6 +816,7 @@ static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Targ
  */
 static int bind_range(sqlite3_stmt *statement, Date first, Date last, int32_t row_count_max) {
     assert(date_to_day_number(first) <= date_to_day_number(last));
+
     int result = bind_date(statement, 1, first);
     if (result == SQLITE_OK) {
         result = bind_date(statement, 2, last);
@@ -820,6 +832,7 @@ static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event) 
     assert(event->repeat_unit < REPEAT_UNIT_COUNT);
     assert(event->kind >= 0);
     assert(event->kind < EVENT_KIND_COUNT);
+
     // SQLITE_TRANSIENT copies the title; SQLITE_STATIC is enough for the string literals.
     int result = sqlite3_bind_text(statement, 1, event->title, -1, SQLITE_TRANSIENT);
     if (result == SQLITE_OK) {
@@ -893,6 +906,7 @@ static int bind_date(sqlite3_stmt *statement, int index, Date date) {
  */
 static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     assert(event != NULL);
+
     *event = (Event){ .id = sqlite3_column_int64(statement, COLUMN_ID) };
 
     const char *title = (const char *)sqlite3_column_text(statement, COLUMN_TITLE);
@@ -979,6 +993,7 @@ static bool column_parse_target(sqlite3_stmt *statement, Event *event) {
  */
 static bool column_parse_location(sqlite3_stmt *statement, Event *event) {
     assert(event->location.id == 0);
+
     if (sqlite3_column_type(statement, COLUMN_LOCATION_ID) == SQLITE_NULL) {
         return true;
     }
@@ -1135,6 +1150,7 @@ static bool event_store_check_foreign_keys(Event_Store *store) {
 static bool event_store_migrate_step(Event_Store *store, int32_t version) {
     assert(version >= 0);
     assert(version < SCHEMA_VERSION);
+
     char set_version_sql[64] = "";
     snprintf(set_version_sql, sizeof(set_version_sql), "PRAGMA user_version = %d;",
              (int)version + 1);

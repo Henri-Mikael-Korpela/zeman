@@ -67,6 +67,7 @@ Date_Time date_time_now(void) {
  */
 static void format_age_count(char *buffer, size_t buffer_size, int64_t count, const char *unit) {
     assert(count >= 1);
+
     // Plural for every count but one.
     const char *plural = "s";
     if (count == 1) {
@@ -153,12 +154,14 @@ bool date_is_valid(Date date) {
 bool date_equal(Date a, Date b) {
     assert(date_is_valid(a));
     assert(date_is_valid(b));
+
     return a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
 int32_t days_in_month(int32_t year, int32_t month) {
     assert(month >= 1);
     assert(month <= 12);
+
     static const int32_t days[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
     if (month == 2) {
         if (is_leap_year(year)) {
@@ -170,6 +173,7 @@ int32_t days_in_month(int32_t year, int32_t month) {
 
 int32_t date_to_day_number(Date date) {
     assert(date_is_valid(date));
+
     // Years start in March, so January and February belong to the previous year.
     int32_t year = date.year;
     if (date.month <= 2) {
@@ -231,6 +235,7 @@ int32_t date_weekday(Date date) {
 
 int32_t date_iso_week(Date date) {
     assert(date_is_valid(date));
+
     // The week belongs to the year its Thursday is in, and counts from that year's first one.
     const int32_t thursday = date_to_day_number(date) - date_weekday(date) + 3;
     const Date thursday_date = date_from_day_number(thursday);
@@ -243,6 +248,7 @@ int32_t date_iso_week(Date date) {
 
 Date date_add_days(Date date, int32_t days) {
     assert(date_is_valid(date));
+
     Date result = date_from_day_number(date_to_day_number(date) + days);
     assert(date_to_day_number(result) - date_to_day_number(date) == days);
     return result;
@@ -250,6 +256,7 @@ Date date_add_days(Date date, int32_t days) {
 
 Date date_add_months(Date date, int32_t months) {
     assert(date_is_valid(date));
+
     int32_t month_index = date.year * 12 + (date.month - 1) + months;
     assert(month_index >= DATE_YEAR_MIN * 12);
     assert(month_index < (DATE_YEAR_MAX + 1) * 12);
@@ -265,6 +272,7 @@ Date date_add_months(Date date, int32_t months) {
 
 bool date_parse_iso(Str text, Date *date) {
     assert(date != NULL);
+
     // Require the fixed-width form so that stored dates also sort correctly as text.
     if (text.length != DATE_ISO_SIZE - 1) {
         return false;
@@ -293,6 +301,7 @@ bool date_parse_iso(Str text, Date *date) {
 void date_format_iso(Date date, char *buffer, size_t buffer_size) {
     assert(date_is_valid(date));
     assert(buffer_size >= DATE_ISO_SIZE);
+
     int written = snprintf(buffer, buffer_size, "%04" PRId32 "-%02" PRId32 "-%02" PRId32,
                            date.year, date.month, date.day);
     assert(written == DATE_ISO_SIZE - 1);
@@ -300,6 +309,7 @@ void date_format_iso(Date date, char *buffer, size_t buffer_size) {
 
 bool time_parse(Str text, int32_t *minute_of_day) {
     assert(minute_of_day != NULL);
+
     if (text.length != TIME_TEXT_SIZE - 1) {
         return false;
     }
@@ -327,6 +337,7 @@ void time_format(int32_t minute_of_day, char *buffer, size_t buffer_size) {
     assert(minute_of_day >= 0);
     assert(minute_of_day < MINUTES_PER_DAY);
     assert(buffer_size >= TIME_TEXT_SIZE);
+
     int written = snprintf(buffer, buffer_size, "%02" PRId32 ":%02" PRId32,
                            minute_of_day / 60, minute_of_day % 60);
     assert(written == TIME_TEXT_SIZE - 1);
@@ -335,24 +346,28 @@ void time_format(int32_t minute_of_day, char *buffer, size_t buffer_size) {
 Str month_name(int32_t month) {
     assert(month >= 1);
     assert(month <= 12);
+
     return month_names[month - 1];
 }
 
 Str month_short_name(int32_t month) {
     assert(month >= 1);
     assert(month <= 12);
+
     return month_short_names[month - 1];
 }
 
 Str weekday_name(int32_t weekday) {
     assert(weekday >= 0);
     assert(weekday < 7);
+
     return weekday_names[weekday];
 }
 
 Str weekday_short_name(int32_t weekday) {
     assert(weekday >= 0);
     assert(weekday < 7);
+
     return weekday_short_names[weekday];
 }
 
@@ -366,6 +381,7 @@ static bool is_leap_year(int32_t year) {
 static bool parse_digits(Str digits, int32_t *number) {
     assert(digits.length > 0);
     assert(digits.length <= 4); // Keeps the result far from int32_t overflow.
+
     uint64_t value = 0;
     if (!str_to_u64(digits, &value)) {
         return false;

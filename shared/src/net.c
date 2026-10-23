@@ -54,6 +54,7 @@ bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, Net_Socket
                  char *error, size_t error_size) {
     assert(host != NULL);
     assert(timeout_ms > 0);
+
     *socket_out = NET_SOCKET_INVALID;
 
     char port_text[8] = "";
@@ -154,6 +155,7 @@ Net_Socket net_accept(Net_Socket listener, bool *peer_is_local, char *peer_addre
 
 int32_t net_send(Net_Socket socket, Array_Slice bytes) {
     assert(bytes.count > 0);
+
     int result = send((Platform_Socket)socket, (const char *)bytes.items, bytes.count,
                       NET_SEND_FLAGS);
     if (result > 0) {
@@ -169,6 +171,7 @@ int32_t net_send(Net_Socket socket, Array_Slice bytes) {
 
 int32_t net_recv(Net_Socket socket, Array_Slice bytes) {
     assert(bytes.count > 0);
+
     int result = recv((Platform_Socket)socket, (char *)bytes.items, bytes.count, 0);
     if (result > 0) {
         return result;
@@ -262,6 +265,7 @@ bool net_udp_open(uint16_t port, Net_Socket *socket_out, char *error, size_t err
 
 bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, Array_Slice bytes) {
     assert(bytes.count > 0);
+
     struct sockaddr_in target = { 0 };
     target.sin_family = AF_INET;
     target.sin_port = htons(port);
@@ -276,6 +280,7 @@ bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, Array_S
 int32_t net_udp_recv(Net_Socket socket, Array_Slice bytes, char *address, size_t address_size,
                      uint16_t *port) {
     assert(bytes.count > 0);
+
     struct sockaddr_in from = { 0 };
     socklen_t from_length = sizeof(from);
     int received = recvfrom((Platform_Socket)socket, (char *)bytes.items, bytes.count, 0,
@@ -368,6 +373,7 @@ static bool net_would_block(void) {
  */
 static bool net_wait(Net_Socket socket, bool for_write, int32_t timeout_ms) {
     assert(timeout_ms >= 0);
+
     fd_set set = { 0 };
     FD_ZERO(&set);
     FD_SET((Platform_Socket)socket, &set);

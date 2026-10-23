@@ -11,6 +11,7 @@ static bool reader_bytes(Reader *reader, void *bytes, size_t count);
 Writer writer_make(Array_Slice buffer) {
     assert(buffer.items != NULL);
     assert(buffer.count > 0);
+
     return (Writer){ .buffer = buffer, .length = 0, .overflow = false };
 }
 
@@ -112,6 +113,7 @@ void writer_link_target(Writer *writer, const Link_Target *target) {
 
 Reader reader_make(Array_Slice buffer) {
     assert(buffer.items != NULL);
+
     return (Reader){ .buffer = buffer, .position = 0, .failed = false };
 }
 
@@ -143,6 +145,7 @@ int64_t reader_i64(Reader *reader) {
 
 void reader_text(Reader *reader, char *text, size_t text_size) {
     assert(text_size > 0);
+
     text[0] = '\0';
     uint8_t prefix[2] = { 0, 0 };
     if (!reader_bytes(reader, prefix, sizeof(prefix))) {
@@ -342,6 +345,7 @@ void protocol_link_format(char *link, size_t link_size, Str address, uint16_t po
 bool protocol_link_parse(Str link, Str *address, uint16_t *port) {
     assert(address != NULL);
     assert(port != NULL);
+
     const Str prefix = str_from_cstr(PROTOCOL_LINK_PREFIX);
     if (str_starts_with(link, prefix)) {
         link = str_slice(link, prefix.length, link.length);

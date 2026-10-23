@@ -35,6 +35,7 @@ void problems_view_init(Problems_View *view) {
 void problems_view_draw(Problems_View *view, Backend *backend, const App *app, Rectangle area) {
     assert(area.width > 0.0f);
     assert(area.height > 0.0f);
+
     // Checking a task off anywhere changes the revision, and moves its problems along.
     const uint64_t revision = backend_revision(backend);
     if (!view->loaded || revision != view->revision) {
@@ -109,6 +110,7 @@ static void problems_view_draw_column(const Problems_View *view, const App *app,
                                       Rectangle cell) {
     assert(count >= 0);
     assert(count <= view->problem_count);
+
     char text[LABEL_SIZE] = "";
     const Str status_name = target_status_name(status);
     snprintf(text, sizeof(text), "%.*s (%" PRId32 ")", STR_ARGUMENTS(status_name), count);

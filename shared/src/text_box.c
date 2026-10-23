@@ -65,6 +65,7 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str 
  */
 static int32_t utf8_sequence_size(Str text) {
     assert(text.length > 0);
+
     const unsigned char first = (unsigned char)text.data[0];
     int32_t size = 0;
     if (first < 0x80) {

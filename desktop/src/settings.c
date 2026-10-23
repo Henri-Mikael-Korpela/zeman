@@ -28,6 +28,7 @@ static bool settings_line_is_skipped(Str line);
 bool settings_load(Settings *settings, const char *directory) {
     assert(settings != NULL);
     assert(directory != NULL);
+
     *settings = (Settings){ 0 };
     char path[SETTINGS_FILE_PATH_SIZE] = "";
     if (!settings_file_path(path, sizeof(path), directory)) {
@@ -70,6 +71,7 @@ bool settings_save(Settings *settings, const char *directory) {
     // comes from a one-line text box, whose pasting turns line breaks into spaces.
     assert(strchr(settings->database_path, '\n') == NULL);
     assert(strchr(settings->database_path, '\r') == NULL);
+
     settings->error[0] = '\0';
     char path[SETTINGS_FILE_PATH_SIZE] = "";
     if (!settings_file_path(path, sizeof(path), directory)) {
@@ -101,6 +103,7 @@ bool settings_save(Settings *settings, const char *directory) {
 static bool settings_file_path(char *buffer, size_t buffer_size, const char *directory) {
     assert(buffer != NULL);
     assert(buffer_size > 0);
+
     const int written = snprintf(buffer, buffer_size, "%s%s", directory, FILE_NAME);
     return written > 0 && (size_t)written < buffer_size;
 }

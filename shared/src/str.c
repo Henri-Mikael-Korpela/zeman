@@ -7,6 +7,7 @@ static size_t utf8_length_at_most(Str s, size_t length_max);
 
 Str str_make(const char *data, size_t length) {
     assert(data != NULL || length == 0);
+
     return (Str){
         .data = data,
         .length = length,
@@ -106,6 +107,7 @@ size_t str_find(Str haystack, Str needle) {
 bool str_split_once(Str s, Str sep, Str *before, Str *after) {
     assert(before != NULL);
     assert(after != NULL);
+
     size_t position = str_find(s, sep);
     if (position == STR_NOT_FOUND) {
         return false;
@@ -117,6 +119,7 @@ bool str_split_once(Str s, Str sep, Str *before, Str *after) {
 
 bool str_to_u64(Str s, uint64_t *out) {
     assert(out != NULL);
+
     if (s.length == 0) {
         return false;
     }
@@ -139,6 +142,7 @@ bool str_to_u64(Str s, uint64_t *out) {
 
 bool str_to_cstr(Str s, char *buffer, size_t capacity) {
     assert(buffer != NULL);
+
     if (s.length >= capacity) {
         return false;
     }
@@ -155,6 +159,7 @@ bool str_to_cstr(Str s, char *buffer, size_t capacity) {
 bool str_copy_truncated(Str s, char *buffer, size_t capacity) {
     assert(buffer != NULL);
     assert(capacity >= 1);
+
     // A NUL byte ends the text where it is, as it would for any C string.
     const size_t nul = str_find_char(s, '\0');
     bool complete = nul == STR_NOT_FOUND;
@@ -175,6 +180,7 @@ bool str_copy_truncated(Str s, char *buffer, size_t capacity) {
 void str_builder_init(Str_Builder *builder, char *buffer, size_t capacity) {
     assert(builder != NULL);
     assert(buffer != NULL || capacity == 0);
+
     builder->data = buffer;
     builder->length = 0;
     builder->capacity = capacity;
@@ -184,6 +190,7 @@ void str_builder_init(Str_Builder *builder, char *buffer, size_t capacity) {
 bool str_builder_append(Str_Builder *builder, Str s) {
     assert(builder != NULL);
     assert(builder->length <= builder->capacity);
+
     if (s.length > builder->capacity - builder->length) {
         builder->overflow = true;
         return false;

@@ -40,6 +40,7 @@ static const Backend_Ops local_ops = {
 
 void local_backend_init(Local_Backend *local) {
     assert(local != NULL);
+
     // Starts from the clock rather than 1, so that a phone that saw the revision of an earlier
     // run of this app does not mistake a new run's revision for one it has already loaded.
     *local = (Local_Backend){ .revision = (uint64_t)time(NULL) << 20, .store_open = false };
@@ -51,6 +52,7 @@ void local_backend_init(Local_Backend *local) {
 bool local_backend_switch(Local_Backend *local, const char *path, bool create) {
     assert(local != NULL);
     assert(path != NULL);
+
     // Opened beside the current store, so that a failure leaves the current one in use.
     Event_Store store = { 0 };
     if (!event_store_open(&store, path, create)) {

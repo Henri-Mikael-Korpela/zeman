@@ -32,6 +32,7 @@ static void server_fail(Writer *response, Str message);
 
 bool server_start(Server *server, Backend *backend, uint16_t port) {
     assert(backend != NULL);
+
     server->backend = backend;
     server->listener = NET_SOCKET_INVALID;
     server->discovery = NET_SOCKET_INVALID;

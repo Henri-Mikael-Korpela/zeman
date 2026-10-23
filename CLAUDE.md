@@ -132,6 +132,7 @@
 - Split compound assertions: `assert(a); assert(b);` rather than `assert(a && b);`.
 - Use `static_assert` (C11 `_Static_assert`) to check compile-time constants, sizes and relationships between them.
 - Assertions must not have side effects, because they may be compiled out with `NDEBUG`.
+- Ensure there's an empty line after function precondition asserts and static_asserts.
 
 ## Error handling
 

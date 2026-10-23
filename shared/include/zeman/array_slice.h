@@ -26,6 +26,7 @@ typedef struct Array_Slice {
  */
 static inline Array_Slice array_slice_make(void *items, int32_t count) {
     assert(count >= 0);
+
     if (count > 0) {
         assert(items != NULL);
     }

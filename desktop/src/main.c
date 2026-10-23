@@ -61,6 +61,7 @@ static const double REDRAW_INTERVAL_SECONDS = 1.0;
 static const char DATABASE_PATH[] = ZEMAN_DATABASE_PATH;
 static_assert(sizeof(DATABASE_PATH) > 1, "The database path is not empty.");
 static_assert(sizeof(DATABASE_PATH) <= SETTINGS_PATH_SIZE, "The path fits the Settings view.");
+
 #endif
 
 typedef enum View {
@@ -311,6 +312,7 @@ static void desktop_database_apply(Desktop *desktop, App *app) {
 static const char *database_path(char *buffer, int32_t buffer_size) {
     assert(buffer != NULL);
     assert(buffer_size > 0);
+
 #ifdef ZEMAN_DATABASE_NEXT_TO_EXECUTABLE
     // GetApplicationDirectory() ends with a path separator already, as it does for fonts above.
     int written = snprintf(buffer, (size_t)buffer_size, "%szeman.db", GetApplicationDirectory());

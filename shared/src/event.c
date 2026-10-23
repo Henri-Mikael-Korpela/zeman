@@ -31,6 +31,7 @@ int32_t event_duration_days(const Event *event) {
 int32_t event_repeat_gap_days_min(const Event *event) {
     assert(event->repeat_interval >= 1);
     assert(event->repeat_interval <= REPEAT_INTERVAL_MAX);
+
     switch ((Repeat_Unit)event->repeat_unit) {
     case REPEAT_NONE:
         // A one-time event never repeats, so no length is too long.
@@ -57,6 +58,7 @@ int32_t event_repeat_gap_days_min(const Event *event) {
 bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *start_day) {
     assert(event->repeat_unit >= 0);
     assert(event->repeat_unit < REPEAT_UNIT_COUNT);
+
     int32_t first_day = date_to_day_number(event->start_date);
     if (day_number < first_day) {
         return false;
@@ -108,6 +110,7 @@ bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *st
 
 Event event_occurrence_at(const Event *event, int32_t start_day) {
     assert(start_day >= date_to_day_number(event->start_date));
+
     Event occurrence = *event;
     occurrence.start_date = date_from_day_number(start_day);
     occurrence.end_date = date_from_day_number(start_day + event_duration_days(event));
@@ -117,6 +120,7 @@ Event event_occurrence_at(const Event *event, int32_t start_day) {
 
 void event_format_repeat(const Event *event, char *buffer, size_t buffer_size) {
     assert(buffer_size > 0);
+
     switch ((Repeat_Unit)event->repeat_unit) {
     case REPEAT_NONE:
         buffer[0] = '\0';
@@ -151,6 +155,7 @@ void event_format_repeat(const Event *event, char *buffer, size_t buffer_size) {
 static bool event_occurrence_on_day_monthly(const Event *event, int32_t day_number,
                                             int32_t month_step, int32_t *start_day) {
     assert(month_step >= 1);
+
     Date first = event->start_date;
     Date day = date_from_day_number(day_number);
     int32_t months_since_first = (day.year - first.year) * 12 + (day.month - first.month);
@@ -246,6 +251,7 @@ bool event_is_valid(const Event *event) {
 bool event_kind_is_target(int32_t kind) {
     assert(kind >= 0);
     assert(kind < EVENT_KIND_COUNT);
+
     return kind == EVENT_KIND_PROBLEM || kind == EVENT_KIND_OPPORTUNITY;
 }
 
@@ -257,6 +263,7 @@ bool opportunity_is_missed(Date end_date, int32_t end_minute, bool tasks_done, D
     assert(date_is_valid(end_date));
     assert(date_is_valid(now.date));
     assert(end_minute == TIME_NONE || minute_is_valid(end_minute));
+
     if (tasks_done) {
         return false;
     }
@@ -276,6 +283,7 @@ Target_Status target_status(int32_t task_count, int32_t task_done_count) {
     assert(task_count >= 0);
     assert(task_done_count >= 0);
     assert(task_done_count <= task_count);
+
     if (task_count == 0) {
         return TARGET_STATUS_NO_TASKS;
     }
