@@ -474,8 +474,8 @@ typedef struct Layout {
     Rectangle header;
     Rectangle range_bar;  // The Month/Week/Day selector; empty when not shown
     Rectangle weekdays;
-    // The week numbers left of the month's rows, with the day cells starting after them at
-    // grid.x; empty in a week or day.
+    // The week numbers left of the month's rows, or the one number of a week or day in the
+    // gutter beside its day cells, with the cells starting after them at grid.x.
     Rectangle week_numbers;
     Rectangle grid;       // The day cells; in a week or day, the row above the timeline
     // The hours of a week or day below the day cells, with the hour labels in a gutter at the
@@ -1437,6 +1437,8 @@ static void layout_set_grid_timeline(Layout *layout, int32_t untimed_count) {
         height = height_max;
     }
     layout->grid = (Rectangle){ area.x + gutter, area.y, area.width - gutter, height };
+    // The week's number sits in the gutter beside the day cells, as the month view's do.
+    layout->week_numbers = (Rectangle){ area.x, area.y, gutter, height };
     layout->timeline = (Rectangle){ area.x, area.y + height, area.width, area.height - height };
     layout->weekdays.x += gutter;
     layout->weekdays.width -= gutter;
@@ -1556,12 +1558,6 @@ static void range_title(const App *app, char *buffer, size_t buffer_size) {
                      "%" PRId32 " %.*s %" PRId32 " - %" PRId32 " %.*s %" PRId32, first.day,
                      STR_ARGUMENTS(first_month_short), first.year, last.day,
                      STR_ARGUMENTS(last_month_short), last.year);
-        }
-        // The week's number after its dates, as calendar apps show it; the first day is a Monday.
-        {
-            const size_t length = strlen(buffer);
-            snprintf(buffer + length, buffer_size - length, ", week %" PRId32,
-                     date_iso_week(first));
         }
         return;
     case RANGE_DAY: {
@@ -1737,24 +1733,27 @@ static void draw_grid(App *app, const Layout *layout) {
 }
 
 /**
- * The number of each week of the month view left of its row, dimmed so that the days stand out,
- * with "Wk" above them. The numbers are the ISO 8601 ones, as the Monday-first weeks are.
+ * The number of each week left of its row, dimmed so that the days stand out, with "Wk" above
+ * them: one per row in the month view, and the one number of the range in a week or day, in the
+ * gutter beside the day cells. The numbers are the ISO 8601 ones, as the Monday-first weeks are.
  */
 static void draw_week_numbers(const App *app, const Layout *layout) {
     if (layout->week_numbers.width <= 0.0f) {
         return;
     }
-    assert(layout->rows > 1);
     const Color color = style_color(TEXT_COLOR_DISABLED);
     draw_text_centered(&app->fonts.small, STR("Wk"),
                        (Rectangle){ layout->week_numbers.x, layout->weekdays.y,
                                     layout->week_numbers.width, layout->weekdays.height },
                        color);
     for (int32_t row = 0; row < layout->rows; row++) {
-        const Date monday = date_add_days(app->visible_first, row * GRID_COLUMN_COUNT);
-        assert(date_weekday(monday) == 0);
+        // A month row starts on a Monday. A week has one row, and a day's week is its own.
+        const Date row_first = date_add_days(app->visible_first, row * layout->columns);
+        if (layout->columns == GRID_COLUMN_COUNT) {
+            assert(date_weekday(row_first) == 0);
+        }
         char number[4] = "";
-        snprintf(number, sizeof(number), "%" PRId32, date_iso_week(monday));
+        snprintf(number, sizeof(number), "%" PRId32, date_iso_week(row_first));
         // As tall as the day number's line in the row's first cell, so that they read together.
         const Rectangle line = { layout->week_numbers.x,
                                  layout->grid.y + (float)row * layout->cell_height + 7,
