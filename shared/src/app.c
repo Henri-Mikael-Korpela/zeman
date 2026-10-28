@@ -3899,9 +3899,19 @@ static void draw_panel_form_kinds(App *app, Rectangle body, bool editing) {
     }
 }
 
+/**
+ * Cancel and Save, and for an existing item Delete at the right of both, in red. Delete closes
+ * the form and leaves the question to the item's card, which asks first, because deleting is
+ * permanent and also removes every repeat.
+ */
 static void draw_panel_form_buttons(App *app, Rectangle body, float y) {
     const float gap = 12;
-    const float button_width = (body.width - gap) / 2;
+    const bool editing = app->form.editing_id != 0;
+    int32_t button_count = 2;
+    if (editing) {
+        button_count = 3;
+    }
+    const float button_width = (body.width - (float)(button_count - 1) * gap) / (float)button_count;
     if (GuiButton((Rectangle){ body.x, y, button_width, BUTTON_HEIGHT_PIXELS }, "Cancel")) {
         form_close(&app->form);
         return;
@@ -3909,6 +3919,40 @@ static void draw_panel_form_buttons(App *app, Rectangle body, float y) {
     const float save_x = body.x + button_width + gap;
     if (GuiButton((Rectangle){ save_x, y, button_width, BUTTON_HEIGHT_PIXELS }, "Save")) {
         app_form_submit(app);
+        return;
+    }
+    if (!editing) {
+        return;
+    }
+    const Rectangle delete_button = { save_x + button_width + gap, y, button_width,
+                                      BUTTON_HEIGHT_PIXELS };
+    // Red for this button only; the styles are global in raygui, so put them back after.
+    static const int32_t properties[] = { BASE_COLOR_NORMAL, BASE_COLOR_FOCUSED,
+                                          BASE_COLOR_PRESSED, BORDER_COLOR_NORMAL,
+                                          BORDER_COLOR_FOCUSED, BORDER_COLOR_PRESSED,
+                                          TEXT_COLOR_NORMAL, TEXT_COLOR_FOCUSED,
+                                          TEXT_COLOR_PRESSED };
+    enum { PROPERTY_COUNT = sizeof(properties) / sizeof(properties[0]) };
+    const Color reds[PROPERTY_COUNT] = {
+        { 185, 40, 40, 255 }, { 210, 55, 55, 255 }, { 150, 30, 30, 255 },
+        { 120, 20, 20, 255 }, { 120, 20, 20, 255 }, { 120, 20, 20, 255 },
+        { 255, 255, 255, 255 }, { 255, 255, 255, 255 }, { 255, 255, 255, 255 },
+    };
+    int32_t saved[PROPERTY_COUNT] = { 0 };
+    for (int32_t i = 0; i < PROPERTY_COUNT; i++) {
+        saved[i] = GuiGetStyle(BUTTON, properties[i]);
+        GuiSetStyle(BUTTON, properties[i], (int32_t)ColorToInt(reds[i]));
+    }
+    const bool pressed = GuiButton(delete_button, "Delete");
+    for (int32_t i = 0; i < PROPERTY_COUNT; i++) {
+        GuiSetStyle(BUTTON, properties[i], saved[i]);
+    }
+    if (pressed) {
+        const int64_t id = app->form.editing_id;
+        form_close(&app->form);
+        app->event_delete_id = id;
+        app->event_focused_id = id;
+        app->panel_reveal_focused = true;
     }
 }
 
