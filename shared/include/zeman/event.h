@@ -79,6 +79,14 @@ typedef struct Task_Completion {
     int32_t occurrence_start_day;  // Day number of the occurrence's start date
 } Task_Completion;
 
+// A task at the one occurrence of it that is due (see event_occurrence_due), as the Tasks view
+// lists it, with whether that occurrence is checked off.
+typedef struct Task_Occurrence {
+    Event task;
+    int32_t start_day;  // Day number of the occurrence's start date
+    bool done;
+} Task_Occurrence;
+
 enum {
     // Tasks linked to one link target, and targets offered to one task, loaded at once. Far
     // more than one target plausibly needs; the form says when more exist.
@@ -152,6 +160,13 @@ int32_t event_repeat_gap_days_min(const Event *event);
  * Finds the occurrence that covers day_number. Returns false if none does.
  */
 bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *start_day);
+
+/**
+ * The start day of the occurrence that is due on day_number: the one that covers the day, else
+ * the first that starts after it, else, when every occurrence is past, the last one. A
+ * repeating task's missed occurrences are passed over for the next, which asks the same again.
+ */
+int32_t event_occurrence_due(const Event *event, int32_t day_number);
 
 /**
  * A copy of the event with its dates moved to the occurrence that starts on start_day.

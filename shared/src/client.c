@@ -36,6 +36,7 @@ static int32_t client_load_target_tasks(void *context, int64_t target_id, Array_
 static int32_t client_load_task_targets(void *context, int64_t task_id, bool problems_only,
                                         Array_Slice targets, bool *truncated);
 static bool client_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
+static int32_t client_load_tasks(void *context, Date today, Array_Slice tasks, bool *truncated);
 static uint64_t client_revision(void *context);
 static Str client_error(const void *context);
 
@@ -50,6 +51,7 @@ static const Backend_Ops client_ops = {
     .load_target_tasks = client_load_target_tasks,
     .load_task_targets = client_load_task_targets,
     .set_task_targets = client_set_task_targets,
+    .load_tasks = client_load_tasks,
     .revision = client_revision,
     .error = client_error,
 };
@@ -260,6 +262,30 @@ static bool client_set_task_targets(void *context, int64_t task_id, Array_Slice 
     }
     Reader response = { 0 };
     return client_call(client, &request, &response) && client_response_done(client, &response);
+}
+
+static int32_t client_load_tasks(void *context, Date today, Array_Slice tasks, bool *truncated) {
+    Client *client = context;
+    assert(date_is_valid(today));
+    assert(tasks.count > 0);
+    Task_Occurrence *task_items = tasks.items;
+    Writer request = client_request_begin(client, PROTOCOL_LOAD_TASKS);
+    writer_date(&request, today);
+    writer_i32(&request, tasks.count);
+    Reader response = { 0 };
+    if (!client_call(client, &request, &response)) {
+        return -1;
+    }
+    *truncated = reader_u8(&response) != 0;
+    int32_t count = reader_i32(&response);
+    if (count < 0 || count > tasks.count) {
+        client_disconnect(client, "The desktop app sent an invalid answer.");
+        return -1;
+    }
+    for (int32_t i = 0; i < count; i++) {
+        task_items[i] = reader_task_occurrence(&response);
+    }
+    return client_response_count(client, &response, count);
 }
 
 /**

@@ -56,6 +56,7 @@ add_executable(zeman
     src/server.c
     src/settings.c
     src/settings_view.c
+    src/tasks_view.c
     src/raygui_impl.c
     "${SHARED_DIR}/app.c"
     "${SHARED_DIR}/calendar.c"

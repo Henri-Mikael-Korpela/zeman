@@ -20,6 +20,7 @@ static int32_t local_load_target_tasks(void *context, int64_t target_id, Array_S
 static int32_t local_load_task_targets(void *context, int64_t task_id, bool problems_only,
                                        Array_Slice targets, bool *truncated);
 static bool local_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
+static int32_t local_load_tasks(void *context, Date today, Array_Slice tasks, bool *truncated);
 static uint64_t local_revision(void *context);
 static Str local_error(const void *context);
 
@@ -34,6 +35,7 @@ static const Backend_Ops local_ops = {
     .load_target_tasks = local_load_target_tasks,
     .load_task_targets = local_load_task_targets,
     .set_task_targets = local_set_task_targets,
+    .load_tasks = local_load_tasks,
     .revision = local_revision,
     .error = local_error,
 };
@@ -234,6 +236,18 @@ static bool local_set_task_targets(void *context, int64_t task_id, Array_Slice t
     // A target's status shows wherever its links are loaded, so phones reload too.
     local_changed(local);
     return true;
+}
+
+static int32_t local_load_tasks(void *context, Date today, Array_Slice tasks, bool *truncated) {
+    Local_Backend *local = context;
+    if (!local_available(local)) {
+        return -1;
+    }
+    int32_t count = event_store_load_tasks(&local->store, today, tasks, truncated);
+    if (count < 0) {
+        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
+    }
+    return count;
 }
 
 static uint64_t local_revision(void *context) {

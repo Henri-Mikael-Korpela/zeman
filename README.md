@@ -72,7 +72,7 @@ This writes `desktop/release/zeman.exe` and `desktop/release/fonts/`. Unlike the
 
 `zeman.exe --port PORT` serves phones on another port than 47800, for example when something else uses it; the QR code and the address shown carry the port. `zeman.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
 
-The navigation on the left switches between **Calendar**, **Problems** and **Connected Devices**. Problems shows every problem in four columns, from the least to the most complete: No planned tasks, Planned, Partly completed and Completed, each with how many problems it holds. Connected Devices shows the QR code that phones scan to connect, the address to type instead, and the phones connected now.
+The navigation on the left switches between **Calendar**, **Problems** and **Connected Devices**. Problems shows every problem in four columns, from the least to the most complete: No planned tasks, Planned, Partly completed and Completed, each with how many problems it holds. Tasks shows every task in four columns: Overdue, Today, Upcoming and Completed. A repeating task is shown once, at the occurrence that covers today or the next one, so a missed repeat gives way to the next. Click a task's checkbox to mark it completed, or anywhere else on it to open its day in the calendar. Connected Devices shows the QR code that phones scan to connect, the address to type instead, and the phones connected now.
 
 ## Android app
 

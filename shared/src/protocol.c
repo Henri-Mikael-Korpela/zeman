@@ -111,6 +111,12 @@ void writer_link_target(Writer *writer, const Link_Target *target) {
     writer_text(writer, str_from_cstr(target->title));
 }
 
+void writer_task_occurrence(Writer *writer, const Task_Occurrence *occurrence) {
+    writer_event(writer, &occurrence->task);
+    writer_i32(writer, occurrence->start_day);
+    writer_u8(writer, (uint8_t)occurrence->done);
+}
+
 Reader reader_make(Array_Slice buffer) {
     assert(buffer.items != NULL);
 
@@ -293,6 +299,32 @@ Link_Target reader_link_target(Reader *reader) {
         return (Link_Target){ 0 };
     }
     return target;
+}
+
+/**
+ * The start day is bounded before event_occurrence_on_day sees it, because it turns the day
+ * into a date, which must be a valid one.
+ */
+Task_Occurrence reader_task_occurrence(Reader *reader) {
+    Task_Occurrence occurrence = { 0 };
+    occurrence.task = reader_event(reader);
+    occurrence.start_day = reader_i32(reader);
+    uint8_t done = reader_u8(reader);
+    occurrence.done = done == 1;
+    if (reader->failed || occurrence.task.kind != EVENT_KIND_TASK || done > 1) {
+        reader->failed = true;
+        return (Task_Occurrence){ 0 };
+    }
+    const int32_t first_day = date_to_day_number(occurrence.task.start_date);
+    const int32_t last_valid_day = date_to_day_number((Date){ DATE_YEAR_MAX, 12, 31 });
+    int32_t start_day = 0;
+    if (occurrence.start_day < first_day || occurrence.start_day > last_valid_day ||
+        !event_occurrence_on_day(&occurrence.task, occurrence.start_day, &start_day) ||
+        start_day != occurrence.start_day) {
+        reader->failed = true;
+        return (Task_Occurrence){ 0 };
+    }
+    return occurrence;
 }
 
 bool reader_done(const Reader *reader) {

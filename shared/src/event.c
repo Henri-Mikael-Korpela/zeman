@@ -18,6 +18,10 @@ enum {
 
 static bool event_occurrence_on_day_monthly(const Event *event, int32_t day_number,
                                             int32_t month_step, int32_t *start_day);
+static int32_t event_occurrence_due_latest(const Event *event, int32_t day_number);
+static bool event_occurrence_due_next(const Event *event, int32_t start_day, int32_t *next_day);
+static int32_t event_repeat_day_step(const Event *event);
+static int32_t event_repeat_month_step(const Event *event);
 static bool minute_is_valid(int32_t minute_of_day);
 static bool text_is_terminated(const char *text, size_t size);
 
@@ -108,6 +112,39 @@ bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *st
     return true;
 }
 
+int32_t event_occurrence_due(const Event *event, int32_t day_number) {
+    assert(event->repeat_unit >= 0);
+    assert(event->repeat_unit < REPEAT_UNIT_COUNT);
+
+    const int32_t first_day = date_to_day_number(event->start_date);
+    if (day_number < first_day || event->repeat_unit == REPEAT_NONE) {
+        return first_day;
+    }
+    int32_t start_day = first_day;
+    if (event_occurrence_on_day(event, day_number, &start_day)) {
+        return start_day;
+    }
+    // No occurrence covers the day, so the latest that starts by it is past, and the one after
+    // it is next, unless the repeat ends first; then the latest is the last.
+    int32_t last_day = day_number;
+    if (event->repeat_has_end) {
+        const int32_t end_day = date_to_day_number(event->repeat_end_date);
+        if (end_day < last_day) {
+            last_day = end_day;
+        }
+    }
+    const int32_t latest_day = event_occurrence_due_latest(event, last_day);
+    int32_t next_day = 0;
+    if (!event_occurrence_due_next(event, latest_day, &next_day)) {
+        return latest_day;
+    }
+    if (event->repeat_has_end && next_day > date_to_day_number(event->repeat_end_date)) {
+        return latest_day;
+    }
+    assert(next_day > day_number);
+    return next_day;
+}
+
 Event event_occurrence_at(const Event *event, int32_t start_day) {
     assert(start_day >= date_to_day_number(event->start_date));
 
@@ -175,6 +212,110 @@ static bool event_occurrence_on_day_monthly(const Event *event, int32_t day_numb
         occurrence_index--;
     }
     return false;
+}
+
+/**
+ * The latest start on or before day_number, which is not before the first, whether or not that
+ * occurrence still covers the day.
+ */
+static int32_t event_occurrence_due_latest(const Event *event, int32_t day_number) {
+    assert(event->repeat_unit != REPEAT_NONE);
+
+    const int32_t first_day = date_to_day_number(event->start_date);
+    assert(day_number >= first_day);
+
+    const int32_t day_step = event_repeat_day_step(event);
+    if (day_step > 0) {
+        return first_day + (day_number - first_day) / day_step * day_step;
+    }
+    int32_t start_day = first_day;
+    // The search bound covers the intervals the form offers, so this fails only for data made
+    // elsewhere; the first occurrence is a start all the same.
+    if (!event_occurrence_on_day_monthly(event, day_number, event_repeat_month_step(event),
+                                         &start_day)) {
+        return first_day;
+    }
+    return start_day;
+}
+
+/**
+ * The first start after start_day, an occurrence's start, ignoring the repeat end. Returns
+ * false past the last valid date, or when monthly occurrences are not found within the search
+ * bound.
+ */
+static bool event_occurrence_due_next(const Event *event, int32_t start_day, int32_t *next_day) {
+    assert(event->repeat_unit != REPEAT_NONE);
+    assert(start_day >= date_to_day_number(event->start_date));
+
+    const int32_t last_valid_day = date_to_day_number((Date){ DATE_YEAR_MAX, 12, 31 });
+    const int32_t day_step = event_repeat_day_step(event);
+    if (day_step > 0) {
+        if (start_day > last_valid_day - day_step) {
+            return false;
+        }
+        *next_day = start_day + day_step;
+        return true;
+    }
+    const int32_t month_step = event_repeat_month_step(event);
+    const Date first = event->start_date;
+    const Date start = date_from_day_number(start_day);
+    const int32_t first_month_index = first.year * 12 + (first.month - 1);
+    const int32_t start_month_index = start.year * 12 + (start.month - 1);
+    // Later occurrences skip months without the start's day, as in event_occurrence_on_day_monthly.
+    int32_t occurrence_index = (start_month_index - first_month_index) / month_step;
+    for (int32_t i = 0; i < MONTH_SEARCH_STEP_MAX; i++) {
+        occurrence_index++;
+        const int32_t month_index = first_month_index + occurrence_index * month_step;
+        const Date occurrence = { month_index / 12, month_index % 12 + 1, first.day };
+        if (occurrence.year > DATE_YEAR_MAX) {
+            return false;
+        }
+        if (occurrence.day <= days_in_month(occurrence.year, occurrence.month)) {
+            *next_day = date_to_day_number(occurrence);
+            assert(*next_day > start_day);
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Days between starts for an event that repeats by days or weeks, or 0 for one by months.
+ */
+static int32_t event_repeat_day_step(const Event *event) {
+    switch ((Repeat_Unit)event->repeat_unit) {
+    case REPEAT_DAY:
+        return event->repeat_interval;
+    case REPEAT_WEEK:
+        return 7 * event->repeat_interval;
+    case REPEAT_MONTH:
+    case REPEAT_YEAR:
+        return 0;
+    case REPEAT_NONE:
+    case REPEAT_UNIT_COUNT:
+        break;
+    }
+    assert(false); // Only repeating units are asked about.
+    return 0;
+}
+
+/**
+ * Months between starts for an event that repeats by months or years.
+ */
+static int32_t event_repeat_month_step(const Event *event) {
+    switch ((Repeat_Unit)event->repeat_unit) {
+    case REPEAT_MONTH:
+        return event->repeat_interval;
+    case REPEAT_YEAR:
+        return 12 * event->repeat_interval;
+    case REPEAT_NONE:
+    case REPEAT_DAY:
+    case REPEAT_WEEK:
+    case REPEAT_UNIT_COUNT:
+        break;
+    }
+    assert(false); // Only units by months are asked about.
+    return 1;
 }
 
 bool event_is_valid(const Event *event) {

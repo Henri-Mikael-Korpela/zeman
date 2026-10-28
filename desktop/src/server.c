@@ -27,6 +27,7 @@ static void server_handle_location(Server *server, Reader *request, Writer *resp
 static void server_handle_load_target_tasks(Server *server, Reader *request, Writer *response);
 static void server_handle_load_task_targets(Server *server, Reader *request, Writer *response);
 static void server_handle_set_task_targets(Server *server, Reader *request, Writer *response);
+static void server_handle_load_tasks(Server *server, Reader *request, Writer *response);
 static bool server_range_is_valid(Date first, Date last);
 static void server_fail(Writer *response, Str message);
 
@@ -302,6 +303,9 @@ static void server_handle(Server *server, Reader *request, Writer *response) {
     case PROTOCOL_SET_TASK_TARGETS:
         server_handle_set_task_targets(server, request, response);
         return;
+    case PROTOCOL_LOAD_TASKS:
+        server_handle_load_tasks(server, request, response);
+        return;
     case PROTOCOL_OPERATION_END:
         assert(false); // Excluded by the range check above.
         return;
@@ -514,6 +518,35 @@ static void server_handle_set_task_targets(Server *server, Reader *request, Writ
         return;
     }
     writer_u8(response, PROTOCOL_OK);
+}
+
+/**
+ * today is the phone's, as the day the view is drawn for, within the years a range may have.
+ */
+static void server_handle_load_tasks(Server *server, Reader *request, Writer *response) {
+    Date today = reader_date(request);
+    int32_t count_max = reader_i32(request);
+    if (!reader_done(request) || !server_range_is_valid(today, today) || count_max < 1) {
+        server_fail(response, STR("Invalid request."));
+        return;
+    }
+    if (count_max > PROTOCOL_EVENT_COUNT_MAX) {
+        count_max = PROTOCOL_EVENT_COUNT_MAX;
+    }
+    bool truncated = false;
+    int32_t count = backend_load_tasks(server->backend, today,
+                                       array_slice_make(server->task_occurrences, count_max),
+                                       &truncated);
+    if (count < 0) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+    writer_u8(response, (uint8_t)truncated);
+    writer_i32(response, count);
+    for (int32_t i = 0; i < count; i++) {
+        writer_task_occurrence(response, &server->task_occurrences[i]);
+    }
 }
 
 static bool server_range_is_valid(Date first, Date last) {

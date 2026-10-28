@@ -39,6 +39,7 @@ typedef struct Server {
     Task_Completion completions[PROTOCOL_COMPLETION_COUNT_MAX];
     Linked_Task linked_tasks[LINK_COUNT_MAX];
     Link_Target link_targets[LINK_COUNT_MAX];
+    Task_Occurrence task_occurrences[PROTOCOL_EVENT_COUNT_MAX];
     Backend *backend;
     Net_Socket listener;
     Net_Socket discovery;  // UDP, or NET_SOCKET_INVALID when the port was taken

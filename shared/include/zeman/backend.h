@@ -50,6 +50,11 @@ typedef struct Backend_Ops {
     // earlier links, all or nothing. With no ids it unlinks the entry from every target, which
     // also suits an entry that is no longer a task.
     bool (*set_task_targets)(void *context, int64_t task_id, Array_Slice target_ids);
+    // Loads every task at its occurrence that is due on today (see event_occurrence_due), with
+    // whether that occurrence is done, in the order of the occurrences' starts, into tasks, a
+    // slice of Task_Occurrence. Returns the count, or -1. When more than tasks.count exist, the
+    // repeating tasks and then the latest to start are kept, and *truncated is set.
+    int32_t (*load_tasks)(void *context, Date today, Array_Slice tasks, bool *truncated);
     // A number that changes whenever the data changes, from this program or another, so that
     // the user interface knows when to reload. 0 when unknown, for example while disconnected.
     uint64_t (*revision)(void *context);
@@ -108,6 +113,11 @@ static inline int32_t backend_load_task_targets(Backend *backend, int64_t task_i
 static inline bool backend_set_task_targets(Backend *backend, int64_t task_id,
                                             Array_Slice target_ids) {
     return backend->ops->set_task_targets(backend->context, task_id, target_ids);
+}
+
+static inline int32_t backend_load_tasks(Backend *backend, Date today, Array_Slice tasks,
+                                         bool *truncated) {
+    return backend->ops->load_tasks(backend->context, today, tasks, truncated);
 }
 
 static inline uint64_t backend_revision(Backend *backend) {

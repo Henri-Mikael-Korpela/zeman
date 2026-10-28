@@ -22,8 +22,9 @@
 enum {
     // Raised whenever a message changes shape, so that old apps say so instead of misreading.
     // 2 added the links between problems and the tasks that solve them, 3 whether a problem is
-    // done to each event, and 4 opportunities as link targets beside problems.
-    PROTOCOL_VERSION = 4,
+    // done to each event, 4 opportunities as link targets beside problems, and 5 the list of
+    // every task for the Tasks view.
+    PROTOCOL_VERSION = 5,
     PROTOCOL_PORT_DEFAULT = 47800,
     // UDP port where the desktop app answers phones looking for it on the local network.
     PROTOCOL_DISCOVERY_PORT = 47801,
@@ -65,6 +66,7 @@ typedef enum Protocol_Operation {
     // task id, problems only, count_max -> truncated, count, targets
     PROTOCOL_LOAD_TASK_TARGETS,
     PROTOCOL_SET_TASK_TARGETS,   // task id, count, target ids ->
+    PROTOCOL_LOAD_TASKS,         // today, count_max -> truncated, count, task occurrences
     PROTOCOL_OPERATION_END,
 } Protocol_Operation;
 
@@ -104,6 +106,7 @@ void writer_event(Writer *writer, const Event *event);
 void writer_completion(Writer *writer, const Task_Completion *completion);
 void writer_linked_task(Writer *writer, const Linked_Task *task);
 void writer_link_target(Writer *writer, const Link_Target *target);
+void writer_task_occurrence(Writer *writer, const Task_Occurrence *occurrence);
 
 Reader reader_make(Array_Slice buffer);
 uint8_t reader_u8(Reader *reader);
@@ -136,6 +139,11 @@ Task_Completion reader_completion(Reader *reader);
  */
 Linked_Task reader_linked_task(Reader *reader);
 Link_Target reader_link_target(Reader *reader);
+/**
+ * A task that is not a task, or a start day that is not one of its occurrences, fails the
+ * reader.
+ */
+Task_Occurrence reader_task_occurrence(Reader *reader);
 /**
  * True when the whole message was read and nothing failed.
  */

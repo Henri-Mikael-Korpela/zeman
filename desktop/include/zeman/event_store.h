@@ -12,7 +12,7 @@ enum {
     // Bytes including the terminator for messages returned to the user interface.
     EVENT_STORE_ERROR_SIZE = 160,
     // Statements prepared at open; event_store.c names them and checks this count.
-    EVENT_STORE_STATEMENT_COUNT = 12,
+    EVENT_STORE_STATEMENT_COUNT = 14,
 };
 
 typedef struct Event_Store {
@@ -100,5 +100,14 @@ int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool 
  * once. Fails, changing nothing, if one of them is not a link target or the task is not a task.
  */
 bool event_store_set_task_targets(Event_Store *store, int64_t task_id, Array_Slice target_ids);
+
+/**
+ * Loads every task at its occurrence due on today, with whether that occurrence is done, sorted
+ * by the occurrence's start, into tasks, a slice of Task_Occurrence. Returns the number loaded,
+ * or -1, and sets *truncated as event_store_load_range does; see Backend_Ops.load_tasks for
+ * which tasks are kept then.
+ */
+int32_t event_store_load_tasks(Event_Store *store, Date today, Array_Slice tasks,
+                               bool *truncated);
 
 #endif

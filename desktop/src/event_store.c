@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "sqlite3.h"
@@ -173,6 +174,8 @@ typedef enum Statement {
     STATEMENT_LINK_INSERT,
     STATEMENT_TARGET_TASKS,
     STATEMENT_TASK_TARGETS,
+    STATEMENT_TASKS,
+    STATEMENT_COMPLETION_EXISTS,
     STATEMENT_COUNT,
 } Statement;
 
@@ -261,6 +264,19 @@ static const char *const statements_sql[STATEMENT_COUNT] = {
         " FROM events p"
         " WHERE p.kind = 'problem' OR (p.kind = 'opportunity' AND ?3 = 0)"
         " ORDER BY linked DESC, p.created_at DESC, p.id DESC LIMIT ?2;",
+    // The columns of STATEMENT_SELECT_RANGE, so that rows are read alike; a task is never a
+    // link target, so its tasks_done is 0. Which occurrence is due is worked out in C, so the
+    // order here only decides which tasks the LIMIT keeps: the repeating ones first, as they
+    // always have one to come, then the latest to start; the caller sorts what it keeps.
+    [STATEMENT_TASKS] =
+        "SELECT e.id, e.title, e.start_date, e.start_time, e.end_date, e.end_time,"
+        "       e.created_at, e.repeat_unit, e.repeat_interval, e.repeat_end_date, e.kind,"
+        "       l.id, l.address, l.city, e.description, 0"
+        " FROM events e LEFT JOIN locations l ON l.id = e.location_id"
+        " WHERE e.kind = 'task'"
+        " ORDER BY e.repeat_unit IS NULL, e.start_date DESC, e.id DESC LIMIT ?1;",
+    [STATEMENT_COMPLETION_EXISTS] =
+        "SELECT 1 FROM task_completions WHERE event_id = ?1 AND occurrence_date = ?2;",
 };
 
 enum {
@@ -300,6 +316,8 @@ static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Ta
 static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Target *target);
 static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_id,
                                               Array_Slice target_ids);
+static int event_store_load_tasks_done(Event_Store *store, Task_Occurrence *occurrence);
+static int event_store_load_tasks_compare(const void *a, const void *b);
 static bool event_store_migrate(Event_Store *store);
 static bool event_store_check_foreign_keys(Event_Store *store);
 static bool event_store_migrate_step(Event_Store *store, int32_t version);
@@ -714,6 +732,100 @@ static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_i
         }
     }
     return true;
+}
+
+/**
+ * One query for the tasks, then one lookup per task for its due occurrence's completion, which
+ * the database answers from its primary key; a few hundred of those take a millisecond or so.
+ */
+int32_t event_store_load_tasks(Event_Store *store, Date today, Array_Slice tasks,
+                               bool *truncated) {
+    assert(date_is_valid(today));
+    assert(tasks.count > 0);
+
+    Task_Occurrence *task_items = tasks.items;
+    const int32_t task_count_max = tasks.count;
+    const int32_t today_day = date_to_day_number(today);
+    sqlite3_stmt *statement = store->statements[STATEMENT_TASKS];
+    int result = sqlite3_bind_int(statement, 1, task_count_max + 1);
+    int32_t task_count = 0;
+    *truncated = false;
+    // Bounded by the LIMIT: at most task_count_max + 1 rows come back.
+    for (int32_t row_index = 0; result == SQLITE_OK && row_index <= task_count_max; row_index++) {
+        int step = sqlite3_step(statement);
+        if (step == SQLITE_DONE) {
+            break;
+        }
+        if (step != SQLITE_ROW) {
+            result = step;
+            break;
+        }
+        if (row_index == task_count_max) {
+            *truncated = true;
+            break;
+        }
+        Task_Occurrence *occurrence = &task_items[task_count];
+        *occurrence = (Task_Occurrence){ .done = false };
+        if (!event_store_load_range_row(statement, &occurrence->task)) {
+            result = SQLITE_MISMATCH;
+            break;
+        }
+        assert(occurrence->task.kind == EVENT_KIND_TASK);
+        occurrence->start_day = event_occurrence_due(&occurrence->task, today_day);
+        result = event_store_load_tasks_done(store, occurrence);
+        task_count++;
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    if (result != SQLITE_OK) {
+        event_store_fail(store, "Cannot load tasks");
+        return -1;
+    }
+    assert(task_count <= task_count_max);
+    qsort(task_items, (size_t)task_count, sizeof(task_items[0]), event_store_load_tasks_compare);
+    return task_count;
+}
+
+/**
+ * Sets whether the occurrence is checked off. Returns SQLITE_OK, or the error.
+ */
+static int event_store_load_tasks_done(Event_Store *store, Task_Occurrence *occurrence) {
+    assert(occurrence->task.id > 0);
+    assert(occurrence->start_day >= date_to_day_number(occurrence->task.start_date));
+
+    sqlite3_stmt *statement = store->statements[STATEMENT_COMPLETION_EXISTS];
+    int result = sqlite3_bind_int64(statement, 1, occurrence->task.id);
+    if (result == SQLITE_OK) {
+        result = bind_date(statement, 2, date_from_day_number(occurrence->start_day));
+    }
+    if (result == SQLITE_OK) {
+        const int step = sqlite3_step(statement);
+        occurrence->done = step == SQLITE_ROW;
+        if (step != SQLITE_ROW && step != SQLITE_DONE) {
+            result = step;
+        }
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    return result;
+}
+
+/**
+ * By the occurrence's start day, then its time, those without a time first as the calendar
+ * lists them, then by id, so that the order is the same on every load.
+ */
+static int event_store_load_tasks_compare(const void *a, const void *b) {
+    const Task_Occurrence *first = a;
+    const Task_Occurrence *second = b;
+    if (first->start_day != second->start_day) {
+        return (first->start_day > second->start_day) - (first->start_day < second->start_day);
+    }
+    const int32_t first_minute = first->task.start_minute;
+    const int32_t second_minute = second->task.start_minute;
+    if (first_minute != second_minute) {
+        return (first_minute > second_minute) - (first_minute < second_minute);
+    }
+    return (first->task.id > second->task.id) - (first->task.id < second->task.id);
 }
 
 static bool event_store_fail(Event_Store *store, const char *context) {

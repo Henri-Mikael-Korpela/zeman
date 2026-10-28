@@ -16,6 +16,7 @@
 #include <zeman/problems_view.h>
 #include <zeman/settings.h>
 #include <zeman/settings_view.h>
+#include <zeman/tasks_view.h>
 
 enum {
     WINDOW_WIDTH_PIXELS = 1520,
@@ -67,13 +68,14 @@ static_assert(sizeof(DATABASE_PATH) <= SETTINGS_PATH_SIZE, "The path fits the Se
 typedef enum View {
     VIEW_CALENDAR,
     VIEW_PROBLEMS,
+    VIEW_TASKS,
     VIEW_DEVICES,
     VIEW_SETTINGS,
     VIEW_COUNT,
 } View;
 
 // Navigation items, top to bottom, indexed by View.
-static const char *const view_names[VIEW_COUNT] = { "Calendar", "Problems",
+static const char *const view_names[VIEW_COUNT] = { "Calendar", "Problems", "Tasks",
                                                     "Connected Devices", "Settings" };
 
 // What the last frame showed, to tell when the window needs a new one. Drawing every frame at
@@ -99,6 +101,7 @@ typedef struct Desktop {
     Server server;
     Client client;
     Problems_View problems;
+    Tasks_View tasks;
     Backend backend;
     Redraw redraw;
     View view;
@@ -219,6 +222,7 @@ static void desktop_open(Desktop *desktop, const Options *options) {
     // Draws the first frame at once, as nothing is on screen yet.
     desktop->redraw = (Redraw){ .frames_pending = 1 };
     problems_view_init(&desktop->problems);
+    tasks_view_init(&desktop->tasks);
     if (desktop->client_mode) {
         client_init(&desktop->client);
         client_set_server(&desktop->client, str_from_cstr(options->connect_host),
@@ -382,13 +386,29 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height) 
         };
     }
 
+    App_Cursor cursor = APP_CURSOR_DEFAULT;
     switch (desktop->view) {
     case VIEW_CALENDAR:
         app_frame(app, content);
+        cursor = app_cursor(app);
         break;
     case VIEW_PROBLEMS:
         problems_view_draw(&desktop->problems, &desktop->backend, app, content);
         break;
+    case VIEW_TASKS: {
+        const Tasks_View_Choice choice = tasks_view_draw(&desktop->tasks, &desktop->backend, app,
+                                                         content);
+        if (choice.hovered) {
+            cursor = APP_CURSOR_HAND;
+        }
+        // The calendar shows the task's day from the next frame, so that this frame's click is
+        // not taken by the calendar as well.
+        if (choice.task_id != 0) {
+            app_show_item(app, choice.date, choice.task_id);
+            desktop->view = VIEW_CALENDAR;
+        }
+        break;
+    }
     case VIEW_DEVICES:
         devices_view_draw(&desktop->devices, &desktop->server, app, content);
         break;
@@ -403,10 +423,6 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height) 
         break;
     }
 
-    App_Cursor cursor = APP_CURSOR_DEFAULT;
-    if (desktop->view == VIEW_CALENDAR) {
-        cursor = app_cursor(app);
-    }
     if ((int32_t)cursor != desktop->cursor) {
         SetMouseCursor(desktop_cursor_shape(cursor));
         desktop->cursor = (int32_t)cursor;

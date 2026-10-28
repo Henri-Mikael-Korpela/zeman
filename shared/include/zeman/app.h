@@ -62,6 +62,18 @@ float app_measure_text(const App *app, App_Text style, Str text);
  */
 void app_draw_problem_bar(const App *app, Str title, bool done, Rectangle bar);
 /**
+ * Draws a task as the calendar does in its day cells, in layout pixels outside app_frame: tinted
+ * in its color, with a checkbox, and faded and struck through once done. Its occurrence's date
+ * comes before the time and title, as it is not in a day cell. Returns the checkbox, so that the
+ * caller can check the task off with a click there.
+ */
+Rectangle app_draw_task_bar(const App *app, const Task_Occurrence *occurrence, Rectangle bar);
+/**
+ * Selects the date and focuses the item with id on it, as a click on its bar in the calendar
+ * does, for when another view sends the user to it. The item must occur on the date.
+ */
+void app_show_item(App *app, Date date, int64_t id);
+/**
  * Shown first in the status bar for as long as the app runs, for example where phones connect.
  */
 void app_set_info(App *app, Str info);

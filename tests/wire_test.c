@@ -1,5 +1,6 @@
 // Tests of the texts that cross the network and the text boxes: the length-prefixed text of the
-// protocol, the link to the desktop app, and pasting into a text box.
+// protocol, the link to the desktop app, and pasting into a text box. Also which occurrence of a
+// task is due, and the task as it crosses the network for the Tasks view.
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -87,6 +88,81 @@ static void test_link_parse(void) {
     assert(!protocol_link_parse(STR(":5000"), &address, &port));
 }
 
+static Event test_task_make(Date start, int32_t repeat_unit, int32_t repeat_interval) {
+    Event task = {
+        .id = 7,
+        .start_date = start,
+        .end_date = start,
+        .created_date = start,
+        .start_minute = TIME_NONE,
+        .end_minute = TIME_NONE,
+        .repeat_unit = repeat_unit,
+        .repeat_interval = repeat_interval,
+        .kind = EVENT_KIND_TASK,
+        .title = "Water the plants",
+    };
+    assert(event_is_valid(&task));
+    return task;
+}
+
+static int32_t test_day(int32_t year, int32_t month, int32_t day) {
+    return date_to_day_number((Date){ year, month, day });
+}
+
+static void test_occurrence_due(void) {
+    // A one-time task is due on its day, before and after it.
+    Event once = test_task_make((Date){ 2026, 10, 20 }, REPEAT_NONE, 1);
+    assert(event_occurrence_due(&once, test_day(2026, 10, 1)) == test_day(2026, 10, 20));
+    assert(event_occurrence_due(&once, test_day(2026, 10, 28)) == test_day(2026, 10, 20));
+
+    // Every three days from 1 October: 28 October is one, and from 29 October the next is the
+    // 31st, the missed one passed over.
+    Event every_three = test_task_make((Date){ 2026, 10, 1 }, REPEAT_DAY, 3);
+    assert(event_occurrence_due(&every_three, test_day(2026, 10, 28)) == test_day(2026, 10, 28));
+    assert(event_occurrence_due(&every_three, test_day(2026, 10, 29)) == test_day(2026, 10, 31));
+
+    // With the repeat ended on 20 October, the last occurrence, the 19th, stays due.
+    every_three.repeat_has_end = true;
+    every_three.repeat_end_date = (Date){ 2026, 10, 20 };
+    assert(event_occurrence_due(&every_three, test_day(2026, 10, 29)) == test_day(2026, 10, 19));
+
+    // Monthly on the 31st skips months without one: after 31 October comes 31 December.
+    Event monthly = test_task_make((Date){ 2026, 1, 31 }, REPEAT_MONTH, 1);
+    assert(event_occurrence_due(&monthly, test_day(2026, 11, 5)) == test_day(2026, 12, 31));
+
+    // Yearly on 29 February waits for the next leap year.
+    Event leap = test_task_make((Date){ 2024, 2, 29 }, REPEAT_YEAR, 1);
+    assert(event_occurrence_due(&leap, test_day(2026, 10, 28)) == test_day(2028, 2, 29));
+}
+
+static void test_task_occurrence_round_trip(void) {
+    static uint8_t bytes[1024];
+    Task_Occurrence occurrence = {
+        .task = test_task_make((Date){ 2026, 10, 1 }, REPEAT_WEEK, 1),
+        .start_day = test_day(2026, 10, 29),
+        .done = true,
+    };
+    Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+    writer_task_occurrence(&writer, &occurrence);
+    assert(!writer.overflow);
+
+    Reader reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+    Task_Occurrence read = reader_task_occurrence(&reader);
+    assert(reader_done(&reader));
+    assert(read.task.id == occurrence.task.id);
+    assert(read.start_day == occurrence.start_day);
+    assert(read.done);
+
+    // A day that is not one of its weekly occurrences is refused.
+    occurrence.start_day++;
+    writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+    writer_task_occurrence(&writer, &occurrence);
+    reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+    read = reader_task_occurrence(&reader);
+    assert(reader.failed);
+    assert(read.task.id == 0);
+}
+
 static void test_paste(void) {
     char text[16] = "ab";
     // Line breaks and tabs become spaces, other control characters are left out.
@@ -117,6 +193,8 @@ int main(void) {
     test_text_round_trip();
     test_text_rejects_bad_messages();
     test_link_parse();
+    test_occurrence_due();
+    test_task_occurrence_round_trip();
     test_paste();
     printf("wire_test: all passed\n");
     return 0;

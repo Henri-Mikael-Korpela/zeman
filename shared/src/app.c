@@ -3284,6 +3284,43 @@ void app_draw_problem_bar(const App *app, Str title, bool done, Rectangle bar) {
 }
 
 /**
+ * The label starts where it would in a day cell, so that the checkbox is where draw_event_label
+ * draws it.
+ */
+Rectangle app_draw_task_bar(const App *app, const Task_Occurrence *occurrence, Rectangle bar) {
+    assert(occurrence->task.kind == EVENT_KIND_TASK);
+    assert(bar.width > 0.0f);
+    assert(bar.height > 0.0f);
+
+    const Event task = event_occurrence_at(&occurrence->task, occurrence->start_day);
+    const Color color = event_color(&task, app_now(app));
+    DrawRectangleRec(bar, Fade(color, task_fill_alpha(occurrence->done)));
+    draw_bar_outline(bar, true, true, Fade(color, task_outline_alpha(occurrence->done)));
+
+    // "31 Dec", then the time and title as on the bar where the occurrence starts.
+    char date[TEXT_LINE_SIZE] = "";
+    format_date_time_short(task.start_date, TIME_NONE, date, sizeof(date));
+    char title[TEXT_LINE_SIZE] = "";
+    event_format_label(&task, true, app_now(app), title, sizeof(title));
+    char label[2 * TEXT_LINE_SIZE] = "";
+    snprintf(label, sizeof(label), "%s %s", date, title);
+    draw_event_label(app, &task, str_from_cstr(label), bar, occurrence->done);
+    return (Rectangle){ bar.x + 4, bar.y + 4, 11, 11 };
+}
+
+void app_show_item(App *app, Date date, int64_t id) {
+    assert(date_is_valid(date));
+    assert(id > 0);
+
+    app_select(app, date);
+    // Not app_focus_item, which needs the item loaded: the date's month may not be yet. app_sync
+    // keeps the focus once it is, because the item occurs on the selected date.
+    app->event_focused_id = id;
+    app->event_delete_id = 0;
+    app->panel_reveal_focused = true;
+}
+
+/**
  * Outlines a bar without lines between the days of a multi-day occurrence.
  */
 static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Color color) {
