@@ -255,6 +255,10 @@ static const Color target_done_color = { 40, 140, 76, 255 };
 // missed one turns gray, so that it recedes like anything past.
 static const Color opportunity_color = { 168, 124, 16, 255 };
 static const Color opportunity_missed_color = { 92, 98, 110, 255 };
+// The part of a day between its first and last timed item, dark blue so that it reads as a
+// span of the day and stays quieter than the items on it; lighter when the day is hovered.
+static const Color timeline_busy_color = { 17, 27, 52, 255 };
+static const Color timeline_busy_hovered_color = { 22, 35, 66, 255 };
 
 // One color of the theme: a raygui DEFAULT property and its value, as 0xRRGGBBAA.
 typedef struct Theme_Color {
@@ -2512,18 +2516,28 @@ static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
                                              array_slice_make(items, EVENT_COUNT_MAX));
 
     // The busy part of the day runs from the first item's start to the last one's end; sorted
-    // by start, the first item starts first, but any item may end last.
+    // by start, the first item starts first, but any item may end last. One item alone is a
+    // span of nothing but itself, so it marks nothing: the highlight needs two items.
     int32_t busy_top = MINUTES_PER_DAY;
     int32_t busy_bottom = 0;
-    if (count > 0) {
+    if (count >= 2) {
         busy_top = items[0].minute_top;
-    }
-    for (int32_t i = 0; i < count; i++) {
-        if (items[i].minute_bottom > busy_bottom) {
-            busy_bottom = items[i].minute_bottom;
+        for (int32_t i = 0; i < count; i++) {
+            if (items[i].minute_bottom > busy_bottom) {
+                busy_bottom = items[i].minute_bottom;
+            }
         }
     }
     draw_timeline_day_background(day, busy_top, busy_bottom, hovered);
+    // A task's block is see-through, so it gets the day's plain background under it: the blue
+    // of the busy part is behind the items, and must not tint them.
+    int32_t day_property = BACKGROUND_COLOR;
+    if (hovered) {
+        day_property = BASE_COLOR_DISABLED;
+    }
+    for (int32_t i = 0; i < count; i++) {
+        DrawRectangleRec(timeline_item_block(day, &items[i]), style_color(day_property));
+    }
     for (int32_t i = 0; i < count; i++) {
         draw_timeline_item(app, &app->events[items[i].event_index],
                            timeline_item_block(day, &items[i]), day_number);
@@ -2907,9 +2921,10 @@ static void draw_timeline_drag(const App *app, const Layout *layout, float top,
 }
 
 /**
- * The free hours before the day's first item and after its last are darker, so that the busy
- * part of the day stands out at a glance; a day without timed items is dark all through, which
- * busy_top past busy_bottom means. A hovered day is lighter in both parts, as cells are.
+ * The hours between the day's first item and its last are dark blue, so that the busy part of
+ * the day stands out at a glance; the free hours before and after are darker. A day with fewer
+ * than two timed items has no busy part, which busy_top past busy_bottom means. A hovered day
+ * is lighter in both parts, as cells are.
  */
 static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_t busy_bottom,
                                          bool hovered) {
@@ -2927,11 +2942,11 @@ static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_
         const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
         Rectangle busy = { day.x, day.y + (float)busy_top * pixels_per_minute, day.width,
                            (float)(busy_bottom - busy_top) * pixels_per_minute };
-        int32_t busy_property = BASE_COLOR_NORMAL;
+        Color busy_color = timeline_busy_color;
         if (hovered) {
-            busy_property = BASE_COLOR_FOCUSED;
+            busy_color = timeline_busy_hovered_color;
         }
-        DrawRectangleRec(busy, style_color(busy_property));
+        DrawRectangleRec(busy, busy_color);
     }
     for (int32_t hour = 0; hour < MINUTES_PER_DAY / 60; hour++) {
         float y = day.y + (float)(hour * TIMELINE_HOUR_HEIGHT_PIXELS);
