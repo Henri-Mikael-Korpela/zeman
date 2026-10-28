@@ -90,7 +90,7 @@ enum {
     // A block drawn on the timeline snaps to quarter hours, which most meetings start on and
     // which is 12 pixels at the timeline's scale, easy to hit with a mouse.
     TIMELINE_MARK_STEP_MINUTES = 15,
-    // With Ctrl held at the press, it snaps to five minutes instead, which is 4 pixels at the
+    // With zoom on at the press, it snaps to five minutes instead, which is 4 pixels at the
     // timeline's scale, too fine to hit; hence the magnifier below.
     TIMELINE_MARK_ZOOM_STEP_MINUTES = 5,
     // The magnifier's scale, and how much slower than the pointer its time moves: a five-minute
@@ -411,7 +411,7 @@ typedef struct Timeline_Mark {
     int32_t day_number;   // Day of the column the press began in
     bool pressed;         // The press began on the timeline and is held
     bool drawing;         // It moved far enough to draw rather than click, or it is zoomed
-    bool zoomed;          // Ctrl was held at the press: five-minute steps under a magnifier
+    bool zoomed;          // Zoom was on at the press: five-minute steps under a magnifier
 } Timeline_Mark;
 
 typedef struct App {
@@ -448,6 +448,9 @@ typedef struct App {
     bool events_truncated;
     bool touch;                     // See App_Config
     bool input_enabled;             // See app_set_input_enabled
+    // Five-minute steps with a magnifier on the timeline, toggled with Z. A toggle rather than a
+    // held key, because a drag needs the pointer and both hands are rarely free for a chord.
+    bool timeline_fine;
     bool created;
     char status[STATUS_SIZE];       // Message for the status bar, cleared on navigation
     char info[INFO_SIZE];           // Shown first in the status bar, see app_set_info
@@ -542,7 +545,6 @@ static void timeline_mark_update(App *app, const Layout *layout, float top, int3
 static void timeline_mark_finish(App *app, float top);
 static int32_t timeline_column_at(const Layout *layout, Vector2 pointer);
 static float timeline_minute_at(float pointer_y, float top);
-static bool timeline_mark_ctrl_down(void);
 static bool timeline_mark_can_start(const App *app);
 static float timeline_mark_pointer_minute(const Timeline_Mark *mark, float pointer_y, float top);
 static Minute_Range timeline_mark_range(float press_minute, float pointer_minute,
@@ -572,7 +574,7 @@ static void timeline_drag_update(App *app, const Layout *layout, float top);
 static void timeline_drag_finish(App *app, const Layout *layout, float top);
 static Event timeline_drag_result(const Event *event, const Timeline_Drag *drag,
                                   float pointer_minute, int32_t pointer_day, int32_t step);
-static int32_t timeline_drag_step(void);
+static int32_t timeline_drag_step(const App *app);
 static int32_t timeline_step(bool fine);
 static int32_t timeline_drag_day_delta(const Timeline_Drag *drag, int32_t pointer_day);
 static Minute_Range event_time_range(const Event *event);
@@ -943,6 +945,9 @@ static void app_handle_keys(App *app, const Layout *layout) {
         return;
     }
 
+    if (IsKeyPressed(KEY_Z)) {
+        app->timeline_fine = !app->timeline_fine;
+    }
     if (IsKeyPressed(KEY_M)) {
         app->range = RANGE_MONTH;
     }
@@ -1858,7 +1863,7 @@ static void timeline_mark_update(App *app, const Layout *layout, float top, int3
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && column >= 0 && !app->form.open &&
         app->timeline_hit.event_id == 0) {
         assert(column < layout->columns);
-        const bool zoomed = timeline_mark_ctrl_down();
+        const bool zoomed = app->timeline_fine;
         *mark = (Timeline_Mark){
             .press_minute = timeline_minute_at(pointer.y, top),
             .press_y = pointer.y,
@@ -1956,10 +1961,6 @@ static float timeline_minute_at(float pointer_y, float top) {
     const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
     const float minute = (pointer_y - top) / pixels_per_minute;
     return fminf(fmaxf(minute, 0.0f), (float)MINUTES_PER_DAY);
-}
-
-static bool timeline_mark_ctrl_down(void) {
-    return IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
 }
 
 /**
@@ -2175,7 +2176,7 @@ static void draw_timeline_ghost_block(const App *app, const Event *event, Rectan
 /**
  * Before a press, a short line across the pointer where a block would start, with its time, so
  * that the press can be aimed. It snaps as the press will, through the same function: to
- * quarter hours, or to five minutes with Ctrl held, when the magnifier shows it larger too.
+ * quarter hours, or to five minutes with zoom toggled on, when the magnifier shows it larger too.
  */
 static void draw_timeline_mark_hover(const App *app, const Layout *layout, float top) {
     const Vector2 pointer = GetMousePosition();
@@ -2183,7 +2184,7 @@ static void draw_timeline_mark_hover(const App *app, const Layout *layout, float
     if (column < 0 || !timeline_mark_can_start(app)) {
         return;
     }
-    const int32_t step = timeline_step(timeline_mark_ctrl_down());
+    const int32_t step = timeline_step(app->timeline_fine);
     const float minute = timeline_minute_at(pointer.y, top);
     const int32_t start = timeline_mark_range(minute, minute, step).minute_top;
     const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
@@ -2202,11 +2203,11 @@ static void draw_timeline_mark_hover(const App *app, const Layout *layout, float
 }
 
 /**
- * With Ctrl held before a press, the magnifier at the pointer, with the line where a block would
+ * With zoom toggled on before a press, the magnifier at the pointer, with the line where a block would
  * start, so that the start can be aimed to five minutes as precisely as the end.
  */
 static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, float top) {
-    if (!timeline_mark_ctrl_down()) {
+    if (!app->timeline_fine) {
         return;
     }
     const Vector2 center = GetMousePosition();
@@ -2521,7 +2522,7 @@ static void timeline_drag_finish(App *app, const Layout *layout, float top) {
     const int32_t pointer_day = date_to_day_number(app->visible_first) +
                                 timeline_column_nearest(layout, pointer.x);
     const Event moved = timeline_drag_result(event, drag, timeline_minute_at(pointer.y, top),
-                                             pointer_day, timeline_drag_step());
+                                             pointer_day, timeline_drag_step(app));
     const Str mistake = form_parse_order(&moved);
     if (mistake.length > 0) {
         snprintf(app->status, sizeof(app->status), "Not moved: %.*s", STR_ARGUMENTS(mistake));
@@ -2598,14 +2599,14 @@ static Event timeline_drag_result(const Event *event, const Timeline_Drag *drag,
 }
 
 /**
- * As when drawing a block: quarter hours, or five minutes with Ctrl held.
+ * As when drawing a block: quarter hours, or five minutes with zoom on.
  */
-static int32_t timeline_drag_step(void) {
-    return timeline_step(timeline_mark_ctrl_down());
+static int32_t timeline_drag_step(const App *app) {
+    return timeline_step(app->timeline_fine);
 }
 
 /**
- * Minutes a block snaps to: five when fine, as with Ctrl held, else a quarter hour.
+ * Minutes a block snaps to: five when fine, as with zoom on, else a quarter hour.
  */
 static int32_t timeline_step(bool fine) {
     if (fine) {
@@ -2716,7 +2717,7 @@ static void draw_timeline_drag(const App *app, const Layout *layout, float top,
     const Vector2 pointer = GetMousePosition();
     const int32_t pointer_day = first_day + timeline_column_nearest(layout, pointer.x);
     const Event moved = timeline_drag_result(event, drag, timeline_minute_at(pointer.y, top),
-                                             pointer_day, timeline_drag_step());
+                                             pointer_day, timeline_drag_step(app));
     const int32_t day_delta = timeline_drag_day_delta(drag, pointer_day);
     const int32_t column = drag->press_day + day_delta - first_day;
     if (column < 0 || column >= layout->columns) {
