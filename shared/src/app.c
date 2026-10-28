@@ -556,13 +556,22 @@ static void draw_timeline_ghost(const App *app, const Layout *layout, float top,
 static void draw_timeline_now(const App *app, const Layout *layout, float top,
                               int32_t first_day);
 static void draw_timeline_ghost_block(const App *app, const Event *event, Rectangle day);
-static void draw_timeline_mark_zoom(const App *app, float top);
+static void draw_timeline_mark_zoom(const App *app, const Layout *layout, float top,
+                                    int32_t first_day);
 static void draw_timeline_mark_hover(const App *app, const Layout *layout, float top);
-static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, float top);
+static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, float top,
+                                          int32_t first_day);
+static void draw_timeline_mark_zoom_items(const App *app, const Layout *layout,
+                                          int32_t first_day, int32_t day_number,
+                                          Vector2 center, float center_minute);
+static void draw_timeline_mark_zoom_item(const App *app, const Event *event,
+                                         Minute_Range range, Rectangle block, Vector2 center,
+                                         float center_minute, float alpha);
 static void draw_timeline_mark_zoom_edge(const App *app, Vector2 center, float center_minute,
                                          int32_t edge_minute, bool label_above);
 static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float center_minute);
-static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute, Minute_Range range,
+static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute,
+                                         Minute_Range range, float left, float right,
                                          Color color);
 static float circle_half_width(float radius, float offset_y);
 static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered);
@@ -1843,9 +1852,9 @@ static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
     EndScissorMode();
     // After the scissor, because the circle may reach past the timeline's edges.
     if (app->timeline_mark.drawing && app->timeline_mark.zoomed) {
-        draw_timeline_mark_zoom(app, top);
+        draw_timeline_mark_zoom(app, layout, top, first_day);
     }
-    draw_timeline_mark_hover_zoom(app, layout, top);
+    draw_timeline_mark_hover_zoom(app, layout, top, first_day);
 }
 
 /**
@@ -2061,7 +2070,8 @@ static void draw_timeline_mark(const App *app, const Layout *layout, float top,
  * A circle at the pointer showing the hours around the block's moving edge TIMELINE_MARK_ZOOM
  * times larger, with a line every five minutes, so that the edge can be put on any of them.
  */
-static void draw_timeline_mark_zoom(const App *app, float top) {
+static void draw_timeline_mark_zoom(const App *app, const Layout *layout, float top,
+                                    int32_t first_day) {
     const Timeline_Mark *mark = &app->timeline_mark;
     assert(mark->zoomed);
     assert(mark->drawing);
@@ -2072,7 +2082,10 @@ static void draw_timeline_mark_zoom(const App *app, float top) {
     const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
     const Color accent = style_color(BORDER_COLOR_PRESSED);
     DrawCircleV(center, radius, style_color(BACKGROUND_COLOR));
-    draw_timeline_mark_zoom_band(center, pointer_minute, range, Fade(accent, 0.35f));
+    draw_timeline_mark_zoom_items(app, layout, first_day, mark->day_number, center,
+                                  pointer_minute);
+    draw_timeline_mark_zoom_band(center, pointer_minute, range, center.x - radius,
+                                 center.x + radius, Fade(accent, 0.35f));
     draw_timeline_mark_zoom_ticks(app, center, pointer_minute);
     // The edge that follows the pointer, with the time the form will get, on the side of the
     // line away from the block, so that the band does not cover it.
@@ -2203,24 +2216,37 @@ static void draw_timeline_mark_hover(const App *app, const Layout *layout, float
 }
 
 /**
- * With zoom toggled on before a press, the magnifier at the pointer, with the line where a block would
- * start, so that the start can be aimed to five minutes as precisely as the end.
+ * With zoom toggled on before a press, the magnifier at the pointer, with the line where a block
+ * would start, so that the start can be aimed to five minutes as precisely as the end. It also
+ * shows over an item and while dragging one, which snap to the same minutes.
  */
-static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, float top) {
+static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, float top,
+                                          int32_t first_day) {
     if (!app->timeline_fine) {
         return;
     }
+    // A block being drawn has its own magnifier.
+    if (app->timeline_mark.pressed || app->form.open) {
+        return;
+    }
     const Vector2 center = GetMousePosition();
-    if (timeline_column_at(layout, center) < 0 || !timeline_mark_can_start(app)) {
+    if (timeline_column_at(layout, center) < 0) {
         return;
     }
     const float minute = timeline_minute_at(center.y, top);
-    const int32_t start = timeline_mark_range(minute, minute, TIMELINE_MARK_ZOOM_STEP_MINUTES)
-                              .minute_top;
     const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
     DrawCircleV(center, radius, style_color(BACKGROUND_COLOR));
+    draw_timeline_mark_zoom_items(app, layout, first_day,
+                                  first_day + timeline_column_at(layout, center), center,
+                                  minute);
     draw_timeline_mark_zoom_ticks(app, center, minute);
-    draw_timeline_mark_zoom_edge(app, center, minute, start, true);
+    // Over an item, or dragging one, a press does not start a block, so there is no start line;
+    // the magnifier still shows the minutes the item will snap to.
+    if (timeline_mark_can_start(app)) {
+        const int32_t start = timeline_mark_range(minute, minute, TIMELINE_MARK_ZOOM_STEP_MINUTES)
+                                  .minute_top;
+        draw_timeline_mark_zoom_edge(app, center, minute, start, true);
+    }
     DrawRing(center, radius - 2, radius, 0.0f, 360.0f, 64, style_color(BORDER_COLOR_PRESSED));
 }
 
@@ -2290,10 +2316,121 @@ static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float 
 }
 
 /**
- * The block's part inside the circle, one pixel row at a time at the circle's width there,
- * because raylib clips drawing to rectangles only.
+ * The items of the day the magnifier is over, at the magnified scale and their true times, so
+ * that the edges to drag can be seen. Horizontally the magnifier is not scaled and is centred
+ * on the pointer, so each block is where it is on the timeline. An item being dragged stays
+ * faint where it was, and where the drag would leave it, on its new day, it is drawn bright.
  */
-static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute, Minute_Range range,
+static void draw_timeline_mark_zoom_items(const App *app, const Layout *layout,
+                                          int32_t first_day, int32_t day_number,
+                                          Vector2 center, float center_minute) {
+    const int32_t column = day_number - first_day;
+    if (column < 0 || column >= layout->columns) {
+        return;
+    }
+    const Rectangle day = { layout->grid.x + (float)column * layout->cell_width, 0,
+                            layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
+    // On the stack, as when the day is drawn; about 10 KB.
+    Timeline_Item items[EVENT_COUNT_MAX] = { 0 };
+    const int32_t count = timeline_day_items(app, day_number,
+                                             array_slice_make(items, EVENT_COUNT_MAX));
+    const Timeline_Drag *drag = &app->timeline_drag;
+    const bool dragging = drag->event_id != 0 && drag->moved;
+    for (int32_t i = 0; i < count; i++) {
+        const Event *event = &app->events[items[i].event_index];
+        float alpha = 0.55f;
+        if (dragging && event->id == drag->event_id) {
+            alpha = 0.2f;
+        }
+        draw_timeline_mark_zoom_item(app, event, event_time_range(event),
+                                     timeline_item_block(day, &items[i]), center,
+                                     center_minute, alpha);
+    }
+    if (!dragging) {
+        return;
+    }
+    const Event *dragged = app_event_find(app, drag->event_id);
+    if (dragged == NULL) {
+        return;
+    }
+    const int32_t pointer_day = first_day + timeline_column_nearest(layout, center.x);
+    const Event moved = timeline_drag_result(dragged, drag, center_minute, pointer_day,
+                                             timeline_drag_step(app));
+    if (drag->press_day + timeline_drag_day_delta(drag, pointer_day) != day_number) {
+        return;
+    }
+    const Timeline_Item item = timeline_item_make(&moved, 0);
+    draw_timeline_mark_zoom_item(app, &moved, event_time_range(&moved),
+                                 timeline_item_block(day, &item), center, center_minute, 0.85f);
+}
+
+/**
+ * One item in the magnifier: a fill from its true start to its true end, solid lines at both
+ * edges, and its title, if there is room in the middle of the circle. What a press at the
+ * pointer would grab is in the accent color: an edge, or for the middle the whole block.
+ */
+static void draw_timeline_mark_zoom_item(const App *app, const Event *event,
+                                         Minute_Range range, Rectangle block, Vector2 center,
+                                         float center_minute, float alpha) {
+    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    const float zoomed_pixels_per_minute =
+        (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
+    const float left = block.x;
+    const float right = block.x + block.width;
+    // Zero length is possible for an item with equal times; one minute is the least to see.
+    const Minute_Range shown = { range.minute_top,
+                                 int32_max(range.minute_bottom, range.minute_top + 1) };
+    const Color color = event_color(event, app_now(app));
+    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    const Timeline_Hit *hit = &app->timeline_hit;
+    // Nothing is grabbed while an item is dragged, whose release would not be a press.
+    const bool grabbed = hit->event_id == event->id && app->timeline_drag.event_id == 0;
+    if (grabbed && hit->part == BLOCK_PART_MIDDLE) {
+        alpha = 0.9f;
+    }
+    draw_timeline_mark_zoom_band(center, center_minute, shown, left, right, Fade(color, alpha));
+    Color top_color = color;
+    Color bottom_color = color;
+    if (grabbed && hit->part == BLOCK_PART_TOP) {
+        top_color = accent;
+    }
+    if (grabbed && hit->part == BLOCK_PART_BOTTOM) {
+        bottom_color = accent;
+    }
+    draw_timeline_mark_zoom_band(center, center_minute,
+                                 (Minute_Range){ shown.minute_top, shown.minute_top + 1 },
+                                 left, right, top_color);
+    draw_timeline_mark_zoom_band(center, center_minute,
+                                 (Minute_Range){ shown.minute_bottom - 1, shown.minute_bottom },
+                                 left, right, bottom_color);
+
+    // The title sits near the item's top, kept in the middle of the circle where it is wide.
+    const float top_y = center.y + ((float)shown.minute_top - center_minute) *
+                                       zoomed_pixels_per_minute;
+    const float bottom_y = center.y + ((float)shown.minute_bottom - center_minute) *
+                                          zoomed_pixels_per_minute;
+    const float text_height = 16;
+    const float text_y = fmaxf(top_y + 4, center.y - radius * 0.6f);
+    if (text_y + text_height > fminf(bottom_y, center.y + radius * 0.6f)) {
+        return;
+    }
+    const float half = circle_half_width(radius, text_y + text_height - center.y);
+    const float clip_left = fmaxf(center.x - half, left);
+    const float clip_right = fminf(center.x + half, right);
+    if (clip_right <= clip_left) {
+        return;
+    }
+    scissor_begin(&app->fonts, clip_left, text_y, clip_right - clip_left, text_height);
+    draw_text(&app->fonts.small, str_from_cstr(event->title), clip_left + 4, text_y, WHITE);
+    scissor_end(&app->fonts);
+}
+
+/**
+ * The block's part inside the circle, between the x positions left and right, one pixel row
+ * at a time at the circle's width there, because raylib clips drawing to rectangles only.
+ */
+static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute,
+                                         Minute_Range range, float left, float right,
                                          Color color) {
     assert(range.minute_top < range.minute_bottom);
 
@@ -2315,7 +2452,11 @@ static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute, Mi
     for (int32_t row = 0; row < row_count; row++) {
         const float y = from + (float)row;
         const float half = circle_half_width(radius, y + 0.5f - center.y);
-        DrawRectangleRec((Rectangle){ center.x - half, y, 2 * half, 1 }, color);
+        const float x_left = fmaxf(center.x - half, left);
+        const float x_right = fminf(center.x + half, right);
+        if (x_right > x_left) {
+            DrawRectangleRec((Rectangle){ x_left, y, x_right - x_left, 1 }, color);
+        }
     }
 }
 
@@ -2441,12 +2582,37 @@ static Timeline_Hit timeline_hit_test(const App *app, const Layout *layout, floa
     const int32_t count = timeline_day_items(app, first_day + column,
                                              array_slice_make(items, EVENT_COUNT_MAX));
     const float grab = (float)TIMELINE_EDGE_GRAB_PIXELS;
+    // With zoom on, the magnifier shows each item at its true times, so a press is tested
+    // against those, and the edge zones are as wide as they look in the magnifier.
+    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    const float grab_minutes = grab / (pixels_per_minute * (float)TIMELINE_MARK_ZOOM);
+    const float pointer_minute = timeline_minute_at(pointer.y, top);
     for (int32_t i = 0; i < count; i++) {
+        const Event *event = &app->events[items[i].event_index];
         const Rectangle block = timeline_item_block(day, &items[i]);
+        if (app->timeline_fine) {
+            const Minute_Range range = event_time_range(event);
+            if (pointer.x < block.x || pointer.x >= block.x + block.width) {
+                continue;
+            }
+            if (pointer_minute < (float)range.minute_top ||
+                pointer_minute > (float)range.minute_bottom) {
+                continue;
+            }
+            hit.part = BLOCK_PART_MIDDLE;
+            if (pointer_minute < (float)range.minute_top + grab_minutes) {
+                hit.part = BLOCK_PART_TOP;
+            } else if (pointer_minute > (float)range.minute_bottom - grab_minutes) {
+                hit.part = BLOCK_PART_BOTTOM;
+            }
+            hit.event_id = event->id;
+            hit.day_number = first_day + column;
+            continue;
+        }
         if (!CheckCollisionPointRec(pointer, block)) {
             continue;
         }
-        hit.event_id = app->events[items[i].event_index].id;
+        hit.event_id = event->id;
         hit.day_number = first_day + column;
         if (pointer.y < block.y + grab) {
             hit.part = BLOCK_PART_TOP;
