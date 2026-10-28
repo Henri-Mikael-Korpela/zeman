@@ -171,6 +171,10 @@ typedef enum Form_Field {
     FORM_FIELD_DESCRIPTION,       // Optional free text
     FORM_FIELD_REPEAT_DAYS,      // Shown only for "Every X days"
     FORM_FIELD_REPEAT_END_DATE,  // Shown only for repeating events; empty repeats forever
+    // Shown only for tasks that do not repeat, in the row of the repeat end, which they cannot
+    // have; an empty date means no deadline.
+    FORM_FIELD_DEADLINE_DATE,
+    FORM_FIELD_DEADLINE_TIME,
     FORM_FIELD_COUNT,
 } Form_Field;
 
@@ -185,7 +189,7 @@ enum {
 static const int32_t form_field_sizes[FORM_FIELD_COUNT] = {
     EVENT_TITLE_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
     LOCATION_ADDRESS_SIZE, LOCATION_CITY_SIZE, EVENT_DESCRIPTION_SIZE, REPEAT_DAYS_TEXT_SIZE,
-    DATE_ISO_SIZE,
+    DATE_ISO_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
 };
 
 // Choices in the form's repeat selector, in the order shown, and the unit each one means.
@@ -4032,6 +4036,14 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
                               STR("Repeat until (optional)"),
                               (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
     }
+    // Never both: a task that repeats has no deadline, and one that does not has no repeat end.
+    if (form_field_visible(form, FORM_FIELD_DEADLINE_DATE)) {
+        assert(!form_field_visible(form, FORM_FIELD_REPEAT_END_DATE));
+        draw_panel_form_field(fonts, form, FORM_FIELD_DEADLINE_DATE, STR("Deadline (optional)"),
+                              (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+        draw_panel_form_field(fonts, form, FORM_FIELD_DEADLINE_TIME, STR("Time"),
+                              (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
+    }
     assert(y + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS == end_y);
     return end_y;
 }
@@ -4396,6 +4408,14 @@ static void form_open_edit(Form *form, const Event *event) {
         date_format_iso(event->repeat_end_date, form->text[FORM_FIELD_REPEAT_END_DATE],
                         DATE_ISO_SIZE);
     }
+    if (event->has_deadline) {
+        date_format_iso(event->deadline_date, form->text[FORM_FIELD_DEADLINE_DATE],
+                        DATE_ISO_SIZE);
+        if (event->deadline_minute != TIME_NONE) {
+            time_format(event->deadline_minute, form->text[FORM_FIELD_DEADLINE_TIME],
+                        TIME_TEXT_SIZE);
+        }
+    }
     snprintf(form->text[FORM_FIELD_LOCATION_ADDRESS], LOCATION_ADDRESS_SIZE, "%s",
              event->location.address);
     snprintf(form->text[FORM_FIELD_LOCATION_CITY], LOCATION_CITY_SIZE, "%s",
@@ -4446,6 +4466,9 @@ static bool form_field_visible(const Form *form, int32_t field) {
     }
     if (field == FORM_FIELD_REPEAT_END_DATE) {
         return form_repeat_option(form) != REPEAT_OPTION_NONE;
+    }
+    if (field == FORM_FIELD_DEADLINE_DATE || field == FORM_FIELD_DEADLINE_TIME) {
+        return form->kind == EVENT_KIND_TASK && form_repeat_option(form) == REPEAT_OPTION_NONE;
     }
     return true;
 }
@@ -4541,6 +4564,20 @@ static Str form_parse_body(const Form *form, Event *event) {
             return STR("Repeat until must be YYYY-MM-DD.");
         }
     }
+    // Ignored while the fields are hidden, as the repeat end is for one-time events.
+    const Str deadline = str_from_cstr(form->text[FORM_FIELD_DEADLINE_DATE]);
+    const Str deadline_time = str_from_cstr(form->text[FORM_FIELD_DEADLINE_TIME]);
+    event->has_deadline = form_field_visible(form, FORM_FIELD_DEADLINE_DATE) &&
+                          (deadline.length > 0 || deadline_time.length > 0);
+    if (event->has_deadline) {
+        // A time alone says when, but not on which day, so it is an error, not a deadline today.
+        if (!date_parse_iso(deadline, &event->deadline_date)) {
+            return STR("Deadline must be YYYY-MM-DD.");
+        }
+        if (!form_parse_time(deadline_time, &event->deadline_minute)) {
+            return STR("Deadline time must be HH:MM.");
+        }
+    }
 
     return form_parse_order(event);
 }
@@ -4572,6 +4609,11 @@ static Str form_parse_order(const Event *event) {
     if (event->repeat_has_end) {
         if (date_to_day_number(event->repeat_end_date) < start_day) {
             return STR("Repeat until is before start.");
+        }
+    }
+    if (event->has_deadline) {
+        if (date_to_day_number(event->deadline_date) < start_day) {
+            return STR("Deadline is before start.");
         }
     }
     // Overlapping occurrences would make a day show the same event twice.
@@ -4864,6 +4906,15 @@ static void event_format_range(const Event *event, Date_Time now, char *buffer,
         return;
     }
     event_format_range_dates(event, buffer, buffer_size);
+    if (event->has_deadline) {
+        char deadline[32] = "";
+        format_date_time_short(event->deadline_date, event->deadline_minute, deadline,
+                               sizeof(deadline));
+        size_t length = strlen(buffer);
+        assert(length < buffer_size);
+        // Cutting the text short is acceptable: the card clips long lines anyway.
+        snprintf(buffer + length, buffer_size - length, ", due %s", deadline);
+    }
     // The longest is "every 999 days".
     char repeat[32] = "";
     event_format_repeat(event, repeat, sizeof(repeat));

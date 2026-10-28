@@ -149,6 +149,13 @@ static const char *const migrations_sql[] = {
     "ALTER TABLE task_links RENAME COLUMN problem_id TO target_id;"
     "DROP INDEX problem_tasks_by_task;"
     "CREATE INDEX task_links_by_task ON task_links (task_id);",
+    // Task deadlines. NULL deadline_date means no deadline. Only a task that does not repeat has
+    // one, and it is not before the task starts; a deadline time needs a deadline date.
+    "ALTER TABLE events ADD COLUMN deadline_date TEXT"
+    "    CHECK (deadline_date IS NULL OR (kind = 'task' AND repeat_unit IS NULL"
+    "        AND deadline_date >= start_date));"
+    "ALTER TABLE events ADD COLUMN deadline_time TEXT"
+    "    CHECK (deadline_time IS NULL OR deadline_date IS NOT NULL);",
 };
 enum { SCHEMA_VERSION = sizeof(migrations_sql) / sizeof(migrations_sql[0]) };
 
@@ -183,17 +190,18 @@ typedef enum Statement {
 static_assert((int)STATEMENT_COUNT == (int)EVENT_STORE_STATEMENT_COUNT,
               "Event_Store holds every statement.");
 
-// Insert and update share parameters 1 to 11, so that both bind with event_store_bind_fields.
+// Insert and update share parameters 1 to 13, so that both bind with event_store_bind_fields.
 static const char *const statements_sql[STATEMENT_COUNT] = {
     [STATEMENT_INSERT] =
         "INSERT INTO events"
         " (title, start_date, start_time, end_date, end_time, repeat_unit, repeat_interval,"
-        "  repeat_end_date, kind, location_id, description)"
-        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);",
+        "  repeat_end_date, kind, location_id, description, deadline_date, deadline_time)"
+        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13);",
     [STATEMENT_UPDATE] =
         "UPDATE events SET title = ?1, start_date = ?2, start_time = ?3, end_date = ?4,"
         " end_time = ?5, repeat_unit = ?6, repeat_interval = ?7, repeat_end_date = ?8,"
-        " kind = ?9, location_id = ?10, description = ?11 WHERE id = ?12;",
+        " kind = ?9, location_id = ?10, description = ?11, deadline_date = ?12,"
+        " deadline_time = ?13 WHERE id = ?14;",
     [STATEMENT_DELETE] = "DELETE FROM events WHERE id = ?1;",
     // Ordered by time of day, all-day events first, because the caller lists the events of one
     // day at a time and a repeating event's first start date says nothing about that order.
@@ -212,7 +220,8 @@ static const char *const statements_sql[STATEMENT_COUNT] = {
         "       AND NOT EXISTS (SELECT 1 FROM task_links tl JOIN events t ON t.id = tl.task_id"
         "                       WHERE tl.target_id = e.id AND t.kind = 'task'"
         "                         AND NOT EXISTS (SELECT 1 FROM task_completions c"
-        "                                         WHERE c.event_id = t.id))"
+        "                                         WHERE c.event_id = t.id)),"
+        "       e.deadline_date, e.deadline_time"
         " FROM events e LEFT JOIN locations l ON l.id = e.location_id"
         " WHERE (e.start_date <= ?2 AND (e.end_date >= ?1 OR (e.repeat_unit IS NOT NULL"
         "        AND (e.repeat_end_date IS NULL OR julianday(e.repeat_end_date)"
@@ -271,7 +280,7 @@ static const char *const statements_sql[STATEMENT_COUNT] = {
     [STATEMENT_TASKS] =
         "SELECT e.id, e.title, e.start_date, e.start_time, e.end_date, e.end_time,"
         "       e.created_at, e.repeat_unit, e.repeat_interval, e.repeat_end_date, e.kind,"
-        "       l.id, l.address, l.city, e.description, 0"
+        "       l.id, l.address, l.city, e.description, 0, e.deadline_date, e.deadline_time"
         " FROM events e LEFT JOIN locations l ON l.id = e.location_id"
         " WHERE e.kind = 'task'"
         " ORDER BY e.repeat_unit IS NULL, e.start_date DESC, e.id DESC LIMIT ?1;",
@@ -296,6 +305,8 @@ enum {
     COLUMN_LOCATION_CITY,
     COLUMN_DESCRIPTION,
     COLUMN_TASKS_DONE,
+    COLUMN_DEADLINE_DATE,
+    COLUMN_DEADLINE_TIME,
 };
 
 // Columns of STATEMENT_TASK_TARGETS.
@@ -334,6 +345,7 @@ static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minu
 static bool column_parse_repeat(sqlite3_stmt *statement, Event *event);
 static bool column_parse_kind(sqlite3_stmt *statement, int column, int32_t *kind);
 static bool column_parse_target(sqlite3_stmt *statement, Event *event);
+static bool column_parse_deadline(sqlite3_stmt *statement, Event *event);
 static bool column_parse_location(sqlite3_stmt *statement, Event *event);
 
 bool event_store_open(Event_Store *store, const char *path, bool create) {
@@ -426,7 +438,7 @@ bool event_store_update(Event_Store *store, const Event *event) {
     sqlite3_stmt *statement = store->statements[STATEMENT_UPDATE];
     int result = event_store_bind_fields(statement, event);
     if (result == SQLITE_OK) {
-        result = sqlite3_bind_int64(statement, 12, event->id);
+        result = sqlite3_bind_int64(statement, 14, event->id);
     }
     return event_store_write(store, statement, result, "Cannot save", true);
 }
@@ -993,6 +1005,22 @@ static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event) 
     if (result == SQLITE_OK) {
         result = sqlite3_bind_text(statement, 11, event->description, -1, SQLITE_TRANSIENT);
     }
+    if (result == SQLITE_OK) {
+        assert(!event->has_deadline || event->kind == EVENT_KIND_TASK);
+        assert(!event->has_deadline || event->repeat_unit == REPEAT_NONE);
+        if (event->has_deadline) {
+            result = bind_date(statement, 12, event->deadline_date);
+        } else {
+            result = sqlite3_bind_null(statement, 12);
+        }
+    }
+    if (result == SQLITE_OK) {
+        if (event->has_deadline) {
+            result = bind_time(statement, 13, event->deadline_minute);
+        } else {
+            result = sqlite3_bind_null(statement, 13);
+        }
+    }
     return result;
 }
 
@@ -1068,6 +1096,9 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
     if (!column_parse_target(statement, event)) {
         return false;
     }
+    if (!column_parse_deadline(statement, event)) {
+        return false;
+    }
     // Longer text from outside this program is cut to fit, as titles are.
     const char *description = (const char *)sqlite3_column_text(statement, COLUMN_DESCRIPTION);
     if (description == NULL) {
@@ -1097,6 +1128,32 @@ static bool column_parse_target(sqlite3_stmt *statement, Event *event) {
         return false;
     }
     return event->repeat_unit == REPEAT_NONE;
+}
+
+/**
+ * A deadline's rules, which the database enforces as well, checked again because drawing
+ * relies on them. No deadline date leaves the event without a deadline.
+ */
+static bool column_parse_deadline(sqlite3_stmt *statement, Event *event) {
+    assert(!event->has_deadline);
+
+    if (sqlite3_column_type(statement, COLUMN_DEADLINE_DATE) == SQLITE_NULL) {
+        return sqlite3_column_type(statement, COLUMN_DEADLINE_TIME) == SQLITE_NULL;
+    }
+    if (!column_parse_date(statement, COLUMN_DEADLINE_DATE, &event->deadline_date)) {
+        return false;
+    }
+    if (!column_parse_time(statement, COLUMN_DEADLINE_TIME, &event->deadline_minute)) {
+        return false;
+    }
+    if (event->kind != EVENT_KIND_TASK || event->repeat_unit != REPEAT_NONE) {
+        return false;
+    }
+    if (date_to_day_number(event->deadline_date) < date_to_day_number(event->start_date)) {
+        return false;
+    }
+    event->has_deadline = true;
+    return true;
 }
 
 /**

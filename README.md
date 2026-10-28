@@ -111,6 +111,8 @@ In the week and day views on the desktop, an item on the hours can be changed by
 
 An event can repeat every week, every X days, every month or every year. Monthly and yearly events keep the same date, so an event on the 31st skips months without one, and an event on 29 February appears only in leap years. Each repetition must end before the next one starts. A repeating event can have an optional **Repeat until** date: it is inclusive, so an occurrence that starts on that date still happens, in full, and none start after it. Leave it empty to repeat forever.
 
+A task that does not repeat can have an optional **Deadline**: a date, and optionally a time, in the form's last row, where a repeating task has its Repeat until. It cannot be before the task's start date, and the card shows it as "due" after the dates.
+
 An event or task can have a location: fill in its address, its city, or both. Locations are shared, so every item saved with the same address and city links to the same location, and the card shows it below the dates.
 
 Events and tasks also have an optional one-line description (up to 199 characters). Cards show it under the dates and location, wrapped over up to three lines.

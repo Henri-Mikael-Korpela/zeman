@@ -74,13 +74,23 @@ void writer_event(Writer *writer, const Event *event) {
         repeat_end_date = event->repeat_end_date;
     }
     writer_date(writer, repeat_end_date);
+    // Zeroes also stand for a task without a deadline.
+    Date deadline_date = { 0, 0, 0 };
+    int32_t deadline_minute = TIME_NONE;
+    if (event->has_deadline) {
+        deadline_date = event->deadline_date;
+        deadline_minute = event->deadline_minute;
+    }
+    writer_date(writer, deadline_date);
     writer_i32(writer, event->start_minute);
     writer_i32(writer, event->end_minute);
     writer_i32(writer, event->created_minute);
+    writer_i32(writer, deadline_minute);
     writer_i32(writer, event->repeat_unit);
     writer_i32(writer, event->repeat_interval);
     writer_i32(writer, event->kind);
     writer_u8(writer, (uint8_t)event->repeat_has_end);
+    writer_u8(writer, (uint8_t)event->has_deadline);
     writer_u8(writer, (uint8_t)event->tasks_done);
     writer_text(writer, str_from_cstr(event->title));
     writer_text(writer, str_from_cstr(event->description));
@@ -216,13 +226,16 @@ Event reader_event(Reader *reader) {
     // Zeroes mean not yet created, and no repeat end; anything else must be a real date.
     Date created = { reader_i32(reader), reader_i32(reader), reader_i32(reader) };
     Date repeat_end = { reader_i32(reader), reader_i32(reader), reader_i32(reader) };
+    Date deadline = { reader_i32(reader), reader_i32(reader), reader_i32(reader) };
     event.start_minute = reader_i32(reader);
     event.end_minute = reader_i32(reader);
     event.created_minute = reader_i32(reader);
+    const int32_t deadline_minute = reader_i32(reader);
     event.repeat_unit = reader_i32(reader);
     event.repeat_interval = reader_i32(reader);
     event.kind = reader_i32(reader);
     event.repeat_has_end = reader_u8(reader) != 0;
+    event.has_deadline = reader_u8(reader) != 0;
     // event_is_valid below refuses it on anything but a link target.
     event.tasks_done = reader_u8(reader) != 0;
     reader_text(reader, event.title, sizeof(event.title));
@@ -235,6 +248,10 @@ Event reader_event(Reader *reader) {
     }
     if (event.repeat_has_end) {
         event.repeat_end_date = repeat_end;
+    }
+    if (event.has_deadline) {
+        event.deadline_date = deadline;
+        event.deadline_minute = deadline_minute;
     }
     if (!reader->failed && !event_is_valid(&event)) {
         reader->failed = true;

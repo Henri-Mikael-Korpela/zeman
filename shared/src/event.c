@@ -375,6 +375,17 @@ bool event_is_valid(const Event *event) {
     if (event->kind == EVENT_KIND_OPPORTUNITY && event->repeat_unit != REPEAT_NONE) {
         return false;
     }
+    if (event->has_deadline) {
+        if (event->kind != EVENT_KIND_TASK || event->repeat_unit != REPEAT_NONE) {
+            return false;
+        }
+        if (!date_is_valid(event->deadline_date) || !minute_is_valid(event->deadline_minute)) {
+            return false;
+        }
+        if (date_to_day_number(event->deadline_date) < start_day) {
+            return false;
+        }
+    }
     if (event->kind == EVENT_KIND_PROBLEM) {
         if (event_duration_days(event) != 0 || event->start_minute != TIME_NONE) {
             return false;

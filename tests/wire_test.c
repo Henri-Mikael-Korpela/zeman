@@ -163,6 +163,64 @@ static void test_task_occurrence_round_trip(void) {
     assert(read.task.id == 0);
 }
 
+static Event test_event_round_trip(const Event *event, bool *accepted) {
+    static uint8_t bytes[1024];
+    Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+    writer_event(&writer, event);
+    assert(!writer.overflow);
+
+    Reader reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+    Event read = reader_event(&reader);
+    *accepted = !reader.failed && reader_done(&reader);
+    return read;
+}
+
+static void test_deadline(void) {
+    bool accepted = false;
+    Event task = test_task_make((Date){ 2026, 10, 20 }, REPEAT_NONE, 1);
+    task.has_deadline = true;
+    task.deadline_date = (Date){ 2026, 10, 25 };
+    task.deadline_minute = 17 * 60;
+    assert(event_is_valid(&task));
+
+    // A deadline crosses the network with its time, or without one.
+    Event read = test_event_round_trip(&task, &accepted);
+    assert(accepted);
+    assert(read.has_deadline);
+    assert(date_equal(read.deadline_date, task.deadline_date));
+    assert(read.deadline_minute == 17 * 60);
+    task.deadline_minute = TIME_NONE;
+    read = test_event_round_trip(&task, &accepted);
+    assert(accepted);
+    assert(read.deadline_minute == TIME_NONE);
+
+    // A task without one stays without, whatever its deadline fields hold.
+    Event none = test_task_make((Date){ 2026, 10, 20 }, REPEAT_NONE, 1);
+    none.deadline_date = (Date){ 2026, 10, 25 };
+    read = test_event_round_trip(&none, &accepted);
+    assert(accepted);
+    assert(!read.has_deadline);
+
+    // The deadline can be the start day, but not before it.
+    task.deadline_date = task.start_date;
+    assert(event_is_valid(&task));
+    task.deadline_date = (Date){ 2026, 10, 19 };
+    assert(!event_is_valid(&task));
+    test_event_round_trip(&task, &accepted);
+    assert(!accepted);
+
+    // Only a task that does not repeat has one.
+    task.deadline_date = (Date){ 2026, 10, 25 };
+    task.repeat_unit = REPEAT_WEEK;
+    assert(!event_is_valid(&task));
+    task.repeat_unit = REPEAT_NONE;
+    task.kind = EVENT_KIND_EVENT;
+    assert(!event_is_valid(&task));
+    task.kind = EVENT_KIND_TASK;
+    task.deadline_minute = MINUTES_PER_DAY;
+    assert(!event_is_valid(&task));
+}
+
 static void test_paste(void) {
     char text[16] = "ab";
     // Line breaks and tabs become spaces, other control characters are left out.
@@ -195,6 +253,7 @@ int main(void) {
     test_link_parse();
     test_occurrence_due();
     test_task_occurrence_round_trip();
+    test_deadline();
     test_paste();
     printf("wire_test: all passed\n");
     return 0;

@@ -58,13 +58,20 @@ typedef struct Event {
     Date end_date;            // End of the first occurrence
     Date created_date;        // Local date when the event was inserted
     Date repeat_end_date;     // Last day an occurrence may start, if repeat_has_end
+    Date deadline_date;       // Day the task is due, if has_deadline
     int32_t start_minute;     // Minute of day, or TIME_NONE
     int32_t end_minute;       // Minute of day, or TIME_NONE
     int32_t created_minute;   // Local minute of day when the event was inserted
+    int32_t deadline_minute;  // Minute of day, or TIME_NONE, if has_deadline
     int32_t repeat_unit;      // Repeat_Unit
     int32_t repeat_interval;  // Units between occurrences; 1 ... REPEAT_INTERVAL_MAX
     int32_t kind;             // Event_Kind
     bool repeat_has_end;     // False repeats forever; always false for one-time events
+    // A task that must be done by deadline_date, and deadline_minute if that is not TIME_NONE.
+    // Only a task that does not repeat has one: a repeat's deadline would have to move with each
+    // occurrence, which is what the occurrences' own dates already say. The deadline is not
+    // before the start date.
+    bool has_deadline;
     // A link target whose linked tasks are all done (see Target_Status): a solved problem or a
     // used opportunity. Worked out when loading, so that the calendar can show it without
     // loading links; never saved, and always false for events and tasks.
