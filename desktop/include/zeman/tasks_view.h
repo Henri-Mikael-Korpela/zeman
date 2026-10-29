@@ -51,7 +51,7 @@ void tasks_view_init(Tasks_View *view);
  * Reloads the tasks when the backend's data or the day changed, then draws them into area, and
  * checks a task off, or back on, when its checkbox is clicked.
  */
-Tasks_View_Choice tasks_view_draw(Tasks_View *view, Backend *backend, const App *app,
+Tasks_View_Choice tasks_view_draw(Tasks_View *view, Backend *backend, App const *app,
                                   Rectangle area);
 
 #endif

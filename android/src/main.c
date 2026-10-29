@@ -41,9 +41,9 @@ enum {
 
 // Share of the way the drawer moves each frame, so that it opens or closes in five frames: a
 // twelfth of a second at 60 frames per second, quick but still seen to slide.
-static const float DRAWER_STEP = 0.2f;
+static float const DRAWER_STEP = 0.2f;
 // Darkening of the view behind the open drawer, so that the drawer reads as on top of it.
-static const float DRAWER_SCRIM_ALPHA = 0.4f;
+static float const DRAWER_SCRIM_ALPHA = 0.4f;
 
 // The views in the navigation drawer, in its order.
 typedef enum View {
@@ -52,7 +52,7 @@ typedef enum View {
     VIEW_COUNT,
 } View;
 
-static const char *const view_names[VIEW_COUNT] = { "Calendar", "Connection settings" };
+static char const *const view_names[VIEW_COUNT] = { "Calendar", "Connection settings" };
 
 typedef enum Connect_Result {
     CONNECT_NONE,
@@ -106,25 +106,25 @@ typedef struct Phone {
 static void phone_frame(Phone *phone);
 static void phone_frame_scan(Phone *phone);
 static void phone_view_set(Phone *phone, View view);
-static void phone_desktop_set(Phone *phone, const char *address);
-static void phone_status(const Phone *phone, char *text, size_t text_size);
-static void desktop_choose(Client *client, App *app, const char *address);
+static void phone_desktop_set(Phone *phone, char const *address);
+static void phone_status(Phone const *phone, char *text, size_t text_size);
+static void desktop_choose(Client *client, App *app, char const *address);
 static void settings_path(char *path, size_t path_size);
 static bool settings_load(char *address, size_t address_size);
-static void settings_save(const char *address);
+static void settings_save(char const *address);
 static View drawer_update(Drawer *drawer, View current);
 static View drawer_update_tap(Drawer *drawer, View current, Vector2 pointer);
-static bool drawer_is_closed(const Drawer *drawer);
+static bool drawer_is_closed(Drawer const *drawer);
 static Rectangle drawer_item(int32_t index, float x);
-static void drawer_draw(const Drawer *drawer, const App *app, View current, const char *status,
+static void drawer_draw(Drawer const *drawer, App const *app, View current, char const *status,
                         float width, float height);
 static void gutter_draw(float height);
 static void screen_begin(float scale);
 static void screen_end(void);
-static void connect_screen_open(Connect_Screen *screen, const char *address);
+static void connect_screen_open(Connect_Screen *screen, char const *address);
 static void connect_screen_close(Connect_Screen *screen);
-static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *app, float scale,
-                                           const char *status, bool input);
+static Connect_Result connect_screen_frame(Connect_Screen *screen, App const *app, float scale,
+                                           char const *status, bool input);
 static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float width, float *y);
 static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float width, float y);
 static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *address,
@@ -183,11 +183,11 @@ static void phone_frame(Phone *phone) {
         phone_frame_scan(phone);
         return;
     }
-    const float scale = phone->scale;
+    float const scale = phone->scale;
     SetMouseScale(1.0f / scale, 1.0f / scale);
     View chosen = drawer_update(&phone->drawer, phone->view);
     SetMouseScale(1.0f, 1.0f);
-    const bool input = drawer_is_closed(&phone->drawer);
+    bool const input = drawer_is_closed(&phone->drawer);
     // Back closes the drawer first; then, on the settings, it returns to a chosen desktop.
     bool desktop_chosen = phone->address[0] != '\0';
     if (input && phone->view == VIEW_CONNECTION && desktop_chosen && IsKeyPressed(KEY_BACK)) {
@@ -205,7 +205,7 @@ static void phone_frame(Phone *phone) {
     BeginDrawing();
     ClearBackground(GetColor((unsigned int)GuiGetStyle(DEFAULT, BACKGROUND_COLOR)));
     if (phone->view == VIEW_CALENDAR) {
-        const float gutter = GUTTER_WIDTH_PIXELS * scale;
+        float const gutter = GUTTER_WIDTH_PIXELS * scale;
         app_set_input_enabled(phone->app, input);
         app_frame(phone->app, (Rectangle){ gutter, 0, (float)GetScreenWidth() - gutter,
                                            (float)GetScreenHeight() });
@@ -214,8 +214,8 @@ static void phone_frame(Phone *phone) {
         result = connect_screen_frame(&phone->connect, phone->app, scale, status, input);
         typing = phone->connect.editing;
     }
-    const float width = (float)GetScreenWidth() / scale;
-    const float height = (float)GetScreenHeight() / scale;
+    float const width = (float)GetScreenWidth() / scale;
+    float const height = (float)GetScreenHeight() / scale;
     BeginMode2D((Camera2D){ .offset = { 0, 0 }, .target = { 0, 0 }, .rotation = 0,
                             .zoom = scale });
     gutter_draw(height);
@@ -274,7 +274,7 @@ static void phone_view_set(Phone *phone, View view) {
  * Connects to the desktop at address, already checked, remembers it for the next start, and
  * shows its calendar. Choosing the desktop in use again reconnects to it.
  */
-static void phone_desktop_set(Phone *phone, const char *address) {
+static void phone_desktop_set(Phone *phone, char const *address) {
     assert(address[0] != '\0');
 
     char copy[ADDRESS_TEXT_SIZE] = "";
@@ -289,7 +289,7 @@ static void phone_desktop_set(Phone *phone, const char *address) {
  * Reads the host and port out of a link, "address" or "address:port", through protocol_link_parse.
  * The host is copied into a C string because the network functions take one.
  */
-static bool link_parse_host(const char *link, char *host, size_t host_size, uint16_t *port) {
+static bool link_parse_host(char const *link, char *host, size_t host_size, uint16_t *port) {
     Str address = str_make("", 0);
     if (!protocol_link_parse(str_from_cstr(link), &address, port)) {
         return false;
@@ -300,7 +300,7 @@ static bool link_parse_host(const char *link, char *host, size_t host_size, uint
 /**
  * One line on the connection, for the drawer and the connection settings.
  */
-static void phone_status(const Phone *phone, char *text, size_t text_size) {
+static void phone_status(Phone const *phone, char *text, size_t text_size) {
     assert(text_size > 0);
 
     char host[CLIENT_HOST_SIZE] = "";
@@ -319,7 +319,7 @@ static void phone_status(const Phone *phone, char *text, size_t text_size) {
 /**
  * address is a link, "address" or "address:port", already checked by protocol_link_parse.
  */
-static void desktop_choose(Client *client, App *app, const char *address) {
+static void desktop_choose(Client *client, App *app, char const *address) {
     char host[CLIENT_HOST_SIZE] = "";
     uint16_t port = 0;
     bool parsed = link_parse_host(address, host, sizeof(host), &port);
@@ -364,7 +364,7 @@ static bool settings_load(char *address, size_t address_size) {
     return true;
 }
 
-static void settings_save(const char *address) {
+static void settings_save(char const *address) {
     // Some Android versions do not create the app's data folder until something asks for it.
     mkdir(android_input_data_directory(), 0770);
     char path[PATH_SIZE] = "";
@@ -386,7 +386,7 @@ static View drawer_update(Drawer *drawer, View current) {
     assert(drawer->open_fraction >= 0.0f);
     assert(drawer->open_fraction <= 1.0f);
 
-    const Vector2 pointer = GetMousePosition();
+    Vector2 const pointer = GetMousePosition();
     if (drawer->open && IsKeyPressed(KEY_BACK)) {
         drawer->open = false;
     }
@@ -471,7 +471,7 @@ static View drawer_update_tap(Drawer *drawer, View current, Vector2 pointer) {
 /**
  * The view takes input only with the drawer wholly closed and nothing pressed on it.
  */
-static bool drawer_is_closed(const Drawer *drawer) {
+static bool drawer_is_closed(Drawer const *drawer) {
     if (drawer->open || drawer->pressed) {
         return false;
     }
@@ -493,7 +493,7 @@ static Rectangle drawer_item(int32_t index, float x) {
  * The drawer slides in from the left over a darkened view. Its items look like the desktop's
  * navigation; the connection is shown at the bottom.
  */
-static void drawer_draw(const Drawer *drawer, const App *app, View current, const char *status,
+static void drawer_draw(Drawer const *drawer, App const *app, View current, char const *status,
                         float width, float height) {
     assert(width > 0.0f);
     assert(height > 0.0f);
@@ -501,8 +501,8 @@ static void drawer_draw(const Drawer *drawer, const App *app, View current, cons
     if (drawer->open_fraction == 0.0f) {
         return;
     }
-    const float x = (drawer->open_fraction - 1.0f) * DRAWER_WIDTH_PIXELS;
-    const Color border = GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_NORMAL));
+    float const x = (drawer->open_fraction - 1.0f) * DRAWER_WIDTH_PIXELS;
+    Color const border = GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_NORMAL));
     DrawRectangleRec((Rectangle){ 0, 0, width, height },
                      Fade(BLACK, DRAWER_SCRIM_ALPHA * drawer->open_fraction));
     DrawRectangleRec((Rectangle){ x, 0, DRAWER_WIDTH_PIXELS, height },
@@ -532,14 +532,14 @@ static void drawer_draw(const Drawer *drawer, const App *app, View current, cons
 static void gutter_draw(float height) {
     assert(height > 0.0f);
 
-    const Color border = GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_NORMAL));
-    const Color accent = GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_PRESSED));
-    const float middle = height / 2;
+    Color const border = GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_NORMAL));
+    Color const accent = GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_PRESSED));
+    float const middle = height / 2;
     DrawRectangleRec((Rectangle){ 0, 0, GUTTER_WIDTH_PIXELS, height },
                      GetColor((unsigned int)GuiGetStyle(DEFAULT, BASE_COLOR_NORMAL)));
     DrawRectangleRec((Rectangle){ GUTTER_WIDTH_PIXELS - 1, 0, 1, height }, border);
     // The grip lines and arrow are centred in the strip.
-    const float center = (GUTTER_WIDTH_PIXELS - 1) / 2.0f;
+    float const center = (GUTTER_WIDTH_PIXELS - 1) / 2.0f;
     DrawRectangleRounded((Rectangle){ center - 2, middle - 64, 4, 44 }, 1.0f, 4, border);
     DrawRectangleRounded((Rectangle){ center - 2, middle + 20, 4, 44 }, 1.0f, 4, border);
     DrawLineEx((Vector2){ center - 4, middle - 10 }, (Vector2){ center + 4, middle }, 3.0f,
@@ -566,7 +566,7 @@ static void screen_end(void) {
     SetMouseScale(1.0f, 1.0f);
 }
 
-static void connect_screen_open(Connect_Screen *screen, const char *address) {
+static void connect_screen_open(Connect_Screen *screen, char const *address) {
     assert(!screen->open);
 
     // Searching the network starts at once; without it, the code or the address still work.
@@ -591,14 +591,14 @@ static void connect_screen_close(Connect_Screen *screen) {
  * Draws the connection settings right of the edge's strip, between the caller's BeginDrawing
  * and EndDrawing. Without input, as while the drawer is out, the controls ignore touches.
  */
-static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *app, float scale,
-                                           const char *status, bool input) {
+static Connect_Result connect_screen_frame(Connect_Screen *screen, App const *app, float scale,
+                                           char const *status, bool input) {
     assert(screen->open);
     assert(scale > 0.0f);
 
     discovery_poll(&screen->discovery);
     // Layout pixels start right of the strip: drawing and touches move and scale the same way.
-    const float offset = GUTTER_WIDTH_PIXELS * scale;
+    float const offset = GUTTER_WIDTH_PIXELS * scale;
     SetMouseOffset(-(int)offset, 0);
     SetMouseScale(1.0f / scale, 1.0f / scale);
     if (!input) {
@@ -606,9 +606,9 @@ static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *ap
     }
     BeginMode2D((Camera2D){ .offset = { offset, 0 }, .target = { 0, 0 }, .rotation = 0,
                             .zoom = scale });
-    const float width = ((float)GetScreenWidth() - offset) / scale;
-    const float x = MARGIN_PIXELS;
-    const float content_width = width - 2 * MARGIN_PIXELS;
+    float const width = ((float)GetScreenWidth() - offset) / scale;
+    float const x = MARGIN_PIXELS;
+    float const content_width = width - 2 * MARGIN_PIXELS;
     float y = 24;
     // A heading in the calendar's style, as the desktop's Connected Devices view has.
     app_draw_text(app, APP_TEXT_HEADING, STR("Connection settings"), x, y);
@@ -633,8 +633,8 @@ static Connect_Result connect_screen_frame(Connect_Screen *screen, const App *ap
  * The recommended way first, the QR code; then a desktop found on this network, if any.
  */
 static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float width, float *y) {
-    const float x = MARGIN_PIXELS;
-    const float content_width = width - 2 * MARGIN_PIXELS;
+    float const x = MARGIN_PIXELS;
+    float const content_width = width - 2 * MARGIN_PIXELS;
     Connect_Result result = CONNECT_NONE;
     GuiLabel((Rectangle){ x, *y, content_width, LINE_PIXELS },
              "Connect, or reconnect, to the desktop:");
@@ -650,7 +650,7 @@ static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float 
              "Connected Devices and scan its code.");
     *y += 3 * LINE_PIXELS;
 
-    const Discovery *discovery = &screen->discovery;
+    Discovery const *discovery = &screen->discovery;
     if (discovery->found) {
         char text[MESSAGE_SIZE] = "";
         snprintf(text, sizeof(text), "Found a desktop at %s.", discovery->found_address);
@@ -670,8 +670,8 @@ static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float 
  * Typing the address, as shown in the desktop's status bar and Connected Devices view.
  */
 static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float width, float y) {
-    const float x = MARGIN_PIXELS;
-    const float content_width = width - 2 * MARGIN_PIXELS;
+    float const x = MARGIN_PIXELS;
+    float const content_width = width - 2 * MARGIN_PIXELS;
     Connect_Result result = CONNECT_NONE;
     GuiLabel((Rectangle){ x, y, content_width, LINE_PIXELS }, "Or type its address, such as");
     GuiLabel((Rectangle){ x, y + LINE_PIXELS, content_width, LINE_PIXELS }, "192.168.1.20:");
@@ -728,22 +728,22 @@ static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *ad
     }
 
     screen_begin(scale);
-    const float width = (float)GetScreenWidth() / scale;
-    const float height = (float)GetScreenHeight() / scale;
-    const float x = MARGIN_PIXELS;
-    const float content_width = width - 2 * MARGIN_PIXELS;
+    float const width = (float)GetScreenWidth() / scale;
+    float const height = (float)GetScreenHeight() / scale;
+    float const x = MARGIN_PIXELS;
+    float const content_width = width - 2 * MARGIN_PIXELS;
     float y = 32;
     GuiLabel((Rectangle){ x, y, content_width, LINE_PIXELS }, "Scan the desktop's QR code");
     y += LINE_PIXELS + 8;
-    const float preview_height = height - y - 4 * LINE_PIXELS - BUTTON_HEIGHT_PIXELS;
+    float const preview_height = height - y - 4 * LINE_PIXELS - BUTTON_HEIGHT_PIXELS;
     qr_scanner_draw(scanner, (Rectangle){ x, y, content_width, preview_height });
     y += preview_height + 8;
-    const char *hint = "Point the camera at the code.";
+    char const *hint = "Point the camera at the code.";
     if (!permitted) {
         hint = "Allow the camera to scan the code.";
     }
     // What the scan itself says, such as why a code was refused, comes before the hint.
-    const char *shown = hint;
+    char const *shown = hint;
     if (scan->message[0] != '\0') {
         shown = scan->message;
     }

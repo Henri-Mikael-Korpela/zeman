@@ -19,7 +19,7 @@ enum {
 static bool qr_scanner_find_camera(QR_Scanner *scanner, char *camera_id, size_t camera_id_size);
 static bool qr_scanner_open_session(QR_Scanner *scanner);
 static bool qr_scanner_copy_frame(QR_Scanner *scanner, AImage *image);
-static bool qr_scanner_fail(QR_Scanner *scanner, const char *message);
+static bool qr_scanner_fail(QR_Scanner *scanner, char const *message);
 static void on_device_disconnected(void *context, ACameraDevice *device);
 static void on_device_error(void *context, ACameraDevice *device, int error);
 static void on_session_state(void *context, ACameraCaptureSession *session);
@@ -159,7 +159,7 @@ bool qr_scanner_poll(QR_Scanner *scanner, char *text, size_t text_size) {
     return false;
 }
 
-void qr_scanner_draw(const QR_Scanner *scanner, Rectangle area) {
+void qr_scanner_draw(QR_Scanner const *scanner, Rectangle area) {
     DrawRectangleRec(area, BLACK);
     if (!scanner->running || !scanner->has_frame) {
         return;
@@ -294,7 +294,7 @@ static bool qr_scanner_copy_frame(QR_Scanner *scanner, AImage *image) {
     return true;
 }
 
-static bool qr_scanner_fail(QR_Scanner *scanner, const char *message) {
+static bool qr_scanner_fail(QR_Scanner *scanner, char const *message) {
     snprintf(scanner->error, sizeof(scanner->error), "%s", message);
     qr_scanner_stop(scanner);
     return false;

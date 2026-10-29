@@ -28,8 +28,8 @@ typedef struct Backend_Ops {
     int32_t (*load_completions)(void *context, Date first, Date last, Array_Slice completions,
                                 bool *truncated);
     // Returns the new id, or 0.
-    int64_t (*insert)(void *context, const Event *event);
-    bool (*update)(void *context, const Event *event);
+    int64_t (*insert)(void *context, Event const *event);
+    bool (*update)(void *context, Event const *event);
     bool (*remove)(void *context, int64_t id);
     bool (*set_task_done)(void *context, int64_t id, Date occurrence_start, bool done);
     // Returns the id of the location with this address and city, creating it if needed, or 0.
@@ -58,11 +58,11 @@ typedef struct Backend_Ops {
     // A number that changes whenever the data changes, from this program or another, so that
     // the user interface knows when to reload. 0 when unknown, for example while disconnected.
     uint64_t (*revision)(void *context);
-    Str (*error)(const void *context);
+    Str (*error)(void const *context);
 } Backend_Ops;
 
 typedef struct Backend {
-    const Backend_Ops *ops;
+    Backend_Ops const *ops;
     void *context;
 } Backend;
 
@@ -77,11 +77,11 @@ static inline int32_t backend_load_completions(Backend *backend, Date first, Dat
                                           truncated);
 }
 
-static inline int64_t backend_insert(Backend *backend, const Event *event) {
+static inline int64_t backend_insert(Backend *backend, Event const *event) {
     return backend->ops->insert(backend->context, event);
 }
 
-static inline bool backend_update(Backend *backend, const Event *event) {
+static inline bool backend_update(Backend *backend, Event const *event) {
     return backend->ops->update(backend->context, event);
 }
 
@@ -124,7 +124,7 @@ static inline uint64_t backend_revision(Backend *backend) {
     return backend->ops->revision(backend->context);
 }
 
-static inline Str backend_error(const Backend *backend) {
+static inline Str backend_error(Backend const *backend) {
     return backend->ops->error(backend->context);
 }
 
@@ -132,7 +132,7 @@ static inline Str backend_error(const Backend *backend) {
  * Copies the error text into buffer, cut at a whole character when it does not fit: the callers
  * keep it in a fixed field of a form or a view, where a shortened message is better than none.
  */
-static inline void backend_error_copy(const Backend *backend, char *buffer, size_t buffer_size) {
+static inline void backend_error_copy(Backend const *backend, char *buffer, size_t buffer_size) {
     (void)str_copy_truncated(backend_error(backend), buffer, buffer_size);
 }
 

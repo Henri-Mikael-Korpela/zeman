@@ -15,10 +15,10 @@ enum {
     TEXT_SIZE = SERVER_ERROR_SIZE + 64,
 };
 
-static float devices_view_draw_qr(const Devices_View *view, float x, float y);
-static void devices_view_draw_clients(const Server *server, const App *app, float x, float y);
+static float devices_view_draw_qr(Devices_View const *view, float x, float y);
+static void devices_view_draw_clients(Server const *server, App const *app, float x, float y);
 
-void devices_view_init(Devices_View *view, const Server *server) {
+void devices_view_init(Devices_View *view, Server const *server) {
     view->qr_ready = false;
     if (!server->listening) {
         return;
@@ -34,9 +34,9 @@ void devices_view_init(Devices_View *view, const Server *server) {
     assert(view->qr_ready);
 }
 
-void devices_view_draw(const Devices_View *view, const Server *server, const App *app,
+void devices_view_draw(Devices_View const *view, Server const *server, App const *app,
                        Rectangle area) {
-    const float x = area.x + MARGIN_PIXELS;
+    float const x = area.x + MARGIN_PIXELS;
     float y = area.y + MARGIN_PIXELS;
     app_draw_text(app, APP_TEXT_HEADING, STR("Connected Devices"), x, y);
     y += 2 * LINE_PIXELS;
@@ -53,7 +53,7 @@ void devices_view_draw(const Devices_View *view, const Server *server, const App
     float qr_size = devices_view_draw_qr(view, x, y);
 
     // Beside the code: the address to type instead, and who is connected.
-    const float side_x = x + qr_size + MARGIN_PIXELS;
+    float const side_x = x + qr_size + MARGIN_PIXELS;
     float side_y = y;
     app_draw_text(app, APP_TEXT_DIM, STR("Or type this address in the app:"), side_x, side_y);
     side_y += LINE_PIXELS;
@@ -73,12 +73,12 @@ void devices_view_draw(const Devices_View *view, const Server *server, const App
 /**
  * Draws the code on white with its quiet zone, and returns its width in pixels.
  */
-static float devices_view_draw_qr(const Devices_View *view, float x, float y) {
-    const int32_t modules = qrcodegen_getSize(view->qr);
-    const float size = (float)((modules + 2 * QR_QUIET_ZONE_MODULES) * QR_MODULE_PIXELS);
+static float devices_view_draw_qr(Devices_View const *view, float x, float y) {
+    int32_t const modules = qrcodegen_getSize(view->qr);
+    float const size = (float)((modules + 2 * QR_QUIET_ZONE_MODULES) * QR_MODULE_PIXELS);
     DrawRectangleRec((Rectangle){ x, y, size, size }, WHITE);
-    const float origin_x = x + QR_QUIET_ZONE_MODULES * QR_MODULE_PIXELS;
-    const float origin_y = y + QR_QUIET_ZONE_MODULES * QR_MODULE_PIXELS;
+    float const origin_x = x + QR_QUIET_ZONE_MODULES * QR_MODULE_PIXELS;
+    float const origin_y = y + QR_QUIET_ZONE_MODULES * QR_MODULE_PIXELS;
     for (int32_t row = 0; row < modules; row++) {
         for (int32_t column = 0; column < modules; column++) {
             if (qrcodegen_getModule(view->qr, column, row)) {
@@ -92,17 +92,17 @@ static float devices_view_draw_qr(const Devices_View *view, float x, float y) {
     return size;
 }
 
-static void devices_view_draw_clients(const Server *server, const App *app, float x, float y) {
+static void devices_view_draw_clients(Server const *server, App const *app, float x, float y) {
     app_draw_text(app, APP_TEXT_NORMAL, STR("Connected now"), x, y);
     y += LINE_PIXELS + 4;
     int32_t shown = 0;
     for (int32_t i = 0; i < SERVER_CLIENT_COUNT_MAX; i++) {
-        const Server_Client *client = &server->clients[i];
+        Server_Client const *client = &server->clients[i];
         if (!client->active) {
             continue;
         }
         time_t connected_at = (time_t)client->connected_at;
-        const struct tm *local = localtime(&connected_at);
+        struct tm const *local = localtime(&connected_at);
         char since[16] = "?";
         if (local != NULL) {
             strftime(since, sizeof(since), "%H:%M", local);

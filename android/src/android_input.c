@@ -16,7 +16,7 @@ static int32_t android_key_character(int32_t key_code, int32_t meta_state);
 static void android_keyboard_jni(struct android_app *app, bool visible);
 static bool android_keyboard_find(JNIEnv *env, jobject activity, jobject *manager,
                                   jobject *decor_view);
-static bool jni_failed(JNIEnv *env, const void *result);
+static bool jni_failed(JNIEnv *env, void const *result);
 
 void android_input_install(Android_Input *input) {
     struct android_app *app = GetAndroidApp();
@@ -61,7 +61,7 @@ void android_input_keyboard_set_visible(Android_Input *input, bool visible) {
     android_keyboard_jni(app, visible);
 }
 
-const char *android_input_data_directory(void) {
+char const *android_input_data_directory(void) {
     struct android_app *app = GetAndroidApp();
     assert(app != NULL);
     return app->activity->internalDataPath;
@@ -111,7 +111,7 @@ typedef struct Key_Symbol {
 // A table rather than a switch, because key codes come from the system and the many codes that
 // type nothing are no mistake to assert on, and because each key then states both its symbols
 // once. Keys that type the same with and without Shift list it twice.
-static const Key_Symbol key_symbols[] = {
+static Key_Symbol const key_symbols[] = {
     { AKEYCODE_SPACE, ' ', ' ' },
     { AKEYCODE_COMMA, ',', '<' },
     { AKEYCODE_PERIOD, '.', '>' },
@@ -135,8 +135,8 @@ enum { KEY_SYMBOL_COUNT = sizeof(key_symbols) / sizeof(key_symbols[0]) };
  * The character a key types on a US keyboard, or 0 for keys that type none.
  */
 static int32_t android_key_character(int32_t key_code, int32_t meta_state) {
-    const bool shift = (meta_state & AMETA_SHIFT_ON) != 0;
-    const bool caps_lock = (meta_state & AMETA_CAPS_LOCK_ON) != 0;
+    bool const shift = (meta_state & AMETA_SHIFT_ON) != 0;
+    bool const caps_lock = (meta_state & AMETA_CAPS_LOCK_ON) != 0;
     if (key_code >= AKEYCODE_A && key_code <= AKEYCODE_Z) {
         int32_t offset = key_code - AKEYCODE_A;
         // Caps Lock and Shift cancel each other out, as on a keyboard.
@@ -146,7 +146,7 @@ static int32_t android_key_character(int32_t key_code, int32_t meta_state) {
         return 'a' + offset;
     }
     if (key_code >= AKEYCODE_0 && key_code <= AKEYCODE_9) {
-        static const char shifted_digits[] = ")!@#$%^&*(";
+        static char const shifted_digits[] = ")!@#$%^&*(";
         int32_t digit = key_code - AKEYCODE_0;
         if (shift) {
             return shifted_digits[digit];
@@ -263,7 +263,7 @@ static bool android_keyboard_find(JNIEnv *env, jobject activity, jobject *manage
  * True, with the exception cleared, when a JNI call failed. Every later call needs the earlier
  * ones to have worked, and JNI must not be called with an exception pending.
  */
-static bool jni_failed(JNIEnv *env, const void *result) {
+static bool jni_failed(JNIEnv *env, void const *result) {
     if (result == NULL || (*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         return true;

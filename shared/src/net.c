@@ -33,7 +33,7 @@ static bool net_set_nonblocking(Platform_Socket socket);
 static bool net_ipv4_is_local(uint32_t host_order);
 static bool net_would_block(void);
 static bool net_wait(Net_Socket socket, bool for_write, int32_t timeout_ms);
-static void net_error_text(const char *context, char *error, size_t error_size);
+static void net_error_text(char const *context, char *error, size_t error_size);
 
 bool net_startup(void) {
 #if defined(_WIN32)
@@ -50,7 +50,7 @@ void net_cleanup(void) {
 #endif
 }
 
-bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, Net_Socket *socket_out,
+bool net_connect(char const *host, uint16_t port, int32_t timeout_ms, Net_Socket *socket_out,
                  char *error, size_t error_size) {
     assert(host != NULL);
     assert(timeout_ms > 0);
@@ -95,7 +95,7 @@ bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, Net_Socket
     }
     // Requests are small and answered at once, so do not wait to fill packets.
     int no_delay = 1;
-    setsockopt(platform, IPPROTO_TCP, TCP_NODELAY, (const char *)&no_delay, sizeof(no_delay));
+    setsockopt(platform, IPPROTO_TCP, TCP_NODELAY, (char const *)&no_delay, sizeof(no_delay));
     *socket_out = result;
     return true;
 }
@@ -149,14 +149,14 @@ Net_Socket net_accept(Net_Socket listener, bool *peer_is_local, char *peer_addre
         return NET_SOCKET_INVALID;
     }
     int no_delay = 1;
-    setsockopt(platform, IPPROTO_TCP, TCP_NODELAY, (const char *)&no_delay, sizeof(no_delay));
+    setsockopt(platform, IPPROTO_TCP, TCP_NODELAY, (char const *)&no_delay, sizeof(no_delay));
     return (Net_Socket)platform;
 }
 
 int32_t net_send(Net_Socket socket, Array_Slice bytes) {
     assert(bytes.count > 0);
 
-    int result = send((Platform_Socket)socket, (const char *)bytes.items, bytes.count,
+    int result = send((Platform_Socket)socket, (char const *)bytes.items, bytes.count,
                       NET_SEND_FLAGS);
     if (result > 0) {
         return result;
@@ -247,7 +247,7 @@ bool net_udp_open(uint16_t port, Net_Socket *socket_out, char *error, size_t err
         return false;
     }
     int enabled = 1;
-    setsockopt(platform, SOL_SOCKET, SO_BROADCAST, (const char *)&enabled, sizeof(enabled));
+    setsockopt(platform, SOL_SOCKET, SO_BROADCAST, (char const *)&enabled, sizeof(enabled));
     struct sockaddr_in address = { 0 };
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
@@ -263,7 +263,7 @@ bool net_udp_open(uint16_t port, Net_Socket *socket_out, char *error, size_t err
     return true;
 }
 
-bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, Array_Slice bytes) {
+bool net_udp_send(Net_Socket socket, char const *address, uint16_t port, Array_Slice bytes) {
     assert(bytes.count > 0);
 
     struct sockaddr_in target = { 0 };
@@ -272,7 +272,7 @@ bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, Array_S
     if (inet_pton(AF_INET, address, &target.sin_addr) != 1) {
         return false;
     }
-    int sent = sendto((Platform_Socket)socket, (const char *)bytes.items, bytes.count, 0,
+    int sent = sendto((Platform_Socket)socket, (char const *)bytes.items, bytes.count, 0,
                       (struct sockaddr *)&target, sizeof(target));
     return sent == bytes.count;
 }
@@ -295,7 +295,7 @@ int32_t net_udp_recv(Net_Socket socket, Array_Slice bytes, char *address, size_t
     return received;
 }
 
-bool net_address_is_local(const char *address) {
+bool net_address_is_local(char const *address) {
     struct in_addr parsed = { 0 };
     if (inet_pton(AF_INET, address, &parsed) != 1) {
         return false;
@@ -389,7 +389,7 @@ static bool net_wait(Net_Socket socket, bool for_write, int32_t timeout_ms) {
     return count > 0;
 }
 
-static void net_error_text(const char *context, char *error, size_t error_size) {
+static void net_error_text(char const *context, char *error, size_t error_size) {
 #if defined(_WIN32)
     snprintf(error, error_size, "%s (error %d).", context, WSAGetLastError());
 #else

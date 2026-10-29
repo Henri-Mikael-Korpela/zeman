@@ -5,7 +5,7 @@
 
 static size_t utf8_length_at_most(Str s, size_t length_max);
 
-Str str_make(const char *data, size_t length) {
+Str str_make(char const *data, size_t length) {
     assert(data != NULL || length == 0);
 
     return (Str){
@@ -14,7 +14,7 @@ Str str_make(const char *data, size_t length) {
     };
 }
 
-Str str_from_cstr(const char *cstr) {
+Str str_from_cstr(char const *cstr) {
     if (cstr == NULL) {
         return str_make("", 0);
     }
@@ -66,7 +66,7 @@ size_t str_find_char(Str s, char c) {
     if (s.length == 0) {
         return STR_NOT_FOUND;
     }
-    const char *hit = memchr(s.data, c, s.length);
+    char const *hit = memchr(s.data, c, s.length);
     if (hit == NULL) {
         return STR_NOT_FOUND;
     }
@@ -125,11 +125,11 @@ bool str_to_u64(Str s, uint64_t *out) {
     }
     uint64_t number = 0;
     for (size_t i = 0; i < s.length; i++) {
-        const char c = s.data[i];
+        char const c = s.data[i];
         if (c < '0' || c > '9') {
             return false;
         }
-        const uint64_t digit = (uint64_t)(c - '0');
+        uint64_t const digit = (uint64_t)(c - '0');
         // Checked before the multiplication, which would wrap around.
         if (number > (UINT64_MAX - digit) / 10) {
             return false;
@@ -161,12 +161,12 @@ bool str_copy_truncated(Str s, char *buffer, size_t capacity) {
     assert(capacity >= 1);
 
     // A NUL byte ends the text where it is, as it would for any C string.
-    const size_t nul = str_find_char(s, '\0');
+    size_t const nul = str_find_char(s, '\0');
     bool complete = nul == STR_NOT_FOUND;
     if (!complete) {
         s = str_slice(s, 0, nul);
     }
-    const size_t length = utf8_length_at_most(s, capacity - 1);
+    size_t const length = utf8_length_at_most(s, capacity - 1);
     if (length < s.length) {
         complete = false;
     }
@@ -202,7 +202,7 @@ bool str_builder_append(Str_Builder *builder, Str s) {
     return true;
 }
 
-Str str_builder_str(const Str_Builder *builder) {
+Str str_builder_str(Str_Builder const *builder) {
     return str_make(builder->data, builder->length);
 }
 

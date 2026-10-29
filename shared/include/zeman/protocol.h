@@ -102,11 +102,11 @@ void writer_u64(Writer *writer, uint64_t value);
 void writer_i64(Writer *writer, int64_t value);
 void writer_text(Writer *writer, Str text);
 void writer_date(Writer *writer, Date date);
-void writer_event(Writer *writer, const Event *event);
-void writer_completion(Writer *writer, const Task_Completion *completion);
-void writer_linked_task(Writer *writer, const Linked_Task *task);
-void writer_link_target(Writer *writer, const Link_Target *target);
-void writer_task_occurrence(Writer *writer, const Task_Occurrence *occurrence);
+void writer_event(Writer *writer, Event const *event);
+void writer_completion(Writer *writer, Task_Completion const *completion);
+void writer_linked_task(Writer *writer, Linked_Task const *task);
+void writer_link_target(Writer *writer, Link_Target const *target);
+void writer_task_occurrence(Writer *writer, Task_Occurrence const *occurrence);
 
 Reader reader_make(Array_Slice buffer);
 uint8_t reader_u8(Reader *reader);
@@ -147,7 +147,7 @@ Task_Occurrence reader_task_occurrence(Reader *reader);
 /**
  * True when the whole message was read and nothing failed.
  */
-bool reader_done(const Reader *reader);
+bool reader_done(Reader const *reader);
 
 /**
  * Writes the link to the desktop app at address and port, as the QR code holds it.
@@ -164,6 +164,6 @@ bool protocol_link_parse(Str link, Str *address, uint16_t *port);
  * Little-endian length prefix of a message.
  */
 void protocol_length_write(uint8_t *bytes, uint32_t length);
-uint32_t protocol_length_read(const uint8_t *bytes);
+uint32_t protocol_length_read(uint8_t const *bytes);
 
 #endif

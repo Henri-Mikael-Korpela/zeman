@@ -19,14 +19,14 @@ static_assert((int32_t)CLIPBOARD_READ_SIZE_MAX >= (int32_t)TEXT_BOX_SIZE_MAX,
 static int32_t utf8_sequence_size(Str text);
 
 int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str clipboard) {
-    const int32_t length = (int32_t)strlen(text);
+    int32_t const length = (int32_t)strlen(text);
     assert(length < text_size);
     assert(text_size <= TEXT_BOX_SIZE_MAX);
     assert(cursor_index >= 0);
     assert(cursor_index <= length);
     char pasted[TEXT_BOX_SIZE_MAX] = "";
     int32_t pasted_length = 0;
-    const int32_t room = text_size - 1 - length;
+    int32_t const room = text_size - 1 - length;
     // Bounded by the read limit as well as the length, so that a huge clipboard is read in part.
     int32_t read_count = CLIPBOARD_READ_SIZE_MAX;
     if (clipboard.length < (size_t)read_count) {
@@ -34,9 +34,9 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str 
     }
     int32_t i = 0;
     while (i < read_count && pasted_length < room) {
-        const Str rest = str_slice(clipboard, (size_t)i, (size_t)read_count);
-        const unsigned char byte = (unsigned char)rest.data[0];
-        const int32_t size = utf8_sequence_size(rest);
+        Str const rest = str_slice(clipboard, (size_t)i, (size_t)read_count);
+        unsigned char const byte = (unsigned char)rest.data[0];
+        int32_t const size = utf8_sequence_size(rest);
         if (byte == '\n' || byte == '\t') {
             pasted[pasted_length] = ' ';
             pasted_length++;
@@ -66,7 +66,7 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str 
 static int32_t utf8_sequence_size(Str text) {
     assert(text.length > 0);
 
-    const unsigned char first = (unsigned char)text.data[0];
+    unsigned char const first = (unsigned char)text.data[0];
     int32_t size = 0;
     if (first < 0x80) {
         size = 1;

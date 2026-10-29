@@ -10,8 +10,8 @@ static int32_t local_load_range(void *context, Date first, Date last, Array_Slic
                                 bool *truncated);
 static int32_t local_load_completions(void *context, Date first, Date last,
                                       Array_Slice completions, bool *truncated);
-static int64_t local_insert(void *context, const Event *event);
-static bool local_update(void *context, const Event *event);
+static int64_t local_insert(void *context, Event const *event);
+static bool local_update(void *context, Event const *event);
 static bool local_remove(void *context, int64_t id);
 static bool local_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
 static int64_t local_location(void *context, Str address, Str city);
@@ -22,9 +22,9 @@ static int32_t local_load_task_targets(void *context, int64_t task_id, bool prob
 static bool local_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
 static int32_t local_load_tasks(void *context, Date today, Array_Slice tasks, bool *truncated);
 static uint64_t local_revision(void *context);
-static Str local_error(const void *context);
+static Str local_error(void const *context);
 
-static const Backend_Ops local_ops = {
+static Backend_Ops const local_ops = {
     .load_range = local_load_range,
     .load_completions = local_load_completions,
     .insert = local_insert,
@@ -51,7 +51,7 @@ void local_backend_init(Local_Backend *local) {
     snprintf(local->error, sizeof(local->error), "No database is open; choose one in Settings.");
 }
 
-bool local_backend_switch(Local_Backend *local, const char *path, bool create) {
+bool local_backend_switch(Local_Backend *local, char const *path, bool create) {
     assert(local != NULL);
     assert(path != NULL);
 
@@ -129,7 +129,7 @@ static int32_t local_load_completions(void *context, Date first, Date last,
     return count;
 }
 
-static int64_t local_insert(void *context, const Event *event) {
+static int64_t local_insert(void *context, Event const *event) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return 0;
@@ -143,7 +143,7 @@ static int64_t local_insert(void *context, const Event *event) {
     return id;
 }
 
-static bool local_update(void *context, const Event *event) {
+static bool local_update(void *context, Event const *event) {
     Local_Backend *local = context;
     if (!local_available(local)) {
         return false;
@@ -251,11 +251,11 @@ static int32_t local_load_tasks(void *context, Date today, Array_Slice tasks, bo
 }
 
 static uint64_t local_revision(void *context) {
-    const Local_Backend *local = context;
+    Local_Backend const *local = context;
     return local->revision;
 }
 
-static Str local_error(const void *context) {
-    const Local_Backend *local = context;
+static Str local_error(void const *context) {
+    Local_Backend const *local = context;
     return str_from_cstr(local->error);
 }

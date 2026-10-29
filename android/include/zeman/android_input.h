@@ -45,6 +45,6 @@ void android_input_keyboard_set_visible(Android_Input *input, bool visible);
 /**
  * Where the app may keep its own files, such as the desktop's address.
  */
-const char *android_input_data_directory(void);
+char const *android_input_data_directory(void);
 
 #endif

@@ -145,7 +145,7 @@ static void server_discovery_poll(Server *server) {
     }
 }
 
-int32_t server_client_count(const Server *server) {
+int32_t server_client_count(Server const *server) {
     int32_t count = 0;
     for (int32_t i = 0; i < SERVER_CLIENT_COUNT_MAX; i++) {
         count += (int32_t)server->clients[i].active;
@@ -240,7 +240,7 @@ static void server_client_drop(Server_Client *client) {
 }
 
 static void server_handle(Server *server, Reader *request, Writer *response) {
-    const uint8_t operation = reader_u8(request);
+    uint8_t const operation = reader_u8(request);
     // The byte comes from the network, so values that are no operation are answered, not
     // asserted; the switch below then names every operation, so that a new one cannot be missed.
     if (operation < PROTOCOL_HELLO || operation >= PROTOCOL_OPERATION_END) {
@@ -418,9 +418,9 @@ static void server_handle_set_task_done(Server *server, Reader *request, Writer 
 
 static void server_handle_location(Server *server, Reader *request, Writer *response) {
     // Views over the request, which outlives this call; the limits are the event's own.
-    const Str address = reader_str(request);
-    const Str city = reader_str(request);
-    const bool fits = address.length < LOCATION_ADDRESS_SIZE && city.length < LOCATION_CITY_SIZE;
+    Str const address = reader_str(request);
+    Str const city = reader_str(request);
+    bool const fits = address.length < LOCATION_ADDRESS_SIZE && city.length < LOCATION_CITY_SIZE;
     if (!reader_done(request) || !fits || (address.length == 0 && city.length == 0)) {
         server_fail(response, STR("Invalid location."));
         return;

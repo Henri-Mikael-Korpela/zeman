@@ -44,6 +44,19 @@ enum {
     // Title, start, end, location, description, repeat and repeat until. The rows keep their
     // place for every kind of entry, so that the buttons below never move.
     FORM_ROW_COUNT = 7,
+    // The button beside a date field that opens the date picker, and the picker's layout: a
+    // header with the month, the weekday names, and six weeks of cells, which always cover a
+    // month. A cell is big enough to hit with a finger.
+    PICKER_BUTTON_WIDTH_PIXELS = 28,
+    PICKER_BUTTON_GAP_PIXELS = 4,
+    PICKER_PADDING_PIXELS = 6,
+    PICKER_HEADER_HEIGHT_PIXELS = 30,
+    PICKER_WEEKDAY_HEIGHT_PIXELS = 20,
+    PICKER_CELL_WIDTH_PIXELS = 32,
+    PICKER_CELL_HEIGHT_PIXELS = 28,
+    PICKER_WIDTH_PIXELS = 7 * PICKER_CELL_WIDTH_PIXELS + 2 * PICKER_PADDING_PIXELS,
+    PICKER_HEIGHT_PIXELS = PICKER_HEADER_HEIGHT_PIXELS + PICKER_WEEKDAY_HEIGHT_PIXELS +
+                           6 * PICKER_CELL_HEIGHT_PIXELS + 2 * PICKER_PADDING_PIXELS,
     // The Month/Week/Day selector: one toggle per range.
     RANGE_ITEM_WIDTH_PIXELS = 72,
     RANGE_BAR_HEIGHT_PIXELS = 28,
@@ -151,14 +164,14 @@ enum {
 
 // Downloaded from Google Fonts by CMake, copied next to the desktop executable and into the
 // Android APK's assets, so that the app needs no network for them at run time.
-static const char FONT_FILE_REGULAR[] = "fonts/Rubik-Regular.ttf";
-static const char FONT_FILE_MEDIUM[] = "fonts/Rubik-Medium.ttf";
+static char const FONT_FILE_REGULAR[] = "fonts/Rubik-Regular.ttf";
+static char const FONT_FILE_MEDIUM[] = "fonts/Rubik-Medium.ttf";
 
 // Tasks are drawn as tinted, outlined bars rather than solid ones, so that they stand apart from
 // events at a glance; done tasks fade further.
-static const float TASK_FILL_ALPHA = 0.20f;
-static const float TASK_DONE_FILL_ALPHA = 0.08f;
-static const float TASK_DONE_OUTLINE_ALPHA = 0.35f;
+static float const TASK_FILL_ALPHA = 0.20f;
+static float const TASK_DONE_FILL_ALPHA = 0.08f;
+static float const TASK_DONE_OUTLINE_ALPHA = 0.35f;
 
 typedef enum Form_Field {
     FORM_FIELD_TITLE,
@@ -186,7 +199,7 @@ enum {
 };
 
 // Buffer size of each field, which raygui also uses to cap how much can be typed.
-static const int32_t form_field_sizes[FORM_FIELD_COUNT] = {
+static int32_t const form_field_sizes[FORM_FIELD_COUNT] = {
     EVENT_TITLE_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
     LOCATION_ADDRESS_SIZE, LOCATION_CITY_SIZE, EVENT_DESCRIPTION_SIZE, REPEAT_DAYS_TEXT_SIZE,
     DATE_ISO_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
@@ -203,10 +216,10 @@ typedef enum Repeat_Option {
 } Repeat_Option;
 
 // raygui separates combo box items with semicolons.
-static const char repeat_option_labels[] =
+static char const repeat_option_labels[] =
     "Does not repeat;Every week;Every X days;Every month;Every year";
 
-static const int32_t repeat_option_units[REPEAT_OPTION_COUNT] = {
+static int32_t const repeat_option_units[REPEAT_OPTION_COUNT] = {
     REPEAT_NONE, REPEAT_WEEK, REPEAT_DAY, REPEAT_MONTH, REPEAT_YEAR,
 };
 
@@ -231,7 +244,7 @@ static_assert((int)EVENT_DESCRIPTION_SIZE <= (int)TEXT_BOX_SIZE_MAX, "Every fiel
 
 // Mid-tones: dark enough for white text on a bar, yet bright enough to stand out from the dark
 // surfaces. Picked by event id, so an event keeps its color in every view.
-static const Color event_colors[] = {
+static Color const event_colors[] = {
     { 59, 111, 216, 255 },   // Blue
     { 200, 70, 60, 255 },    // Red
     { 46, 138, 78, 255 },    // Green
@@ -244,21 +257,21 @@ static const Color event_colors[] = {
 enum { EVENT_COLOR_COUNT = sizeof(event_colors) / sizeof(event_colors[0]) };
 
 // Light, because error text is drawn on the dark surfaces, not on a bar.
-static const Color error_color = { 248, 113, 113, 255 };
+static Color const error_color = { 248, 113, 113, 255 };
 // Every problem has this color, darker than any event color, so that problems read as problems
 // at a glance rather than as one more event.
-static const Color problem_color = { 160, 36, 48, 255 };
+static Color const problem_color = { 160, 36, 48, 255 };
 // A solved problem or used opportunity turns green, the usual color for "resolved", dark enough
 // for white text.
-static const Color target_done_color = { 40, 140, 76, 255 };
+static Color const target_done_color = { 40, 140, 76, 255 };
 // Every opportunity is gold, unlike any event color, so that a chance stands out as one. A
 // missed one turns gray, so that it recedes like anything past.
-static const Color opportunity_color = { 168, 124, 16, 255 };
-static const Color opportunity_missed_color = { 92, 98, 110, 255 };
+static Color const opportunity_color = { 168, 124, 16, 255 };
+static Color const opportunity_missed_color = { 92, 98, 110, 255 };
 // The part of a day between its first and last timed item, dark blue so that it reads as a
 // span of the day and stays quieter than the items on it; lighter when the day is hovered.
-static const Color timeline_busy_color = { 17, 27, 52, 255 };
-static const Color timeline_busy_hovered_color = { 22, 35, 66, 255 };
+static Color const timeline_busy_color = { 17, 27, 52, 255 };
+static Color const timeline_busy_hovered_color = { 22, 35, 66, 255 };
 
 // One color of the theme: a raygui DEFAULT property and its value, as 0xRRGGBBAA.
 typedef struct Theme_Color {
@@ -270,7 +283,7 @@ typedef struct Theme_Color {
 // apps draw themselves, reads its colors from raygui's style table, so this table is the whole
 // theme. Near-black surfaces with a slight blue cast, borders just above the surfaces so that
 // the grid recedes behind the entries, and one blue accent for what is selected or today.
-static const Theme_Color theme_colors[] = {
+static Theme_Color const theme_colors[] = {
     { 0x0E1014FF, BACKGROUND_COLOR },       // Window, panel, days outside the month
     { 0x262A33FF, LINE_COLOR },             // Panel outline
     { 0x171A20FF, BASE_COLOR_NORMAL },      // Day cells, cards, buttons, navigation
@@ -301,7 +314,7 @@ typedef enum Calendar_Range {
 } Calendar_Range;
 
 // raygui separates toggle group items with semicolons; the order is Calendar_Range's.
-static const char range_labels[] = "Month;Week;Day";
+static char const range_labels[] = "Month;Week;Day";
 
 typedef struct Key_Step {
     int32_t key;     // raylib KeyboardKey
@@ -310,7 +323,7 @@ typedef struct Key_Step {
 
 // The arrow keys move the selection by a day or a week, whatever the range; Page Up and Page
 // Down move by the range (see range_step).
-static const Key_Step key_steps[] = {
+static Key_Step const key_steps[] = {
     { KEY_LEFT, -1 },
     { KEY_RIGHT, 1 },
     { KEY_UP, -7 },
@@ -341,6 +354,15 @@ typedef struct Form {
     int repeat_option;     // Repeat_Option; int because raygui's combo box writes it
     int32_t kind;          // Event_Kind
     bool open;
+    // The date picker, a month of days under a date field, which sets that field. Shown while
+    // picker_open; picker_anchor and picker_button are where the field and its button were
+    // drawn this frame, so that the picker can sit under the field and a press on the button
+    // can close it.
+    Rectangle picker_anchor;
+    Rectangle picker_button;
+    Date picker_month;     // First day of the month shown
+    int32_t picker_field;  // Form_Field the picker sets
+    bool picker_open;
     bool links_loaded;       // False after a failed load, so that saving keeps the stored links
     bool links_truncated;    // More links or targets exist than were loaded
     char text[FORM_FIELD_COUNT][EVENT_DESCRIPTION_SIZE];
@@ -502,208 +524,214 @@ typedef struct Layout {
     bool portrait;
 } Layout;
 
-static void fonts_load(Fonts *fonts, const char *directory, float scale);
-static Text_Style fonts_load_style(const char *directory, const char *file_name,
-                                   int32_t size_pixels, float scale, const int *codepoints,
+static void fonts_load(Fonts *fonts, char const *directory, float scale);
+static Text_Style fonts_load_style(char const *directory, char const *file_name,
+                                   int32_t size_pixels, float scale, int const *codepoints,
                                    bool *loaded);
 static void fonts_unload(Fonts *fonts);
-static void app_handle_keys(App *app, const Layout *layout);
-static Date app_handle_keys_pointer(const App *app, const Layout *layout, Date target);
+static void app_handle_keys(App *app, Layout const *layout);
+static Date app_handle_keys_pointer(App const *app, Layout const *layout, Date target);
 static void app_select(App *app, Date date);
 static void app_sync(App *app);
 static void app_load_events(App *app, Date month, uint64_t revision);
-static const Event *app_event_find(const App *app, int64_t id);
-static int64_t app_event_first_on_day(const App *app, int32_t day_number);
+static Event const *app_event_find(App const *app, int64_t id);
+static int64_t app_event_first_on_day(App const *app, int32_t day_number);
 static void app_form_open(App *app, Date date, int32_t kind);
-static void app_form_open_edit(App *app, const Event *event);
+static void app_form_open_edit(App *app, Event const *event);
 static void app_form_load_links(App *app);
 static void app_form_clipboard(App *app);
 static void app_form_submit(App *app);
 static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserted);
 static void app_event_delete(App *app, int64_t id);
-static bool app_task_done(const App *app, int64_t id, int32_t start_day);
-static Date_Time app_now(const App *app);
-static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done);
+static bool app_task_done(App const *app, int64_t id, int32_t start_day);
+static Date_Time app_now(App const *app);
+static void app_task_set_done(App *app, Event const *event, int32_t start_day, bool done);
 static Layout layout_compute(float width, float height, bool form_open, int32_t range,
                              int32_t untimed_count);
 static Layout layout_compute_portrait(float width, float height, bool form_open,
                                       int32_t range, int32_t untimed_count);
 static void layout_set_grid(Layout *layout, int32_t range, int32_t untimed_count);
 static void layout_set_grid_timeline(Layout *layout, int32_t untimed_count);
-static int32_t app_untimed_count_max(const App *app);
+static int32_t app_untimed_count_max(App const *app);
 static int32_t range_day_count(int32_t range);
 static Date range_step(Date date, int32_t range, int32_t direction);
-static Date range_first_date(const App *app);
-static void range_title(const App *app, char *buffer, size_t buffer_size);
-static int32_t app_visible_item_count(const App *app);
-static Rectangle grid_cell_rectangle(const Layout *layout, int32_t cell_index);
+static Date range_first_date(App const *app);
+static void range_title(App const *app, char *buffer, size_t buffer_size);
+static int32_t app_visible_item_count(App const *app);
+static Rectangle grid_cell_rectangle(Layout const *layout, int32_t cell_index);
 static Date grid_first_date(Date month);
-static void draw_header(App *app, const Layout *layout);
-static void draw_weekdays(const Fonts *fonts, const Layout *layout, Date first);
-static void draw_grid(App *app, const Layout *layout);
-static void draw_week_numbers(const App *app, const Layout *layout);
-static void draw_grid_selection(const App *app, const Layout *layout, int32_t first_day);
-static void draw_timeline(App *app, const Layout *layout, int32_t first_day);
-static void draw_timeline_hours(const App *app, const Layout *layout, float top);
-static void timeline_mark_update(App *app, const Layout *layout, float top, int32_t first_day);
+static void draw_header(App *app, Layout const *layout);
+static void draw_weekdays(Fonts const *fonts, Layout const *layout, Date first);
+static void draw_grid(App *app, Layout const *layout);
+static void draw_week_numbers(App const *app, Layout const *layout);
+static void draw_grid_selection(App const *app, Layout const *layout, int32_t first_day);
+static void draw_timeline(App *app, Layout const *layout, int32_t first_day);
+static void draw_timeline_hours(App const *app, Layout const *layout, float top);
+static void timeline_mark_update(App *app, Layout const *layout, float top, int32_t first_day);
 static void timeline_mark_finish(App *app, float top);
-static int32_t timeline_column_at(const Layout *layout, Vector2 pointer);
+static int32_t timeline_column_at(Layout const *layout, Vector2 pointer);
 static float timeline_minute_at(float pointer_y, float top);
-static bool timeline_mark_can_start(const App *app);
-static float timeline_mark_pointer_minute(const Timeline_Mark *mark, float pointer_y, float top);
+static bool timeline_mark_can_start(App const *app);
+static float timeline_mark_pointer_minute(Timeline_Mark const *mark, float pointer_y, float top);
 static Minute_Range timeline_mark_range(float press_minute, float pointer_minute,
                                         int32_t step_minutes);
-static void draw_timeline_mark(const App *app, const Layout *layout, float top,
+static void draw_timeline_mark(App const *app, Layout const *layout, float top,
                                int32_t first_day);
-static void draw_timeline_ghost(const App *app, const Layout *layout, float top,
+static void draw_timeline_ghost(App const *app, Layout const *layout, float top,
                                 int32_t first_day);
-static void draw_timeline_now(const App *app, const Layout *layout, float top,
+static void draw_timeline_now(App const *app, Layout const *layout, float top,
                               int32_t first_day);
-static void draw_timeline_ghost_block(const App *app, const Event *event, Rectangle day);
-static void draw_timeline_mark_zoom(const App *app, const Layout *layout, float top,
+static void draw_timeline_ghost_block(App const *app, Event const *event, Rectangle day);
+static void draw_timeline_mark_zoom(App const *app, Layout const *layout, float top,
                                     int32_t first_day);
-static void draw_timeline_mark_hover(const App *app, const Layout *layout, float top);
-static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, float top,
+static void draw_timeline_mark_hover(App const *app, Layout const *layout, float top);
+static void draw_timeline_mark_hover_zoom(App const *app, Layout const *layout, float top,
                                           int32_t first_day);
-static void draw_timeline_mark_zoom_items(const App *app, const Layout *layout,
+static void draw_timeline_mark_zoom_items(App const *app, Layout const *layout,
                                           int32_t first_day, int32_t day_number,
                                           Vector2 center, float center_minute);
-static void draw_timeline_mark_zoom_item(const App *app, const Event *event,
+static void draw_timeline_mark_zoom_item(App const *app, Event const *event,
                                          Minute_Range range, Rectangle block, Vector2 center,
                                          float center_minute, float alpha);
-static void draw_timeline_mark_zoom_edge(const App *app, Vector2 center, float center_minute,
+static void draw_timeline_mark_zoom_edge(App const *app, Vector2 center, float center_minute,
                                          int32_t edge_minute, bool label_above);
-static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float center_minute);
+static void draw_timeline_mark_zoom_ticks(App const *app, Vector2 center, float center_minute);
 static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute,
                                          Minute_Range range, float left, float right,
                                          Color color);
 static float circle_half_width(float radius, float offset_y);
-static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered);
-static Rectangle timeline_item_block(Rectangle day, const Timeline_Item *item);
-static int32_t timeline_day_items(const App *app, int32_t day_number, Array_Slice items);
-static Timeline_Hit timeline_hit_test(const App *app, const Layout *layout, float top,
+static void draw_timeline_day(App const *app, Rectangle day, int32_t day_number, bool hovered);
+static Rectangle timeline_item_block(Rectangle day, Timeline_Item const *item);
+static int32_t timeline_day_items(App const *app, int32_t day_number, Array_Slice items);
+static Timeline_Hit timeline_hit_test(App const *app, Layout const *layout, float top,
                                       int32_t first_day);
-static void timeline_drag_update(App *app, const Layout *layout, float top);
-static void timeline_drag_finish(App *app, const Layout *layout, float top);
-static Event timeline_drag_result(const Event *event, const Timeline_Drag *drag,
+static void timeline_drag_update(App *app, Layout const *layout, float top);
+static void timeline_drag_finish(App *app, Layout const *layout, float top);
+static Event timeline_drag_result(Event const *event, Timeline_Drag const *drag,
                                   float pointer_minute, int32_t pointer_day, int32_t step);
-static int32_t timeline_drag_step(const App *app);
+static int32_t timeline_drag_step(App const *app);
 static int32_t timeline_step(bool fine);
-static int32_t timeline_drag_day_delta(const Timeline_Drag *drag, int32_t pointer_day);
-static Minute_Range event_time_range(const Event *event);
+static int32_t timeline_drag_day_delta(Timeline_Drag const *drag, int32_t pointer_day);
+static Minute_Range event_time_range(Event const *event);
 static int32_t minute_snap(float minute, int32_t step_minutes);
-static int32_t timeline_column_nearest(const Layout *layout, float pointer_x);
+static int32_t timeline_column_nearest(Layout const *layout, float pointer_x);
 static void timeline_cursor_update(App *app);
-static void draw_timeline_drag(const App *app, const Layout *layout, float top,
+static void draw_timeline_drag(App const *app, Layout const *layout, float top,
                                int32_t first_day);
 static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_t busy_bottom,
                                          bool hovered);
-static void draw_timeline_item(const App *app, const Event *event, Rectangle block,
+static void draw_timeline_item(App const *app, Event const *event, Rectangle block,
                                int32_t day_number);
-static int32_t timeline_items_collect(const App *app, int32_t day_number, Array_Slice items);
-static Timeline_Item timeline_item_make(const Event *event, int32_t event_index);
+static int32_t timeline_items_collect(App const *app, int32_t day_number, Array_Slice items);
+static Timeline_Item timeline_item_make(Event const *event, int32_t event_index);
 static void timeline_items_sort(Array_Slice items);
-static bool timeline_item_is_before(const Timeline_Item *a, const Timeline_Item *b);
+static bool timeline_item_is_before(Timeline_Item const *a, Timeline_Item const *b);
 static void timeline_items_assign_lanes(Array_Slice items);
 static int32_t timeline_lane_find(Array_Slice lanes, int32_t minute_top);
 static void timeline_items_set_lane_count(Array_Slice items, int32_t first_index,
                                           int32_t end_index, int32_t lane_count);
-static const Event *focused_event_find(const App *app);
+static Event const *focused_event_find(App const *app);
 static void app_focus_item(App *app, int64_t id);
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
-                           const Event *focused);
-static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date, bool in_month);
-static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int32_t day_number,
-                                            const Event *focused);
-static int64_t draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_number,
+                           Event const *focused);
+static void draw_grid_cell_day_number(App const *app, Rectangle cell, Date date, bool in_month);
+static void draw_grid_cell_creation_markers(App const *app, Rectangle cell, int32_t day_number,
+                                            Event const *focused);
+static int64_t draw_grid_cell_events(App const *app, Rectangle cell, int32_t day_number,
                                      int32_t column);
-static bool draw_grid_cell_event_bar(const App *app, const Event *event, Rectangle bar_slot,
+static bool draw_grid_cell_event_bar(App const *app, Event const *event, Rectangle bar_slot,
                                      int32_t day_number, int32_t start_day, int32_t column);
-static void draw_event_label(const App *app, const Event *event, Str label, Rectangle area,
+static void draw_event_label(App const *app, Event const *event, Str label, Rectangle area,
                              bool done);
 static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Color color);
 static void draw_check_mark(Rectangle box, bool done, Color color);
 static void draw_tick(Rectangle area, float thickness, Color color);
 static void draw_panel(App *app, Rectangle panel);
 static void draw_panel_events(App *app, Rectangle body);
-static float draw_panel_events_height(const App *app, float card_width);
+static float draw_panel_events_height(App const *app, float card_width);
 static void draw_panel_events_reveal(App *app, Rectangle list);
 static void draw_panel_events_list(App *app, Rectangle list);
 static void scroll_update(Scroll *scroll, Rectangle list, float content_height,
                           bool drag_scrolls);
 static void draw_scrollbar(Rectangle list, float content_height, float offset_pixels);
-static bool draw_panel_event_card(App *app, const Event *event, Rectangle card);
-static void draw_panel_event_card_frame(const App *app, const Event *event, Rectangle card,
+static bool draw_panel_event_card(App *app, Event const *event, Rectangle card);
+static void draw_panel_event_card_frame(App const *app, Event const *event, Rectangle card,
                                         bool hovered, bool focused, bool confirming);
-static void draw_panel_event_card_title(const App *app, const Event *event, Rectangle card,
+static void draw_panel_event_card_title(App const *app, Event const *event, Rectangle card,
                                         bool done);
-static void draw_panel_event_card_details(const Fonts *fonts, const Event *event, Date_Time now,
+static void draw_panel_event_card_details(Fonts const *fonts, Event const *event, Date_Time now,
                                           Rectangle card);
-static void draw_panel_legend(const Fonts *fonts, Rectangle area);
+static void draw_panel_legend(Fonts const *fonts, Rectangle area);
 static void draw_panel_form(App *app, Rectangle body);
 static void draw_panel_form_kinds(App *app, Rectangle body, bool editing);
 static void draw_panel_form_buttons(App *app, Rectangle body, float y);
 static float draw_panel_form_rows_end(float y);
 static float draw_panel_form_fields(App *app, Rectangle body, float y);
 static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, float end_y);
-static void draw_panel_form_target_tasks(const App *app, Rectangle body, float y, float end_y);
-static void draw_panel_form_target_tasks_status(const App *app, Rectangle body, float y);
+static void draw_panel_form_target_tasks(App const *app, Rectangle body, float y, float end_y);
+static void draw_panel_form_target_tasks_status(App const *app, Rectangle body, float y);
 static void draw_panel_form_targets(App *app, Rectangle body, float y, float end_y);
-static bool draw_panel_form_targets_row(const App *app, const Link_Target *target,
+static bool draw_panel_form_targets_row(App const *app, Link_Target const *target,
                                         Rectangle row, bool clickable);
-static int32_t form_targets_linked_count(const Form *form);
-static bool form_deadline_is_missed(const Form *form, Date_Time now, bool tasks_done);
-static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field, Str label,
+static int32_t form_targets_linked_count(Form const *form);
+static bool form_deadline_is_missed(Form const *form, Date_Time now, bool tasks_done);
+static void draw_panel_form_field(Fonts const *fonts, Form *form, int32_t field, Str label,
                                   Rectangle box);
+static void draw_panel_form_date_field(Fonts const *fonts, Form *form, Date fallback,
+                                       int32_t field, Str label, Rectangle box);
+static void draw_panel_form_picker(App *app, Rectangle body);
+static void draw_panel_form_picker_cells(Fonts const *fonts, Form *form, Rectangle popup,
+                                         Date today, bool pressed, bool *chosen);
+static void form_picker_open(Form *form, int32_t field, Date fallback);
 static void draw_status(App *app, Rectangle status);
 static void form_open(Form *form, Date date, int32_t kind);
-static void form_open_edit(Form *form, const Event *event);
+static void form_open_edit(Form *form, Event const *event);
 static void form_close(Form *form);
-static int32_t form_field_next(const Form *form, bool backwards);
-static bool form_field_visible(const Form *form, int32_t field);
-static int32_t form_repeat_option(const Form *form);
-static float event_card_height(const Fonts *fonts, const Event *event, bool confirming,
+static int32_t form_field_next(Form const *form, bool backwards);
+static bool form_field_visible(Form const *form, int32_t field);
+static int32_t form_repeat_option(Form const *form);
+static float event_card_height(Fonts const *fonts, Event const *event, bool confirming,
                                float card_width);
-static Text_Lines text_wrap(const Text_Style *style, Str text, float width_pixels);
-static bool text_line_fits(const Text_Style *style, Str line, float width_pixels);
-static Str form_parse(const Form *form, Date today, Event *event);
-static Str form_parse_problem(const Form *form, Date today, Event *event);
-static Str form_parse_body(const Form *form, Event *event);
-static Str form_parse_order(const Event *event);
+static Text_Lines text_wrap(Text_Style const *style, Str text, float width_pixels);
+static bool text_line_fits(Text_Style const *style, Str line, float width_pixels);
+static Str form_parse(Form const *form, Date today, Event *event);
+static Str form_parse_problem(Form const *form, Date today, Event *event);
+static Str form_parse_body(Form const *form, Event *event);
+static Str form_parse_order(Event const *event);
 static bool form_parse_time(Str text, int32_t *minute_of_day);
 static bool form_parse_repeat_days(Str text, int32_t *days);
-static bool event_occurs_on_day(const Event *event, int32_t day_number);
-static bool event_created_on_day(const Event *event, int32_t day_number);
-static bool event_is_timed(const Event *event);
+static bool event_occurs_on_day(Event const *event, int32_t day_number);
+static bool event_created_on_day(Event const *event, int32_t day_number);
+static bool event_is_timed(Event const *event);
 static float task_fill_alpha(bool done);
 static float task_outline_alpha(bool done);
-static Str event_delete_question(const Event *event);
-static bool event_in_day_cell(const Event *event, int32_t range);
-static bool event_is_missed(const Event *event, Date_Time now);
-static Color event_color(const Event *event, Date_Time now);
-static void event_format_label(const Event *event, bool with_time, Date_Time now, char *buffer,
+static Str event_delete_question(Event const *event);
+static bool event_in_day_cell(Event const *event, int32_t range);
+static bool event_is_missed(Event const *event, Date_Time now);
+static Color event_color(Event const *event, Date_Time now);
+static void event_format_label(Event const *event, bool with_time, Date_Time now, char *buffer,
                                size_t buffer_size);
-static void event_format_range(const Event *event, Date_Time now, char *buffer,
+static void event_format_range(Event const *event, Date_Time now, char *buffer,
                                size_t buffer_size);
-static void event_format_range_dates(const Event *event, char *buffer, size_t buffer_size);
-static void event_format_created(const Event *event, Date_Time now, char *buffer,
+static void event_format_range_dates(Event const *event, char *buffer, size_t buffer_size);
+static void event_format_created(Event const *event, Date_Time now, char *buffer,
                                  size_t buffer_size);
-static void event_format_location(const Event *event, char *buffer, size_t buffer_size);
+static void event_format_location(Event const *event, char *buffer, size_t buffer_size);
 static void text_copy_trimmed(char *buffer, size_t buffer_size, Str text);
 static Str text_skip_spaces(Str text);
 static void format_date_time_short(Date date, int32_t minute_of_day, char *buffer,
                                    size_t buffer_size);
 static void theme_apply(void);
 static Color style_color(int32_t property);
-static void draw_text(const Text_Style *style, Str text, float x, float y, Color color);
+static void draw_text(Text_Style const *style, Str text, float x, float y, Color color);
 static float draw_text_round(float position, float scale);
-static Vector2 measure_text(const Text_Style *style, Str text);
-static void draw_text_centered(const Text_Style *style, Str text, Rectangle area,
+static Vector2 measure_text(Text_Style const *style, Str text);
+static void draw_text_centered(Text_Style const *style, Str text, Rectangle area,
                                Color color);
-static void scissor_begin(const Fonts *fonts, float x, float y, float width, float height);
-static void scissor_end(const Fonts *fonts);
+static void scissor_begin(Fonts const *fonts, float x, float y, float width, float height);
+static void scissor_end(Fonts const *fonts);
 
-App *app_create(Backend *backend, const App_Config *config) {
+App *app_create(Backend *backend, App_Config const *config) {
     // Static rather than on the stack, because App holds every loaded event; one per program.
     static App app;
     assert(!app.created);
@@ -728,7 +756,7 @@ App *app_create(Backend *backend, const App_Config *config) {
         snprintf(app.status, sizeof(app.status), "Rubik font not found: using the default.");
     }
 
-    const Date_Time now = date_time_now();
+    Date_Time const now = date_time_now();
     app.today = now.date;
     app.now_minute = now.minute_of_day;
     app.selected = app.today;
@@ -753,7 +781,7 @@ void app_frame(App *app, Rectangle area) {
     assert(area.width > 0.0f);
     assert(area.height > 0.0f);
 
-    const float scale = app->fonts.scale;
+    float const scale = app->fonts.scale;
     // Layout pixels start at the area's corner: mouse positions, drawing and scissor
     // rectangles are all moved and scaled the same way, so raygui works unchanged.
     app->fonts.origin = (Vector2){ area.x, area.y };
@@ -796,7 +824,7 @@ void app_frame(App *app, Rectangle area) {
     SetMouseScale(1.0f, 1.0f);
 }
 
-void app_draw_text(const App *app, App_Text style, Str text, float x, float y) {
+void app_draw_text(App const *app, App_Text style, Str text, float x, float y) {
     switch (style) {
     case APP_TEXT_HEADING:
         draw_text(&app->fonts.heading, text, x, y, style_color(TEXT_COLOR_NORMAL));
@@ -814,7 +842,7 @@ void app_draw_text(const App *app, App_Text style, Str text, float x, float y) {
     assert(false); // Not an App_Text.
 }
 
-float app_measure_text(const App *app, App_Text style, Str text) {
+float app_measure_text(App const *app, App_Text style, Str text) {
     switch (style) {
     case APP_TEXT_HEADING:
         return measure_text(&app->fonts.heading, text).x;
@@ -850,7 +878,7 @@ void app_discard_edits(App *app) {
     app->events_stale = true;
 }
 
-App_Cursor app_cursor(const App *app) {
+App_Cursor app_cursor(App const *app) {
     assert(app->created);
     assert(app->cursor >= APP_CURSOR_DEFAULT);
     assert(app->cursor <= APP_CURSOR_MOVE);
@@ -858,7 +886,7 @@ App_Cursor app_cursor(const App *app) {
     return (App_Cursor)app->cursor;
 }
 
-bool app_text_input_active(const App *app) {
+bool app_text_input_active(App const *app) {
     return app->form.open && app->form.field_active != FORM_FIELD_NONE;
 }
 
@@ -872,7 +900,7 @@ void app_set_input_enabled(App *app, bool enabled) {
  * Loads Rubik at each size it is drawn at, times the scale, so that each glyph covers exactly
  * the screen pixels it is drawn on. Needs the window, because glyphs go to a texture.
  */
-static void fonts_load(Fonts *fonts, const char *directory, float scale) {
+static void fonts_load(Fonts *fonts, char const *directory, float scale) {
     int codepoints[FONT_CODEPOINT_COUNT] = { 0 };
     int32_t count = 0;
     for (int32_t codepoint = 32; codepoint <= 126; codepoint++) {
@@ -899,8 +927,8 @@ static void fonts_load(Fonts *fonts, const char *directory, float scale) {
  * Falls back to raylib's default font, scaled, when the file is missing or unreadable, so that
  * the calendar still works; *loaded then becomes false.
  */
-static Text_Style fonts_load_style(const char *directory, const char *file_name,
-                                   int32_t size_pixels, float scale, const int *codepoints,
+static Text_Style fonts_load_style(char const *directory, char const *file_name,
+                                   int32_t size_pixels, float scale, int const *codepoints,
                                    bool *loaded) {
     assert(size_pixels > 0);
     assert(scale > 0.0f);
@@ -933,9 +961,14 @@ static void fonts_unload(Fonts *fonts) {
     fonts->loaded = false;
 }
 
-static void app_handle_keys(App *app, const Layout *layout) {
+static void app_handle_keys(App *app, Layout const *layout) {
     // Android's Back button does what Escape does on the desktop.
     if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_BACK)) {
+        if (app->form.open && app->form.picker_open) {
+            // The picker is over the form: Escape closes what is on top first.
+            app->form.picker_open = false;
+            return;
+        }
         if (app->form.open) {
             form_close(&app->form);
         }
@@ -993,9 +1026,9 @@ static void app_handle_keys(App *app, const Layout *layout) {
  * the panel: a sideways swipe on a touch screen, or the wheel over the day cells, moves by the
  * range. Over the timeline the wheel scrolls the hours instead (see draw_timeline).
  */
-static Date app_handle_keys_pointer(const App *app, const Layout *layout, Date target) {
-    const Vector2 mouse = GetMousePosition();
-    const bool over_grid = CheckCollisionPointRec(mouse, layout->grid);
+static Date app_handle_keys_pointer(App const *app, Layout const *layout, Date target) {
+    Vector2 const mouse = GetMousePosition();
+    bool const over_grid = CheckCollisionPointRec(mouse, layout->grid);
     if (over_grid || CheckCollisionPointRec(mouse, layout->timeline)) {
         if (app->touch && IsGestureDetected(GESTURE_SWIPE_LEFT)) {
             target = range_step(target, app->range, 1);
@@ -1036,7 +1069,7 @@ static void app_select(App *app, Date date) {
  * focused event, which is always one of the events on the selected date.
  */
 static void app_sync(App *app) {
-    const Date_Time now = date_time_now();
+    Date_Time const now = date_time_now();
     app->today = now.date;
     app->now_minute = now.minute_of_day;
     Date month = { app->selected.year, app->selected.month, 1 };
@@ -1052,7 +1085,7 @@ static void app_sync(App *app) {
     app->visible_first = range_first_date(app);
 
     int32_t selected_day = date_to_day_number(app->selected);
-    const Event *focused = app_event_find(app, app->event_focused_id);
+    Event const *focused = app_event_find(app, app->event_focused_id);
     if (focused == NULL || !event_occurs_on_day(focused, selected_day)) {
         app->event_focused_id = app_event_first_on_day(app, selected_day);
     }
@@ -1097,9 +1130,9 @@ static void app_load_events(App *app, Date month, uint64_t revision) {
     app->events_truncated = app->events_truncated || completions_truncated;
 }
 
-static bool app_task_done(const App *app, int64_t id, int32_t start_day) {
+static bool app_task_done(App const *app, int64_t id, int32_t start_day) {
     for (int32_t i = 0; i < app->completion_count; i++) {
-        const Task_Completion *completion = &app->completions[i];
+        Task_Completion const *completion = &app->completions[i];
         if (completion->event_id == id && completion->occurrence_start_day == start_day) {
             return true;
         }
@@ -1110,14 +1143,14 @@ static bool app_task_done(const App *app, int64_t id, int32_t start_day) {
 /**
  * The moment app_sync last read from the clock, so that a frame draws one time throughout.
  */
-static Date_Time app_now(const App *app) {
+static Date_Time app_now(App const *app) {
     assert(date_is_valid(app->today));
     assert(app->now_minute >= 0);
 
     return (Date_Time){ app->today, app->now_minute };
 }
 
-static void app_task_set_done(App *app, const Event *event, int32_t start_day, bool done) {
+static void app_task_set_done(App *app, Event const *event, int32_t start_day, bool done) {
     assert(event->kind == EVENT_KIND_TASK);
     assert(app_task_done(app, event->id, start_day) != done);
 
@@ -1128,14 +1161,14 @@ static void app_task_set_done(App *app, const Event *event, int32_t start_day, b
     }
     // completions[] is reloaded by the next app_sync, together with the events.
     app->events_stale = true;
-    const char *outcome = "Not done:";
+    char const *outcome = "Not done:";
     if (done) {
         outcome = "Done:";
     }
     snprintf(app->status, sizeof(app->status), "%s \"%s\".", outcome, event->title);
 }
 
-static const Event *app_event_find(const App *app, int64_t id) {
+static Event const *app_event_find(App const *app, int64_t id) {
     if (id == 0) {
         return NULL;
     }
@@ -1147,7 +1180,7 @@ static const Event *app_event_find(const App *app, int64_t id) {
     return NULL;
 }
 
-static int64_t app_event_first_on_day(const App *app, int32_t day_number) {
+static int64_t app_event_first_on_day(App const *app, int32_t day_number) {
     for (int32_t i = 0; i < app->event_count; i++) {
         if (event_occurs_on_day(&app->events[i], day_number)) {
             return app->events[i].id;
@@ -1160,7 +1193,7 @@ static void app_form_submit(App *app) {
     assert(app->form.open);
 
     Event event = { 0 };
-    const Str mistake = form_parse(&app->form, app->today, &event);
+    Str const mistake = form_parse(&app->form, app->today, &event);
     if (mistake.length > 0) {
         (void)str_copy_truncated(mistake, app->form.error, sizeof(app->form.error));
         return;
@@ -1207,7 +1240,7 @@ static void app_form_submit(App *app) {
     }
     app->event_focused_id = id;
     app->events_stale = true;
-    const char *outcome = "Saved";
+    char const *outcome = "Saved";
     if (editing) {
         outcome = "Updated";
     }
@@ -1222,11 +1255,11 @@ static void app_form_submit(App *app) {
  */
 static void app_form_clipboard(App *app) {
     Form *form = &app->form;
-    const int32_t field = form->field_active;
+    int32_t const field = form->field_active;
     assert(field >= 0);
     assert(field < FORM_FIELD_COUNT);
     char *text = form->text[field];
-    const bool cut = IsKeyPressed(KEY_X);
+    bool const cut = IsKeyPressed(KEY_X);
     if (IsKeyPressed(KEY_C) || cut) {
         if (text[0] == '\0') {
             return; // Copying nothing would only empty the clipboard.
@@ -1236,7 +1269,7 @@ static void app_form_clipboard(App *app) {
             text[0] = '\0';
             text_box_cursor_index_set(0);
         }
-        const char *outcome = "Copied";
+        char const *outcome = "Copied";
         if (cut) {
             outcome = "Cut";
         }
@@ -1245,12 +1278,12 @@ static void app_form_clipboard(App *app) {
     }
     if (IsKeyPressed(KEY_V)) {
         // NULL when the clipboard is empty, holds no text, or does not exist.
-        const char *clipboard = GetClipboardText();
+        char const *clipboard = GetClipboardText();
         if (clipboard == NULL) {
             return;
         }
         int32_t cursor_index = text_box_cursor_index();
-        const int32_t length = (int32_t)strlen(text);
+        int32_t const length = (int32_t)strlen(text);
         if (cursor_index > length) {
             cursor_index = length; // raygui clamps it only when it next draws the box.
         }
@@ -1269,7 +1302,7 @@ static void app_form_open(App *app, Date date, int32_t kind) {
     app_form_load_links(app);
 }
 
-static void app_form_open_edit(App *app, const Event *event) {
+static void app_form_open_edit(App *app, Event const *event) {
     assert(event->id > 0);
 
     form_open_edit(&app->form, event);
@@ -1313,7 +1346,7 @@ static void app_form_load_links(App *app) {
  * it may have been a task until now. Returns false, with the form's error set, on failure.
  */
 static bool app_form_save_links(App *app, int64_t id, int32_t kind, bool inserted) {
-    const Form *form = &app->form;
+    Form const *form = &app->form;
     assert(id > 0);
     // A target's links are made from its tasks' forms, and a new event has none.
     if (event_kind_is_target(kind)) {
@@ -1352,7 +1385,7 @@ static void app_event_delete(App *app, int64_t id) {
 
     app->event_delete_id = 0;
     char title[EVENT_TITLE_SIZE] = "";
-    const Event *event = app_event_find(app, id);
+    Event const *event = app_event_find(app, id);
     if (event != NULL) {
         snprintf(title, sizeof(title), "%s", event->title);
     }
@@ -1379,8 +1412,8 @@ static Layout layout_compute(float width, float height, bool form_open, int32_t 
     if (width < height) {
         return layout_compute_portrait(width, height, form_open, range, untimed_count);
     }
-    const float padding = (float)PADDING_PIXELS;
-    const float status_height = (float)STATUS_HEIGHT_PIXELS;
+    float const padding = (float)PADDING_PIXELS;
+    float const status_height = (float)STATUS_HEIGHT_PIXELS;
     Layout layout = { .grid_visible = true, .portrait = false };
     layout.status = (Rectangle){ 0, height - status_height, width, status_height };
     layout.panel = (Rectangle){ width - padding - PANEL_WIDTH_PIXELS, padding,
@@ -1389,7 +1422,7 @@ static Layout layout_compute(float width, float height, bool form_open, int32_t 
     float calendar_width = layout.panel.x - 2 * padding;
     layout.header = (Rectangle){ padding, padding, calendar_width, HEADER_HEIGHT_PIXELS };
     // The range selector at the right end of the header, centered in its height.
-    const float range_width = RANGE_COUNT * (RANGE_ITEM_WIDTH_PIXELS + 2) - 2;
+    float const range_width = RANGE_COUNT * (RANGE_ITEM_WIDTH_PIXELS + 2) - 2;
     layout.range_bar = (Rectangle){ padding + calendar_width - range_width,
                                     padding + (HEADER_HEIGHT_PIXELS - RANGE_BAR_HEIGHT_PIXELS) / 2,
                                     range_width, RANGE_BAR_HEIGHT_PIXELS };
@@ -1424,7 +1457,7 @@ static void layout_set_grid(Layout *layout, int32_t range, int32_t untimed_count
     } else {
         // Cut from the left of the grid and of the weekday names, so that each day stays above
         // its column, as the timeline's gutter does.
-        const float gutter = (float)WEEK_NUMBER_GUTTER_WIDTH_PIXELS;
+        float const gutter = (float)WEEK_NUMBER_GUTTER_WIDTH_PIXELS;
         layout->week_numbers = (Rectangle){ layout->grid.x, layout->grid.y, gutter,
                                             layout->grid.height };
         layout->grid.x += gutter;
@@ -1449,12 +1482,12 @@ static void layout_set_grid_timeline(Layout *layout, int32_t untimed_count) {
     assert(untimed_count >= 0);
     assert(untimed_count <= EVENT_COUNT_MAX);
 
-    const float gutter = (float)TIMELINE_GUTTER_WIDTH_PIXELS;
-    const float slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
-    const Rectangle area = layout->grid;
+    float const gutter = (float)TIMELINE_GUTTER_WIDTH_PIXELS;
+    float const slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
+    Rectangle const area = layout->grid;
     float height = (float)(CELL_TOP_LINE_PIXELS + CELL_BOTTOM_MARGIN_PIXELS) +
                    (float)untimed_count * slot_height;
-    const float height_max = area.height * UNTIMED_HEIGHT_PERCENT_MAX / 100.0f;
+    float const height_max = area.height * UNTIMED_HEIGHT_PERCENT_MAX / 100.0f;
     if (height > height_max) {
         height = height_max;
     }
@@ -1473,17 +1506,17 @@ static void layout_set_grid_timeline(Layout *layout, int32_t untimed_count) {
  * The most items without a time on any one day shown, which sets how tall a week or day's cells
  * are. A month's cells share the grid evenly, so it needs none.
  */
-static int32_t app_untimed_count_max(const App *app) {
+static int32_t app_untimed_count_max(App const *app) {
     if (app->range == RANGE_MONTH) {
         return 0;
     }
-    const int32_t first_day = date_to_day_number(app->visible_first);
-    const int32_t day_count = range_day_count(app->range);
+    int32_t const first_day = date_to_day_number(app->visible_first);
+    int32_t const day_count = range_day_count(app->range);
     int32_t count_max = 0;
     for (int32_t day = 0; day < day_count; day++) {
         int32_t count = 0;
         for (int32_t i = 0; i < app->event_count; i++) {
-            const Event *event = &app->events[i];
+            Event const *event = &app->events[i];
             if (!event_is_timed(event) && event_occurs_on_day(event, first_day + day)) {
                 count++;
             }
@@ -1535,7 +1568,7 @@ static Date range_step(Date date, int32_t range, int32_t direction) {
  * A month starts on the Monday of the week that holds its first day, a week on its Monday, and
  * a day view shows the selected day.
  */
-static Date range_first_date(const App *app) {
+static Date range_first_date(App const *app) {
     switch ((Calendar_Range)app->range) {
     case RANGE_MONTH:
         return grid_first_date(app->events_month);
@@ -1554,15 +1587,15 @@ static Date range_first_date(const App *app) {
  * "October 2026"; "12 - 18 October 2026", or with both months or years when the week spans
  * them; "Tue 20 October 2026".
  */
-static void range_title(const App *app, char *buffer, size_t buffer_size) {
-    const Date first = app->visible_first;
-    const Date last = date_add_days(first, GRID_COLUMN_COUNT - 1);
-    const Str first_month = month_name(first.month);
-    const Str first_month_short = month_short_name(first.month);
-    const Str last_month_short = month_short_name(last.month);
+static void range_title(App const *app, char *buffer, size_t buffer_size) {
+    Date const first = app->visible_first;
+    Date const last = date_add_days(first, GRID_COLUMN_COUNT - 1);
+    Str const first_month = month_name(first.month);
+    Str const first_month_short = month_short_name(first.month);
+    Str const last_month_short = month_short_name(last.month);
     switch ((Calendar_Range)app->range) {
     case RANGE_MONTH: {
-        const Str month = month_name(app->events_month.month);
+        Str const month = month_name(app->events_month.month);
         snprintf(buffer, buffer_size, "%.*s %" PRId32, STR_ARGUMENTS(month),
                  app->events_month.year);
         return;
@@ -1583,7 +1616,7 @@ static void range_title(const App *app, char *buffer, size_t buffer_size) {
         }
         return;
     case RANGE_DAY: {
-        const Str weekday = weekday_short_name(date_weekday(first));
+        Str const weekday = weekday_short_name(date_weekday(first));
         snprintf(buffer, buffer_size, "%.*s %" PRId32 " %.*s %" PRId32, STR_ARGUMENTS(weekday),
                  first.day, STR_ARGUMENTS(first_month), first.year);
         return;
@@ -1598,9 +1631,9 @@ static void range_title(const App *app, char *buffer, size_t buffer_size) {
 /**
  * Items with an occurrence on a day shown, for the status bar.
  */
-static int32_t app_visible_item_count(const App *app) {
-    const int32_t first_day = date_to_day_number(app->visible_first);
-    const int32_t day_count = range_day_count(app->range);
+static int32_t app_visible_item_count(App const *app) {
+    int32_t const first_day = date_to_day_number(app->visible_first);
+    int32_t const day_count = range_day_count(app->range);
     int32_t count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
         for (int32_t day = 0; day < day_count; day++) {
@@ -1619,9 +1652,9 @@ static int32_t app_visible_item_count(const App *app) {
  */
 static Layout layout_compute_portrait(float width, float height, bool form_open,
                                       int32_t range, int32_t untimed_count) {
-    const float padding = (float)PADDING_PIXELS_PORTRAIT;
-    const float status_height = (float)STATUS_HEIGHT_PIXELS;
-    const float content_width = width - 2 * padding;
+    float const padding = (float)PADDING_PIXELS_PORTRAIT;
+    float const status_height = (float)STATUS_HEIGHT_PIXELS;
+    float const content_width = width - 2 * padding;
     Layout layout = { .grid_visible = !form_open, .portrait = true };
     layout.status = (Rectangle){ 0, height - status_height, width, status_height };
     layout.header = (Rectangle){ padding, padding, content_width, HEADER_HEIGHT_PIXELS };
@@ -1647,7 +1680,7 @@ static Layout layout_compute_portrait(float width, float height, bool form_open,
     return layout;
 }
 
-static Rectangle grid_cell_rectangle(const Layout *layout, int32_t cell_index) {
+static Rectangle grid_cell_rectangle(Layout const *layout, int32_t cell_index) {
     assert(cell_index >= 0);
     assert(cell_index < layout->rows * layout->columns);
 
@@ -1673,9 +1706,9 @@ static Date grid_first_date(Date month) {
  * Buttons on the left, the range selector on the right (or in its own row on a phone), and the
  * title of what is shown between them.
  */
-static void draw_header(App *app, const Layout *layout) {
-    const Rectangle header = layout->header;
-    const float height = header.height;
+static void draw_header(App *app, Layout const *layout) {
+    Rectangle const header = layout->header;
+    float const height = header.height;
     if (GuiButton((Rectangle){ header.x, header.y, 40, height }, "<")) {
         app_select(app, range_step(app->selected, app->range, -1));
     }
@@ -1695,7 +1728,7 @@ static void draw_header(App *app, const Layout *layout) {
 
     char title[TEXT_LINE_SIZE] = "";
     range_title(app, title, sizeof(title));
-    const float buttons_width = 194;
+    float const buttons_width = 194;
     float right = header.x + header.width;
     if (!layout->portrait) {
         right = layout->range_bar.x - 8;
@@ -1703,7 +1736,7 @@ static void draw_header(App *app, const Layout *layout) {
     Rectangle area = { header.x + buttons_width, header.y, right - header.x - buttons_width,
                        height };
     // The normal font when the heading font is too wide for the space, as on a phone.
-    const Text_Style *style = &app->fonts.heading;
+    Text_Style const *style = &app->fonts.heading;
     if (measure_text(style, str_from_cstr(title)).x > area.width) {
         style = &app->fonts.ui;
     }
@@ -1713,7 +1746,7 @@ static void draw_header(App *app, const Layout *layout) {
 /**
  * The names of the days shown: short in a week or month, in full for a single day.
  */
-static void draw_weekdays(const Fonts *fonts, const Layout *layout, Date first) {
+static void draw_weekdays(Fonts const *fonts, Layout const *layout, Date first) {
     for (int32_t column = 0; column < layout->columns; column++) {
         Rectangle area = { layout->weekdays.x + (float)column * layout->cell_width,
                            layout->weekdays.y, layout->cell_width, layout->weekdays.height };
@@ -1723,7 +1756,7 @@ static void draw_weekdays(const Fonts *fonts, const Layout *layout, Date first) 
         if (weekday >= 5) {
             color_property = TEXT_COLOR_DISABLED;
         }
-        const Color color = style_color(color_property);
+        Color const color = style_color(color_property);
         // The full name when there is room for it: a day alone.
         Str name = weekday_short_name(weekday);
         if (layout->columns == 1) {
@@ -1737,10 +1770,10 @@ static void draw_weekdays(const Fonts *fonts, const Layout *layout, Date first) 
  * Draws from visible_first, set by app_sync, rather than the selected date, so that a click
  * that changes the selection mid-frame never draws one range's days with another's events.
  */
-static void draw_grid(App *app, const Layout *layout) {
+static void draw_grid(App *app, Layout const *layout) {
     int32_t first_day = date_to_day_number(app->visible_first);
-    const Event *focused = focused_event_find(app);
-    const int32_t cell_count = layout->rows * layout->columns;
+    Event const *focused = focused_event_find(app);
+    int32_t const cell_count = layout->rows * layout->columns;
     for (int32_t cell_index = 0; cell_index < cell_count; cell_index++) {
         Rectangle cell = grid_cell_rectangle(layout, cell_index);
         int32_t column = cell_index % layout->columns;
@@ -1759,25 +1792,25 @@ static void draw_grid(App *app, const Layout *layout) {
  * them: one per row in the month view, and the one number of the range in a week or day, in the
  * gutter beside the day cells. The numbers are the ISO 8601 ones, as the Monday-first weeks are.
  */
-static void draw_week_numbers(const App *app, const Layout *layout) {
+static void draw_week_numbers(App const *app, Layout const *layout) {
     if (layout->week_numbers.width <= 0.0f) {
         return;
     }
-    const Color color = style_color(TEXT_COLOR_DISABLED);
+    Color const color = style_color(TEXT_COLOR_DISABLED);
     draw_text_centered(&app->fonts.small, STR("Wk"),
                        (Rectangle){ layout->week_numbers.x, layout->weekdays.y,
                                     layout->week_numbers.width, layout->weekdays.height },
                        color);
     for (int32_t row = 0; row < layout->rows; row++) {
         // A month row starts on a Monday. A week has one row, and a day's week is its own.
-        const Date row_first = date_add_days(app->visible_first, row * layout->columns);
+        Date const row_first = date_add_days(app->visible_first, row * layout->columns);
         if (layout->columns == GRID_COLUMN_COUNT) {
             assert(date_weekday(row_first) == 0);
         }
         char number[4] = "";
         snprintf(number, sizeof(number), "%" PRId32, date_iso_week(row_first));
         // As tall as the day number's line in the row's first cell, so that they read together.
-        const Rectangle line = { layout->week_numbers.x,
+        Rectangle const line = { layout->week_numbers.x,
                                  layout->grid.y + (float)row * layout->cell_height + 7,
                                  layout->week_numbers.width, (float)TEXT_SIZE_PIXELS };
         draw_text_centered(&app->fonts.small, str_from_cstr(number), line, color);
@@ -1787,8 +1820,8 @@ static void draw_week_numbers(const App *app, const Layout *layout) {
 /**
  * An accent outline around the selected day; in a week or day, down through its hours too.
  */
-static void draw_grid_selection(const App *app, const Layout *layout, int32_t first_day) {
-    const int32_t cell_index = date_to_day_number(app->selected) - first_day;
+static void draw_grid_selection(App const *app, Layout const *layout, int32_t first_day) {
+    int32_t const cell_index = date_to_day_number(app->selected) - first_day;
     // A click this frame may have selected a day outside the range drawn.
     if (cell_index < 0 || cell_index >= layout->rows * layout->columns) {
         return;
@@ -1809,13 +1842,13 @@ static void draw_grid_selection(const App *app, const Layout *layout, int32_t fi
  * draws a block that becomes a new event at its times; on a touch screen, where a finger has
  * no wheel, dragging scrolls instead.
  */
-static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
-    const Rectangle timeline = layout->timeline;
+static void draw_timeline(App *app, Layout const *layout, int32_t first_day) {
+    Rectangle const timeline = layout->timeline;
     assert(timeline.height > 0.0f);
     assert(layout->rows == 1);
     scroll_update(&app->timeline_scroll, timeline, (float)TIMELINE_HEIGHT_PIXELS, app->touch);
     // Where 00:00 is: above the timeline while it is scrolled down.
-    const float top = timeline.y - app->timeline_scroll.offset_pixels;
+    float const top = timeline.y - app->timeline_scroll.offset_pixels;
     app->timeline_hit = timeline_hit_test(app, layout, top, first_day);
     if (!app->touch) {
         // Before the marking, so that a press on an item drags it rather than drawing a block.
@@ -1867,16 +1900,16 @@ static void draw_timeline(App *app, const Layout *layout, int32_t first_day) {
  * stays a click, which selects the day as before. Not while a form is open, which a new form
  * would replace, losing what was typed in it.
  */
-static void timeline_mark_update(App *app, const Layout *layout, float top, int32_t first_day) {
+static void timeline_mark_update(App *app, Layout const *layout, float top, int32_t first_day) {
     Timeline_Mark *mark = &app->timeline_mark;
-    const Vector2 pointer = GetMousePosition();
-    const int32_t column = timeline_column_at(layout, pointer);
+    Vector2 const pointer = GetMousePosition();
+    int32_t const column = timeline_column_at(layout, pointer);
     // A new press always starts afresh, even over a block left pressed when its release came
     // while the timeline was not shown, as in the month view.
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && column >= 0 && !app->form.open &&
         app->timeline_hit.event_id == 0) {
         assert(column < layout->columns);
-        const bool zoomed = app->timeline_fine;
+        bool const zoomed = app->timeline_fine;
         *mark = (Timeline_Mark){
             .press_minute = timeline_minute_at(pointer.y, top),
             .press_y = pointer.y,
@@ -1891,7 +1924,7 @@ static void timeline_mark_update(App *app, const Layout *layout, float top, int3
     if (!mark->pressed) {
         return;
     }
-    const float moved = fabsf(pointer.y - mark->press_y);
+    float const moved = fabsf(pointer.y - mark->press_y);
     if (moved > (float)LIST_DRAG_THRESHOLD_PIXELS) {
         mark->drawing = true;
     }
@@ -1913,14 +1946,14 @@ static void timeline_mark_update(App *app, const Layout *layout, float top, int3
  * toggle then makes it a task instead, as for any new item.
  */
 static void timeline_mark_finish(App *app, float top) {
-    const Timeline_Mark *mark = &app->timeline_mark;
+    Timeline_Mark const *mark = &app->timeline_mark;
     assert(mark->pressed);
     assert(mark->drawing);
     assert(!app->form.open);
-    const float pointer_minute = timeline_mark_pointer_minute(mark, GetMousePosition().y, top);
-    const int32_t step = timeline_step(mark->zoomed);
-    const Minute_Range range = timeline_mark_range(mark->press_minute, pointer_minute, step);
-    const Date date = date_from_day_number(mark->day_number);
+    float const pointer_minute = timeline_mark_pointer_minute(mark, GetMousePosition().y, top);
+    int32_t const step = timeline_step(mark->zoomed);
+    Minute_Range const range = timeline_mark_range(mark->press_minute, pointer_minute, step);
+    Date const date = date_from_day_number(mark->day_number);
     app_select(app, date);
     app_form_open(app, date, EVENT_KIND_EVENT);
     Form *form = &app->form;
@@ -1935,15 +1968,15 @@ static void timeline_mark_finish(App *app, float top) {
  * press was, so that the magnifier's five-minute steps are as far apart under the hand as
  * quarter hours are unzoomed; the wheel scrolling meanwhile then changes nothing.
  */
-static float timeline_mark_pointer_minute(const Timeline_Mark *mark, float pointer_y, float top) {
+static float timeline_mark_pointer_minute(Timeline_Mark const *mark, float pointer_y, float top) {
     assert(mark->pressed);
 
     if (!mark->zoomed) {
         return timeline_minute_at(pointer_y, top);
     }
-    const float zoomed_pixels_per_minute =
+    float const zoomed_pixels_per_minute =
         (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
-    const float moved_minutes = (pointer_y - mark->press_y) / zoomed_pixels_per_minute;
+    float const moved_minutes = (pointer_y - mark->press_y) / zoomed_pixels_per_minute;
     return fminf(fmaxf(mark->press_minute + moved_minutes, 0.0f), (float)MINUTES_PER_DAY);
 }
 
@@ -1951,7 +1984,7 @@ static float timeline_mark_pointer_minute(const Timeline_Mark *mark, float point
  * The day column under the pointer, from 0, or -1 when the pointer is not over the days'
  * hours, as over the hour labels in the gutter.
  */
-static int32_t timeline_column_at(const Layout *layout, Vector2 pointer) {
+static int32_t timeline_column_at(Layout const *layout, Vector2 pointer) {
     if (!CheckCollisionPointRec(pointer, layout->timeline)) {
         return -1;
     }
@@ -1971,8 +2004,8 @@ static int32_t timeline_column_at(const Layout *layout, Vector2 pointer) {
  * The minute of day under the pointer, not yet snapped, kept within the day.
  */
 static float timeline_minute_at(float pointer_y, float top) {
-    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
-    const float minute = (pointer_y - top) / pixels_per_minute;
+    float const pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    float const minute = (pointer_y - top) / pixels_per_minute;
     return fminf(fmaxf(minute, 0.0f), (float)MINUTES_PER_DAY);
 }
 
@@ -1981,7 +2014,7 @@ static float timeline_minute_at(float pointer_y, float top) {
  * replace, losing what was typed in it. The hints before a press follow the same rule, so that
  * they never promise a block the press would not draw.
  */
-static bool timeline_mark_can_start(const App *app) {
+static bool timeline_mark_can_start(App const *app) {
     if (app->timeline_mark.pressed) {
         return false;
     }
@@ -2006,7 +2039,7 @@ static Minute_Range timeline_mark_range(float press_minute, float pointer_minute
     assert(step_minutes > 0);
     assert(MINUTES_PER_DAY % step_minutes == 0);
 
-    const float step = (float)step_minutes;
+    float const step = (float)step_minutes;
     Minute_Range range = {
         .minute_top = (int32_t)floorf(fminf(press_minute, pointer_minute) / step) * step_minutes,
         .minute_bottom = (int32_t)ceilf(fmaxf(press_minute, pointer_minute) / step) * step_minutes,
@@ -2033,30 +2066,30 @@ static Minute_Range timeline_mark_range(float press_minute, float pointer_minute
  * The block being drawn, across its day's column, with its times. Not drawn while its day is out
  * of sight, as after moving to another week with the keys; the release still makes the item.
  */
-static void draw_timeline_mark(const App *app, const Layout *layout, float top,
+static void draw_timeline_mark(App const *app, Layout const *layout, float top,
                                int32_t first_day) {
-    const Timeline_Mark *mark = &app->timeline_mark;
+    Timeline_Mark const *mark = &app->timeline_mark;
     if (!mark->drawing) {
         return;
     }
     assert(mark->pressed);
-    const int32_t column = mark->day_number - first_day;
+    int32_t const column = mark->day_number - first_day;
     if (column < 0 || column >= layout->columns) {
         return;
     }
-    const float pointer_minute = timeline_mark_pointer_minute(mark, GetMousePosition().y, top);
-    const int32_t step = timeline_step(mark->zoomed);
-    const Minute_Range range = timeline_mark_range(mark->press_minute, pointer_minute, step);
-    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    float const pointer_minute = timeline_mark_pointer_minute(mark, GetMousePosition().y, top);
+    int32_t const step = timeline_step(mark->zoomed);
+    Minute_Range const range = timeline_mark_range(mark->press_minute, pointer_minute, step);
+    float const pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
     // Inset as items are, so that the block lines up with the items it will sit among.
-    const float inset = 2.0f;
-    const Rectangle block = {
+    float const inset = 2.0f;
+    Rectangle const block = {
         layout->grid.x + (float)column * layout->cell_width + inset,
         top + (float)range.minute_top * pixels_per_minute,
         layout->cell_width - 2 * inset,
         (float)(range.minute_bottom - range.minute_top) * pixels_per_minute,
     };
-    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    Color const accent = style_color(BORDER_COLOR_PRESSED);
     DrawRectangleRec(block, Fade(accent, 0.35f));
     DrawRectangleLinesEx(block, 2, accent);
     char start[TIME_TEXT_SIZE] = "";
@@ -2074,17 +2107,17 @@ static void draw_timeline_mark(const App *app, const Layout *layout, float top,
  * A circle at the pointer showing the hours around the block's moving edge TIMELINE_MARK_ZOOM
  * times larger, with a line every five minutes, so that the edge can be put on any of them.
  */
-static void draw_timeline_mark_zoom(const App *app, const Layout *layout, float top,
+static void draw_timeline_mark_zoom(App const *app, Layout const *layout, float top,
                                     int32_t first_day) {
-    const Timeline_Mark *mark = &app->timeline_mark;
+    Timeline_Mark const *mark = &app->timeline_mark;
     assert(mark->zoomed);
     assert(mark->drawing);
-    const Vector2 center = GetMousePosition();
-    const float pointer_minute = timeline_mark_pointer_minute(mark, center.y, top);
-    const Minute_Range range = timeline_mark_range(mark->press_minute, pointer_minute,
+    Vector2 const center = GetMousePosition();
+    float const pointer_minute = timeline_mark_pointer_minute(mark, center.y, top);
+    Minute_Range const range = timeline_mark_range(mark->press_minute, pointer_minute,
                                                    TIMELINE_MARK_ZOOM_STEP_MINUTES);
-    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
-    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    float const radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    Color const accent = style_color(BORDER_COLOR_PRESSED);
     DrawCircleV(center, radius, style_color(BACKGROUND_COLOR));
     draw_timeline_mark_zoom_items(app, layout, first_day, mark->day_number, center,
                                   pointer_minute);
@@ -2093,7 +2126,7 @@ static void draw_timeline_mark_zoom(const App *app, const Layout *layout, float 
     draw_timeline_mark_zoom_ticks(app, center, pointer_minute);
     // The edge that follows the pointer, with the time the form will get, on the side of the
     // line away from the block, so that the band does not cover it.
-    const bool upwards = pointer_minute < mark->press_minute;
+    bool const upwards = pointer_minute < mark->press_minute;
     int32_t edge = range.minute_bottom;
     if (upwards) {
         edge = range.minute_top;
@@ -2107,17 +2140,17 @@ static void draw_timeline_mark_zoom(const App *app, const Layout *layout, float 
  * apps mark it. Nothing when today is not in sight. The time is read by app_sync every frame,
  * and the desktop draws at least once a second while idle, so the line moves on each minute.
  */
-static void draw_timeline_now(const App *app, const Layout *layout, float top,
+static void draw_timeline_now(App const *app, Layout const *layout, float top,
                               int32_t first_day) {
-    const int32_t column = date_to_day_number(app->today) - first_day;
+    int32_t const column = date_to_day_number(app->today) - first_day;
     if (column < 0 || column >= layout->columns) {
         return;
     }
     assert(app->now_minute >= 0);
     assert(app->now_minute < MINUTES_PER_DAY);
-    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
-    const float y = top + (float)app->now_minute * pixels_per_minute;
-    const float left = layout->grid.x + (float)column * layout->cell_width;
+    float const pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    float const y = top + (float)app->now_minute * pixels_per_minute;
+    float const left = layout->grid.x + (float)column * layout->cell_width;
     // Two pixels high, centred on the minute, so that it stands out from the one-pixel hour
     // lines it may lie on.
     DrawRectangleRec((Rectangle){ left, y - 1, layout->cell_width, 2 }, WHITE);
@@ -2130,9 +2163,9 @@ static void draw_timeline_now(const App *app, const Layout *layout, float top,
  * saved. Read from the form each frame, so that it follows edits to its times, date and repeat,
  * and is gone once the form is saved or cancelled. Nothing while the form cannot be read yet.
  */
-static void draw_timeline_ghost(const App *app, const Layout *layout, float top,
+static void draw_timeline_ghost(App const *app, Layout const *layout, float top,
                                 int32_t first_day) {
-    const Form *form = &app->form;
+    Form const *form = &app->form;
     if (!form->open || form->editing_id != 0 || form->kind == EVENT_KIND_PROBLEM) {
         return;
     }
@@ -2143,7 +2176,7 @@ static void draw_timeline_ghost(const App *app, const Layout *layout, float top,
     if (!event_is_timed(&event)) {
         return; // A ghost in the day cells is not drawn: there the form's dates already show.
     }
-    const Str title = text_skip_spaces(str_from_cstr(form->text[FORM_FIELD_TITLE]));
+    Str const title = text_skip_spaces(str_from_cstr(form->text[FORM_FIELD_TITLE]));
     // Until the user types a title, the ghost says what it will be.
     Str ghost_title = title;
     if (title.length == 0) {
@@ -2155,7 +2188,7 @@ static void draw_timeline_ghost(const App *app, const Layout *layout, float top,
     (void)str_copy_truncated(ghost_title, event.title, sizeof(event.title));
     for (int32_t column = 0; column < layout->columns; column++) {
         if (event_occurs_on_day(&event, first_day + column)) {
-            const Rectangle day = { layout->grid.x + (float)column * layout->cell_width, top,
+            Rectangle const day = { layout->grid.x + (float)column * layout->cell_width, top,
                                     layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
             draw_timeline_ghost_block(app, &event, day);
         }
@@ -2166,22 +2199,22 @@ static void draw_timeline_ghost(const App *app, const Layout *layout, float top,
  * The ghost across the whole day, over the items it overlaps, which show through it; its place
  * among them in lanes is known only once it is saved.
  */
-static void draw_timeline_ghost_block(const App *app, const Event *event, Rectangle day) {
+static void draw_timeline_ghost_block(App const *app, Event const *event, Rectangle day) {
     assert(event->id == 0);
     assert(event_is_timed(event));
 
     // The same top and length the saved item will have, including the defaults for an item
     // with only one time. The index is not used here.
-    const Timeline_Item item = timeline_item_make(event, 0);
-    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
-    const float inset = 2.0f;
-    const Rectangle block = {
+    Timeline_Item const item = timeline_item_make(event, 0);
+    float const pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    float const inset = 2.0f;
+    Rectangle const block = {
         day.x + inset,
         day.y + (float)item.minute_top * pixels_per_minute,
         day.width - 2 * inset - 1,
         (float)(item.minute_bottom - item.minute_top) * pixels_per_minute - 1,
     };
-    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    Color const accent = style_color(BORDER_COLOR_PRESSED);
     DrawRectangleRec(block, Fade(accent, 0.25f));
     DrawRectangleLinesEx(block, 1, Fade(accent, 0.8f));
     char label[TEXT_LINE_SIZE] = "";
@@ -2195,23 +2228,23 @@ static void draw_timeline_ghost_block(const App *app, const Event *event, Rectan
  * that the press can be aimed. It snaps as the press will, through the same function: to
  * quarter hours, or to five minutes with zoom toggled on, when the magnifier shows it larger too.
  */
-static void draw_timeline_mark_hover(const App *app, const Layout *layout, float top) {
-    const Vector2 pointer = GetMousePosition();
-    const int32_t column = timeline_column_at(layout, pointer);
+static void draw_timeline_mark_hover(App const *app, Layout const *layout, float top) {
+    Vector2 const pointer = GetMousePosition();
+    int32_t const column = timeline_column_at(layout, pointer);
     if (column < 0 || !timeline_mark_can_start(app)) {
         return;
     }
-    const int32_t step = timeline_step(app->timeline_fine);
-    const float minute = timeline_minute_at(pointer.y, top);
-    const int32_t start = timeline_mark_range(minute, minute, step).minute_top;
-    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
-    const float y = top + (float)start * pixels_per_minute;
+    int32_t const step = timeline_step(app->timeline_fine);
+    float const minute = timeline_minute_at(pointer.y, top);
+    int32_t const start = timeline_mark_range(minute, minute, step).minute_top;
+    float const pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    float const y = top + (float)start * pixels_per_minute;
     // Centred on the pointer, but within its day, whose borders it does not cross.
-    const float day_left = layout->grid.x + (float)column * layout->cell_width + 2;
-    const float day_right = day_left + layout->cell_width - 4;
-    const float left = fmaxf(pointer.x - (float)TIMELINE_MARK_HOVER_HALF_PIXELS, day_left);
-    const float right = fminf(pointer.x + (float)TIMELINE_MARK_HOVER_HALF_PIXELS, day_right);
-    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    float const day_left = layout->grid.x + (float)column * layout->cell_width + 2;
+    float const day_right = day_left + layout->cell_width - 4;
+    float const left = fmaxf(pointer.x - (float)TIMELINE_MARK_HOVER_HALF_PIXELS, day_left);
+    float const right = fminf(pointer.x + (float)TIMELINE_MARK_HOVER_HALF_PIXELS, day_right);
+    Color const accent = style_color(BORDER_COLOR_PRESSED);
     DrawRectangleRec((Rectangle){ left, y - 1, right - left, 2 }, accent);
     char label[TIME_TEXT_SIZE] = "";
     time_format(start, label, sizeof(label));
@@ -2224,7 +2257,7 @@ static void draw_timeline_mark_hover(const App *app, const Layout *layout, float
  * would start, so that the start can be aimed to five minutes as precisely as the end. It also
  * shows over an item and while dragging one, which snap to the same minutes.
  */
-static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, float top,
+static void draw_timeline_mark_hover_zoom(App const *app, Layout const *layout, float top,
                                           int32_t first_day) {
     if (!app->timeline_fine) {
         return;
@@ -2233,12 +2266,12 @@ static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, 
     if (app->timeline_mark.pressed || app->form.open) {
         return;
     }
-    const Vector2 center = GetMousePosition();
+    Vector2 const center = GetMousePosition();
     if (timeline_column_at(layout, center) < 0) {
         return;
     }
-    const float minute = timeline_minute_at(center.y, top);
-    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    float const minute = timeline_minute_at(center.y, top);
+    float const radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
     DrawCircleV(center, radius, style_color(BACKGROUND_COLOR));
     draw_timeline_mark_zoom_items(app, layout, first_day,
                                   first_day + timeline_column_at(layout, center), center,
@@ -2247,7 +2280,7 @@ static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, 
     // Over an item, or dragging one, a press does not start a block, so there is no start line;
     // the magnifier still shows the minutes the item will snap to.
     if (timeline_mark_can_start(app)) {
-        const int32_t start = timeline_mark_range(minute, minute, TIMELINE_MARK_ZOOM_STEP_MINUTES)
+        int32_t const start = timeline_mark_range(minute, minute, TIMELINE_MARK_ZOOM_STEP_MINUTES)
                                   .minute_top;
         draw_timeline_mark_zoom_edge(app, center, minute, start, true);
     }
@@ -2258,16 +2291,16 @@ static void draw_timeline_mark_hover_zoom(const App *app, const Layout *layout, 
  * A line across the magnifier at edge_minute, with its time above or below it. The edge is at
  * most one step from the middle, so it is always inside the circle.
  */
-static void draw_timeline_mark_zoom_edge(const App *app, Vector2 center, float center_minute,
+static void draw_timeline_mark_zoom_edge(App const *app, Vector2 center, float center_minute,
                                          int32_t edge_minute, bool label_above) {
-    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
-    const float zoomed_pixels_per_minute =
+    float const radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    float const zoomed_pixels_per_minute =
         (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
-    const float edge_y = center.y + ((float)edge_minute - center_minute) *
+    float const edge_y = center.y + ((float)edge_minute - center_minute) *
                                         zoomed_pixels_per_minute;
     assert(fabsf(edge_y - center.y) < radius);
-    const float half = circle_half_width(radius, edge_y - center.y);
-    const Color accent = style_color(BORDER_COLOR_PRESSED);
+    float const half = circle_half_width(radius, edge_y - center.y);
+    Color const accent = style_color(BORDER_COLOR_PRESSED);
     DrawRectangleRec((Rectangle){ center.x - half, edge_y - 1, 2 * half, 2 }, accent);
     char label[TIME_TEXT_SIZE] = "";
     time_format(edge_minute, label, sizeof(label));
@@ -2283,13 +2316,13 @@ static void draw_timeline_mark_zoom_edge(const App *app, Vector2 center, float c
  * A line every five minutes across the circle, brighter every quarter hour, which also has its
  * time at the left, so that the scale reads at a glance.
  */
-static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float center_minute) {
-    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
-    const float zoomed_pixels_per_minute =
+static void draw_timeline_mark_zoom_ticks(App const *app, Vector2 center, float center_minute) {
+    float const radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    float const zoomed_pixels_per_minute =
         (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
     // Minutes from the middle to the circle's top or bottom.
-    const float reach = radius / zoomed_pixels_per_minute;
-    const int32_t step = TIMELINE_MARK_ZOOM_STEP_MINUTES;
+    float const reach = radius / zoomed_pixels_per_minute;
+    int32_t const step = TIMELINE_MARK_ZOOM_STEP_MINUTES;
     int32_t first = (int32_t)ceilf((center_minute - reach) / (float)step) * step;
     int32_t last = (int32_t)floorf((center_minute + reach) / (float)step) * step;
     if (first < 0) {
@@ -2300,14 +2333,14 @@ static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float 
     }
     // Bounded by the circle: about 2 * reach / step + 1 lines, a dozen at the scale chosen.
     for (int32_t minute = first; minute <= last; minute += step) {
-        const float y = center.y + ((float)minute - center_minute) * zoomed_pixels_per_minute;
-        const float half = circle_half_width(radius, y - center.y);
-        const bool quarter = minute % TIMELINE_MARK_STEP_MINUTES == 0;
+        float const y = center.y + ((float)minute - center_minute) * zoomed_pixels_per_minute;
+        float const half = circle_half_width(radius, y - center.y);
+        bool const quarter = minute % TIMELINE_MARK_STEP_MINUTES == 0;
         int32_t color_property = BORDER_COLOR_NORMAL;
         if (quarter) {
             color_property = BORDER_COLOR_FOCUSED;
         }
-        const Color color = style_color(color_property);
+        Color const color = style_color(color_property);
         DrawRectangleRec((Rectangle){ center.x - half, y, 2 * half, 1 }, color);
         // Near the top and bottom the circle is too narrow for a label.
         if (quarter && minute < MINUTES_PER_DAY && half > radius / 2) {
@@ -2325,23 +2358,23 @@ static void draw_timeline_mark_zoom_ticks(const App *app, Vector2 center, float 
  * on the pointer, so each block is where it is on the timeline. An item being dragged stays
  * faint where it was, and where the drag would leave it, on its new day, it is drawn bright.
  */
-static void draw_timeline_mark_zoom_items(const App *app, const Layout *layout,
+static void draw_timeline_mark_zoom_items(App const *app, Layout const *layout,
                                           int32_t first_day, int32_t day_number,
                                           Vector2 center, float center_minute) {
-    const int32_t column = day_number - first_day;
+    int32_t const column = day_number - first_day;
     if (column < 0 || column >= layout->columns) {
         return;
     }
-    const Rectangle day = { layout->grid.x + (float)column * layout->cell_width, 0,
+    Rectangle const day = { layout->grid.x + (float)column * layout->cell_width, 0,
                             layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
     // On the stack, as when the day is drawn; about 10 KB.
     Timeline_Item items[EVENT_COUNT_MAX] = { 0 };
-    const int32_t count = timeline_day_items(app, day_number,
+    int32_t const count = timeline_day_items(app, day_number,
                                              array_slice_make(items, EVENT_COUNT_MAX));
-    const Timeline_Drag *drag = &app->timeline_drag;
-    const bool dragging = drag->event_id != 0 && drag->moved;
+    Timeline_Drag const *drag = &app->timeline_drag;
+    bool const dragging = drag->event_id != 0 && drag->moved;
     for (int32_t i = 0; i < count; i++) {
-        const Event *event = &app->events[items[i].event_index];
+        Event const *event = &app->events[items[i].event_index];
         float alpha = 0.55f;
         if (dragging && event->id == drag->event_id) {
             alpha = 0.2f;
@@ -2353,17 +2386,17 @@ static void draw_timeline_mark_zoom_items(const App *app, const Layout *layout,
     if (!dragging) {
         return;
     }
-    const Event *dragged = app_event_find(app, drag->event_id);
+    Event const *dragged = app_event_find(app, drag->event_id);
     if (dragged == NULL) {
         return;
     }
-    const int32_t pointer_day = first_day + timeline_column_nearest(layout, center.x);
-    const Event moved = timeline_drag_result(dragged, drag, center_minute, pointer_day,
+    int32_t const pointer_day = first_day + timeline_column_nearest(layout, center.x);
+    Event const moved = timeline_drag_result(dragged, drag, center_minute, pointer_day,
                                              timeline_drag_step(app));
     if (drag->press_day + timeline_drag_day_delta(drag, pointer_day) != day_number) {
         return;
     }
-    const Timeline_Item item = timeline_item_make(&moved, 0);
+    Timeline_Item const item = timeline_item_make(&moved, 0);
     draw_timeline_mark_zoom_item(app, &moved, event_time_range(&moved),
                                  timeline_item_block(day, &item), center, center_minute, 0.85f);
 }
@@ -2373,22 +2406,22 @@ static void draw_timeline_mark_zoom_items(const App *app, const Layout *layout,
  * edges, and its title, if there is room in the middle of the circle. What a press at the
  * pointer would grab is in the accent color: an edge, or for the middle the whole block.
  */
-static void draw_timeline_mark_zoom_item(const App *app, const Event *event,
+static void draw_timeline_mark_zoom_item(App const *app, Event const *event,
                                          Minute_Range range, Rectangle block, Vector2 center,
                                          float center_minute, float alpha) {
-    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
-    const float zoomed_pixels_per_minute =
+    float const radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    float const zoomed_pixels_per_minute =
         (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
-    const float left = block.x;
-    const float right = block.x + block.width;
+    float const left = block.x;
+    float const right = block.x + block.width;
     // Zero length is possible for an item with equal times; one minute is the least to see.
-    const Minute_Range shown = { range.minute_top,
+    Minute_Range const shown = { range.minute_top,
                                  int32_max(range.minute_bottom, range.minute_top + 1) };
-    const Color color = event_color(event, app_now(app));
-    const Color accent = style_color(BORDER_COLOR_PRESSED);
-    const Timeline_Hit *hit = &app->timeline_hit;
+    Color const color = event_color(event, app_now(app));
+    Color const accent = style_color(BORDER_COLOR_PRESSED);
+    Timeline_Hit const *hit = &app->timeline_hit;
     // Nothing is grabbed while an item is dragged, whose release would not be a press.
-    const bool grabbed = hit->event_id == event->id && app->timeline_drag.event_id == 0;
+    bool const grabbed = hit->event_id == event->id && app->timeline_drag.event_id == 0;
     if (grabbed && hit->part == BLOCK_PART_MIDDLE) {
         alpha = 0.9f;
     }
@@ -2409,18 +2442,18 @@ static void draw_timeline_mark_zoom_item(const App *app, const Event *event,
                                  left, right, bottom_color);
 
     // The title sits near the item's top, kept in the middle of the circle where it is wide.
-    const float top_y = center.y + ((float)shown.minute_top - center_minute) *
+    float const top_y = center.y + ((float)shown.minute_top - center_minute) *
                                        zoomed_pixels_per_minute;
-    const float bottom_y = center.y + ((float)shown.minute_bottom - center_minute) *
+    float const bottom_y = center.y + ((float)shown.minute_bottom - center_minute) *
                                           zoomed_pixels_per_minute;
-    const float text_height = 16;
-    const float text_y = fmaxf(top_y + 4, center.y - radius * 0.6f);
+    float const text_height = 16;
+    float const text_y = fmaxf(top_y + 4, center.y - radius * 0.6f);
     if (text_y + text_height > fminf(bottom_y, center.y + radius * 0.6f)) {
         return;
     }
-    const float half = circle_half_width(radius, text_y + text_height - center.y);
-    const float clip_left = fmaxf(center.x - half, left);
-    const float clip_right = fminf(center.x + half, right);
+    float const half = circle_half_width(radius, text_y + text_height - center.y);
+    float const clip_left = fmaxf(center.x - half, left);
+    float const clip_right = fminf(center.x + half, right);
     if (clip_right <= clip_left) {
         return;
     }
@@ -2438,15 +2471,15 @@ static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute,
                                          Color color) {
     assert(range.minute_top < range.minute_bottom);
 
-    const float radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
-    const float zoomed_pixels_per_minute =
+    float const radius = (float)TIMELINE_MARK_ZOOM_RADIUS_PIXELS;
+    float const zoomed_pixels_per_minute =
         (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f * (float)TIMELINE_MARK_ZOOM;
-    const float band_top = center.y + ((float)range.minute_top - center_minute) *
+    float const band_top = center.y + ((float)range.minute_top - center_minute) *
                                           zoomed_pixels_per_minute;
-    const float band_bottom = center.y + ((float)range.minute_bottom - center_minute) *
+    float const band_bottom = center.y + ((float)range.minute_bottom - center_minute) *
                                              zoomed_pixels_per_minute;
-    const float from = fmaxf(band_top, center.y - radius);
-    const float to = fminf(band_bottom, center.y + radius);
+    float const from = fmaxf(band_top, center.y - radius);
+    float const to = fminf(band_bottom, center.y + radius);
     // At most the circle's height in rows.
     int32_t row_count = 0;
     if (to > from) {
@@ -2454,10 +2487,10 @@ static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute,
     }
     assert(row_count <= 2 * TIMELINE_MARK_ZOOM_RADIUS_PIXELS + 1);
     for (int32_t row = 0; row < row_count; row++) {
-        const float y = from + (float)row;
-        const float half = circle_half_width(radius, y + 0.5f - center.y);
-        const float x_left = fmaxf(center.x - half, left);
-        const float x_right = fminf(center.x + half, right);
+        float const y = from + (float)row;
+        float const half = circle_half_width(radius, y + 0.5f - center.y);
+        float const x_left = fmaxf(center.x - half, left);
+        float const x_right = fminf(center.x + half, right);
         if (x_right > x_left) {
             DrawRectangleRec((Rectangle){ x_left, y, x_right - x_left, 1 }, color);
         }
@@ -2470,7 +2503,7 @@ static void draw_timeline_mark_zoom_band(Vector2 center, float center_minute,
 static float circle_half_width(float radius, float offset_y) {
     assert(radius > 0.0f);
 
-    const float squared = radius * radius - offset_y * offset_y;
+    float const squared = radius * radius - offset_y * offset_y;
     if (squared > 0.0f) {
         return sqrtf(squared);
     }
@@ -2480,12 +2513,12 @@ static float circle_half_width(float radius, float offset_y) {
 /**
  * The hour labels in the gutter left of the days; each day draws its own hour lines.
  */
-static void draw_timeline_hours(const App *app, const Layout *layout, float top) {
-    const Rectangle timeline = layout->timeline;
-    const float days_left = layout->grid.x;
+static void draw_timeline_hours(App const *app, Layout const *layout, float top) {
+    Rectangle const timeline = layout->timeline;
+    float const days_left = layout->grid.x;
     assert(days_left > timeline.x);
     assert(days_left < timeline.x + timeline.width);
-    const Text_Style *style = &app->fonts.small;
+    Text_Style const *style = &app->fonts.small;
     for (int32_t hour = 0; hour < MINUTES_PER_DAY / 60; hour++) {
         float y = top + (float)(hour * TIMELINE_HOUR_HEIGHT_PIXELS);
         // Hours scrolled out of sight would be clipped anyway; skipping them saves the text.
@@ -2506,13 +2539,13 @@ static void draw_timeline_hours(const App *app, const Layout *layout, float top)
  * day is the column from 00:00 to 24:00, which may reach outside the timeline that clips it.
  * Items that overlap share the day's width side by side.
  */
-static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number, bool hovered) {
+static void draw_timeline_day(App const *app, Rectangle day, int32_t day_number, bool hovered) {
     assert(day.width > 0.0f);
     assert(day.height == (float)TIMELINE_HEIGHT_PIXELS);
 
     // On the stack, because it is needed only while one day is drawn; about 10 KB.
     Timeline_Item items[EVENT_COUNT_MAX] = { 0 };
-    const int32_t count = timeline_day_items(app, day_number,
+    int32_t const count = timeline_day_items(app, day_number,
                                              array_slice_make(items, EVENT_COUNT_MAX));
 
     // The busy part of the day runs from the first item's start to the last one's end; sorted
@@ -2548,10 +2581,10 @@ static void draw_timeline_day(const App *app, Rectangle day, int32_t day_number,
  * The day's timed items in drawing order, with their lanes: the one layout that both drawing
  * and finding the block under the pointer use, so that they always agree. Returns how many.
  */
-static int32_t timeline_day_items(const App *app, int32_t day_number, Array_Slice items) {
-    const int32_t count = timeline_items_collect(app, day_number, items);
+static int32_t timeline_day_items(App const *app, int32_t day_number, Array_Slice items) {
+    int32_t const count = timeline_items_collect(app, day_number, items);
     // Only the items collected are put in order, and given lanes.
-    const Array_Slice collected = array_slice_make(items.items, count);
+    Array_Slice const collected = array_slice_make(items.items, count);
     timeline_items_sort(collected);
     timeline_items_assign_lanes(collected);
     return count;
@@ -2560,13 +2593,13 @@ static int32_t timeline_day_items(const App *app, int32_t day_number, Array_Slic
 /**
  * Where an item's block is in its day, from 00:00 at day.y.
  */
-static Rectangle timeline_item_block(Rectangle day, const Timeline_Item *item) {
+static Rectangle timeline_item_block(Rectangle day, Timeline_Item const *item) {
     assert(item->lane < item->lane_count);
 
-    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    float const pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
     // Kept free at the sides of the day, so that items do not touch the day's borders.
-    const float inset = 2.0f;
-    const float lane_width = (day.width - 2 * inset) / (float)item->lane_count;
+    float const inset = 2.0f;
+    float const lane_width = (day.width - 2 * inset) / (float)item->lane_count;
     // One pixel less each way, so that neighbouring blocks of one color stay apart.
     return (Rectangle){
         day.x + inset + (float)item->lane * lane_width,
@@ -2581,31 +2614,31 @@ static Rectangle timeline_item_block(Rectangle day, const Timeline_Item *item) {
  * since blocks scrolled out of it are clipped away. Blocks are drawn in order, so the last one
  * under the pointer is the one on top.
  */
-static Timeline_Hit timeline_hit_test(const App *app, const Layout *layout, float top,
+static Timeline_Hit timeline_hit_test(App const *app, Layout const *layout, float top,
                                       int32_t first_day) {
     Timeline_Hit hit = { .event_id = 0, .day_number = 0, .part = BLOCK_PART_NONE };
-    const Vector2 pointer = GetMousePosition();
-    const int32_t column = timeline_column_at(layout, pointer);
+    Vector2 const pointer = GetMousePosition();
+    int32_t const column = timeline_column_at(layout, pointer);
     if (column < 0) {
         return hit;
     }
-    const Rectangle day = { layout->grid.x + (float)column * layout->cell_width, top,
+    Rectangle const day = { layout->grid.x + (float)column * layout->cell_width, top,
                             layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
     // On the stack, as when the day is drawn; about 10 KB.
     Timeline_Item items[EVENT_COUNT_MAX] = { 0 };
-    const int32_t count = timeline_day_items(app, first_day + column,
+    int32_t const count = timeline_day_items(app, first_day + column,
                                              array_slice_make(items, EVENT_COUNT_MAX));
-    const float grab = (float)TIMELINE_EDGE_GRAB_PIXELS;
+    float const grab = (float)TIMELINE_EDGE_GRAB_PIXELS;
     // With zoom on, the magnifier shows each item at its true times, so a press is tested
     // against those, and the edge zones are as wide as they look in the magnifier.
-    const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
-    const float grab_minutes = grab / (pixels_per_minute * (float)TIMELINE_MARK_ZOOM);
-    const float pointer_minute = timeline_minute_at(pointer.y, top);
+    float const pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+    float const grab_minutes = grab / (pixels_per_minute * (float)TIMELINE_MARK_ZOOM);
+    float const pointer_minute = timeline_minute_at(pointer.y, top);
     for (int32_t i = 0; i < count; i++) {
-        const Event *event = &app->events[items[i].event_index];
-        const Rectangle block = timeline_item_block(day, &items[i]);
+        Event const *event = &app->events[items[i].event_index];
+        Rectangle const block = timeline_item_block(day, &items[i]);
         if (app->timeline_fine) {
-            const Minute_Range range = event_time_range(event);
+            Minute_Range const range = event_time_range(event);
             if (pointer.x < block.x || pointer.x >= block.x + block.width) {
                 continue;
             }
@@ -2644,10 +2677,10 @@ static Timeline_Hit timeline_hit_test(const App *app, const Layout *layout, floa
  * not move stays a click, which selects the item. Not while a form is open, which may hold the
  * item's old times and would save them back over the drag.
  */
-static void timeline_drag_update(App *app, const Layout *layout, float top) {
+static void timeline_drag_update(App *app, Layout const *layout, float top) {
     Timeline_Drag *drag = &app->timeline_drag;
-    const Timeline_Hit *hit = &app->timeline_hit;
-    const Vector2 pointer = GetMousePosition();
+    Timeline_Hit const *hit = &app->timeline_hit;
+    Vector2 const pointer = GetMousePosition();
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && hit->event_id != 0 && !app->form.open) {
         assert(hit->part != BLOCK_PART_NONE);
         *drag = (Timeline_Drag){
@@ -2663,8 +2696,8 @@ static void timeline_drag_update(App *app, const Layout *layout, float top) {
     if (drag->event_id == 0) {
         return;
     }
-    const int32_t first_day = date_to_day_number(app->visible_first);
-    const int32_t pointer_day = first_day + timeline_column_nearest(layout, pointer.x);
+    int32_t const first_day = date_to_day_number(app->visible_first);
+    int32_t const pointer_day = first_day + timeline_column_nearest(layout, pointer.x);
     if (fabsf(pointer.y - drag->press_y) > (float)LIST_DRAG_THRESHOLD_PIXELS) {
         drag->moved = true;
     }
@@ -2689,32 +2722,32 @@ static void timeline_drag_update(App *app, const Layout *layout, float top) {
  * Saves the item at the drag's place, after the checks the form makes, and selects its new day.
  * A repeating item moves as a whole, as editing it does.
  */
-static void timeline_drag_finish(App *app, const Layout *layout, float top) {
-    const Timeline_Drag *drag = &app->timeline_drag;
+static void timeline_drag_finish(App *app, Layout const *layout, float top) {
+    Timeline_Drag const *drag = &app->timeline_drag;
     assert(drag->event_id != 0);
     assert(drag->moved);
     // Gone when a reload meanwhile no longer has it, as after a phone deleted it.
-    const Event *event = app_event_find(app, drag->event_id);
+    Event const *event = app_event_find(app, drag->event_id);
     if (event == NULL) {
         return;
     }
-    const Vector2 pointer = GetMousePosition();
-    const int32_t pointer_day = date_to_day_number(app->visible_first) +
+    Vector2 const pointer = GetMousePosition();
+    int32_t const pointer_day = date_to_day_number(app->visible_first) +
                                 timeline_column_nearest(layout, pointer.x);
-    const Event moved = timeline_drag_result(event, drag, timeline_minute_at(pointer.y, top),
+    Event const moved = timeline_drag_result(event, drag, timeline_minute_at(pointer.y, top),
                                              pointer_day, timeline_drag_step(app));
-    const Str mistake = form_parse_order(&moved);
+    Str const mistake = form_parse_order(&moved);
     if (mistake.length > 0) {
         snprintf(app->status, sizeof(app->status), "Not moved: %.*s", STR_ARGUMENTS(mistake));
         return;
     }
     if (!backend_update(app->backend, &moved)) {
-        const Str reason = backend_error(app->backend);
+        Str const reason = backend_error(app->backend);
         snprintf(app->status, sizeof(app->status), "Not moved: %.*s", STR_ARGUMENTS(reason));
         return;
     }
     app->events_stale = true;
-    const int32_t day_delta = timeline_drag_day_delta(drag, pointer_day);
+    int32_t const day_delta = timeline_drag_day_delta(drag, pointer_day);
     app_select(app, date_from_day_number(drag->press_day + day_delta));
     app->event_focused_id = moved.id;
     snprintf(app->status, sizeof(app->status), "Updated \"%s\".", moved.title);
@@ -2726,15 +2759,15 @@ static void timeline_drag_finish(App *app, const Layout *layout, float top) {
  * and the dates by the days moved across. A time the item lacks stays missing when it is moved,
  * but an edge dragged sets both times, as the block the user sized has both.
  */
-static Event timeline_drag_result(const Event *event, const Timeline_Drag *drag,
+static Event timeline_drag_result(Event const *event, Timeline_Drag const *drag,
                                   float pointer_minute, int32_t pointer_day, int32_t step) {
     assert(event_is_timed(event));
     assert(step > 0);
 
-    const Minute_Range range = event_time_range(event);
-    const float delta = pointer_minute - drag->press_minute;
+    Minute_Range const range = event_time_range(event);
+    float const delta = pointer_minute - drag->press_minute;
     // The last minute of the day stands for midnight, as for a drawn block.
-    const int32_t minute_last = MINUTES_PER_DAY - 1;
+    int32_t const minute_last = MINUTES_PER_DAY - 1;
     Event result = *event;
     switch ((Block_Part)drag->part) {
     case BLOCK_PART_TOP: {
@@ -2752,7 +2785,7 @@ static Event timeline_drag_result(const Event *event, const Timeline_Drag *drag,
         break;
     }
     case BLOCK_PART_MIDDLE: {
-        const int32_t length = range.minute_bottom - range.minute_top;
+        int32_t const length = range.minute_bottom - range.minute_top;
         int32_t top = minute_snap((float)range.minute_top + delta, step);
         top = int32_min(top, minute_last - length);
         top = int32_max(top, 0);
@@ -2765,7 +2798,7 @@ static Event timeline_drag_result(const Event *event, const Timeline_Drag *drag,
         if (event->end_minute != TIME_NONE) {
             result.end_minute = top + length;
         }
-        const int32_t day_delta = pointer_day - drag->press_day;
+        int32_t const day_delta = pointer_day - drag->press_day;
         result.start_date = date_add_days(event->start_date, day_delta);
         result.end_date = date_add_days(event->end_date, day_delta);
         break;
@@ -2781,7 +2814,7 @@ static Event timeline_drag_result(const Event *event, const Timeline_Drag *drag,
 /**
  * As when drawing a block: quarter hours, or five minutes with zoom on.
  */
-static int32_t timeline_drag_step(const App *app) {
+static int32_t timeline_drag_step(App const *app) {
     return timeline_step(app->timeline_fine);
 }
 
@@ -2799,7 +2832,7 @@ static int32_t timeline_step(bool fine) {
  * Days a drag moved the item: only the middle moves it to another day, as an edge changes a
  * time on its own day.
  */
-static int32_t timeline_drag_day_delta(const Timeline_Drag *drag, int32_t pointer_day) {
+static int32_t timeline_drag_day_delta(Timeline_Drag const *drag, int32_t pointer_day) {
     if (drag->part == BLOCK_PART_MIDDLE) {
         return pointer_day - drag->press_day;
     }
@@ -2810,7 +2843,7 @@ static int32_t timeline_drag_day_delta(const Timeline_Drag *drag, int32_t pointe
  * The item's real times on its day. A missing time is the other one an hour away, as the block
  * is drawn; unlike the block, a short item is not lengthened, so a drag keeps its true length.
  */
-static Minute_Range event_time_range(const Event *event) {
+static Minute_Range event_time_range(Event const *event) {
     assert(event_is_timed(event));
 
     int32_t top = event->start_minute;
@@ -2839,14 +2872,14 @@ static int32_t minute_snap(float minute, int32_t step_minutes) {
 /**
  * The day column nearest the pointer, so that a drag past the first or last day stays on it.
  */
-static int32_t timeline_column_nearest(const Layout *layout, float pointer_x) {
+static int32_t timeline_column_nearest(Layout const *layout, float pointer_x) {
     assert(layout->columns > 0);
 
-    const float position = (pointer_x - layout->grid.x) / layout->cell_width;
+    float const position = (pointer_x - layout->grid.x) / layout->cell_width;
     if (position < 0.0f) {
         return 0;
     }
-    const int32_t column = (int32_t)position;
+    int32_t const column = (int32_t)position;
     return int32_min(column, layout->columns - 1);
 }
 
@@ -2856,7 +2889,7 @@ static int32_t timeline_column_nearest(const Layout *layout, float pointer_x) {
  * every part is just clicked.
  */
 static void timeline_cursor_update(App *app) {
-    const Timeline_Drag *drag = &app->timeline_drag;
+    Timeline_Drag const *drag = &app->timeline_drag;
     if (drag->event_id != 0) {
         if (drag->part != BLOCK_PART_MIDDLE) {
             app->cursor = APP_CURSOR_RESIZE;
@@ -2868,12 +2901,12 @@ static void timeline_cursor_update(App *app) {
         }
         return;
     }
-    const Timeline_Hit *hit = &app->timeline_hit;
+    Timeline_Hit const *hit = &app->timeline_hit;
     if (hit->event_id == 0) {
         return;
     }
-    const bool draggable = !app->touch && !app->form.open;
-    const bool edge = hit->part == BLOCK_PART_TOP || hit->part == BLOCK_PART_BOTTOM;
+    bool const draggable = !app->touch && !app->form.open;
+    bool const edge = hit->part == BLOCK_PART_TOP || hit->part == BLOCK_PART_BOTTOM;
     app->cursor = APP_CURSOR_HAND;
     if (draggable && edge) {
         app->cursor = APP_CURSOR_RESIZE;
@@ -2884,33 +2917,33 @@ static void timeline_cursor_update(App *app) {
  * Where the dragged item will go: a block in its color with an accent outline and its new
  * times, in the column of its new day, over the item's old place, which stays until it is saved.
  */
-static void draw_timeline_drag(const App *app, const Layout *layout, float top,
+static void draw_timeline_drag(App const *app, Layout const *layout, float top,
                                int32_t first_day) {
-    const Timeline_Drag *drag = &app->timeline_drag;
+    Timeline_Drag const *drag = &app->timeline_drag;
     if (drag->event_id == 0 || !drag->moved) {
         return;
     }
-    const Event *event = app_event_find(app, drag->event_id);
+    Event const *event = app_event_find(app, drag->event_id);
     if (event == NULL) {
         return;
     }
-    const Vector2 pointer = GetMousePosition();
-    const int32_t pointer_day = first_day + timeline_column_nearest(layout, pointer.x);
-    const Event moved = timeline_drag_result(event, drag, timeline_minute_at(pointer.y, top),
+    Vector2 const pointer = GetMousePosition();
+    int32_t const pointer_day = first_day + timeline_column_nearest(layout, pointer.x);
+    Event const moved = timeline_drag_result(event, drag, timeline_minute_at(pointer.y, top),
                                              pointer_day, timeline_drag_step(app));
-    const int32_t day_delta = timeline_drag_day_delta(drag, pointer_day);
-    const int32_t column = drag->press_day + day_delta - first_day;
+    int32_t const day_delta = timeline_drag_day_delta(drag, pointer_day);
+    int32_t const column = drag->press_day + day_delta - first_day;
     if (column < 0 || column >= layout->columns) {
         return;
     }
-    const Rectangle day = { layout->grid.x + (float)column * layout->cell_width, top,
+    Rectangle const day = { layout->grid.x + (float)column * layout->cell_width, top,
                             layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
     // The same height the saved item will be drawn at, across the whole day.
-    const Timeline_Item item = timeline_item_make(&moved, 0);
-    const Rectangle block = timeline_item_block(day, &item);
+    Timeline_Item const item = timeline_item_make(&moved, 0);
+    Rectangle const block = timeline_item_block(day, &item);
     DrawRectangleRec(block, Fade(event_color(event, app_now(app)), 0.75f));
     DrawRectangleLinesEx(block, 2, style_color(BORDER_COLOR_PRESSED));
-    const Minute_Range range = event_time_range(&moved);
+    Minute_Range const range = event_time_range(&moved);
     char start[TIME_TEXT_SIZE] = "";
     char end[TIME_TEXT_SIZE] = "";
     time_format(range.minute_top, start, sizeof(start));
@@ -2939,7 +2972,7 @@ static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_
     }
     DrawRectangleRec(day, style_color(day_property));
     if (busy_top < busy_bottom) {
-        const float pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
+        float const pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
         Rectangle busy = { day.x, day.y + (float)busy_top * pixels_per_minute, day.width,
                            (float)(busy_bottom - busy_top) * pixels_per_minute };
         Color busy_color = timeline_busy_color;
@@ -2957,16 +2990,16 @@ static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_
 /**
  * A block from the item's start to its end, with its time and title on the top line.
  */
-static void draw_timeline_item(const App *app, const Event *event, Rectangle block,
+static void draw_timeline_item(App const *app, Event const *event, Rectangle block,
                                int32_t day_number) {
     assert(event_duration_days(event) == 0);
     assert(block.width > 0.0f);
     assert(block.height > 0.0f);
 
     // A one-day item's occurrence starts on the day it is drawn on.
-    const bool task = event->kind == EVENT_KIND_TASK;
-    const bool done = task && app_task_done(app, event->id, day_number);
-    const Color color = event_color(event, app_now(app));
+    bool const task = event->kind == EVENT_KIND_TASK;
+    bool const done = task && app_task_done(app, event->id, day_number);
+    Color const color = event_color(event, app_now(app));
     if (task) {
         DrawRectangleRec(block, Fade(color, task_fill_alpha(done)));
         DrawRectangleLinesEx(block, 1, Fade(color, task_outline_alpha(done)));
@@ -2982,7 +3015,7 @@ static void draw_timeline_item(const App *app, const Event *event, Rectangle blo
 /**
  * The items with a time that occur on day_number, in App.events' order. Returns how many.
  */
-static int32_t timeline_items_collect(const App *app, int32_t day_number, Array_Slice items) {
+static int32_t timeline_items_collect(App const *app, int32_t day_number, Array_Slice items) {
     assert(app->event_count <= EVENT_COUNT_MAX);
     // Room for every event, as in the worst case every one of them is on the day.
     assert(items.count >= app->event_count);
@@ -2990,7 +3023,7 @@ static int32_t timeline_items_collect(const App *app, int32_t day_number, Array_
     Timeline_Item *timeline_items = items.items;
     int32_t count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
-        const Event *event = &app->events[i];
+        Event const *event = &app->events[i];
         if (event_is_timed(event) && event_occurs_on_day(event, day_number)) {
             timeline_items[count] = timeline_item_make(event, i);
             count++;
@@ -3004,7 +3037,7 @@ static int32_t timeline_items_collect(const App *app, int32_t day_number, Array_
  * The minutes an item's block covers: from its start to its end time, or an hour from the one
  * time it has; at least TIMELINE_ITEM_MINUTES_MIN, and within the day.
  */
-static Timeline_Item timeline_item_make(const Event *event, int32_t event_index) {
+static Timeline_Item timeline_item_make(Event const *event, int32_t event_index) {
     assert(event_is_timed(event));
     assert(event_index >= 0);
 
@@ -3046,7 +3079,7 @@ static void timeline_items_sort(Array_Slice items) {
 
     Timeline_Item *timeline_items = items.items;
     for (int32_t i = 1; i < items.count; i++) {
-        const Timeline_Item item = timeline_items[i];
+        Timeline_Item const item = timeline_items[i];
         int32_t j = i;
         // Bounded by i, which j counts down from.
         while (j > 0 && timeline_item_is_before(&item, &timeline_items[j - 1])) {
@@ -3061,7 +3094,7 @@ static void timeline_items_sort(Array_Slice items) {
  * Earlier starts first, and of two that start together, the longer first, so that it takes
  * the leftmost lane and the shorter one sits beside it.
  */
-static bool timeline_item_is_before(const Timeline_Item *a, const Timeline_Item *b) {
+static bool timeline_item_is_before(Timeline_Item const *a, Timeline_Item const *b) {
     if (a->minute_top != b->minute_top) {
         return a->minute_top < b->minute_top;
     }
@@ -3091,7 +3124,7 @@ static void timeline_items_assign_lanes(Array_Slice items) {
             group_first_index = i;
             lane_count = 0;
         }
-        const int32_t lane = timeline_lane_find(array_slice_make(lane_bottoms, lane_count),
+        int32_t const lane = timeline_lane_find(array_slice_make(lane_bottoms, lane_count),
                                                 item->minute_top);
         if (lane == lane_count) {
             lane_count++;
@@ -3118,8 +3151,8 @@ static void timeline_items_assign_lanes(Array_Slice items) {
  * lane_count, while there may be more; else the lane that frees up first.
  */
 static int32_t timeline_lane_find(Array_Slice lanes, int32_t minute_top) {
-    const int32_t *lane_bottoms = lanes.items;
-    const int32_t lane_count = lanes.count;
+    int32_t const *lane_bottoms = lanes.items;
+    int32_t const lane_count = lanes.count;
     assert(lane_count >= 0);
     assert(lane_count <= TIMELINE_LANE_COUNT_MAX);
 
@@ -3160,8 +3193,8 @@ static void timeline_items_set_lane_count(Array_Slice items, int32_t first_index
 /**
  * The focused item, if it occurs on the selected day; its creation dot is ringed in the grid.
  */
-static const Event *focused_event_find(const App *app) {
-    const Event *event = app_event_find(app, app->event_focused_id);
+static Event const *focused_event_find(App const *app) {
+    Event const *event = app_event_find(app, app->event_focused_id);
     if (event == NULL) {
         return NULL;
     }
@@ -3173,7 +3206,7 @@ static const Event *focused_event_find(const App *app) {
 }
 
 static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t column,
-                           const Event *focused) {
+                           Event const *focused) {
     Date date = date_from_day_number(day_number);
     // Days of the next and previous month are dimmed in the month view only; a week or day
     // shows its days alike.
@@ -3193,7 +3226,7 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
 
     draw_grid_cell_day_number(app, cell, date, in_month);
     draw_grid_cell_creation_markers(app, cell, day_number, focused);
-    const int64_t item_id = draw_grid_cell_events(app, cell, day_number, column);
+    int64_t const item_id = draw_grid_cell_events(app, cell, day_number, column);
     if (item_id != 0) {
         app->cursor = APP_CURSOR_HAND;
     }
@@ -3220,7 +3253,7 @@ static void app_focus_item(App *app, int64_t id) {
     app->panel_reveal_focused = true;
 }
 
-static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date, bool in_month) {
+static void draw_grid_cell_day_number(App const *app, Rectangle cell, Date date, bool in_month) {
     char number[4] = "";
     snprintf(number, sizeof(number), "%" PRId32, date.day);
     Vector2 position = { cell.x + 10, cell.y + 7 };
@@ -3245,10 +3278,10 @@ static void draw_grid_cell_day_number(const App *app, Rectangle cell, Date date,
  * One dot per event created on this day, right to left from the top-right corner. The focused
  * event's dot gets a ring, so that the day it was created is easy to find.
  */
-static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int32_t day_number,
-                                            const Event *focused) {
-    const float radius = (float)CREATION_MARKER_RADIUS_PIXELS;
-    const float spacing = 2 * radius + 6;
+static void draw_grid_cell_creation_markers(App const *app, Rectangle cell, int32_t day_number,
+                                            Event const *focused) {
+    float const radius = (float)CREATION_MARKER_RADIUS_PIXELS;
+    float const spacing = 2 * radius + 6;
     Vector2 center = { cell.x + cell.width - 14, cell.y + 7 + TEXT_SIZE_PIXELS / 2.0f };
     // Slots between the day number and the right edge, each holding a dot or the "+".
     int32_t slot_count = (int32_t)((cell.width - 14 - DAY_NUMBER_WIDTH_PIXELS) / spacing) + 1;
@@ -3267,7 +3300,7 @@ static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int3
 
     int32_t marker_count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
-        const Event *event = &app->events[i];
+        Event const *event = &app->events[i];
         if (!event_created_on_day(event, day_number)) {
             continue;
         }
@@ -3288,9 +3321,9 @@ static void draw_grid_cell_creation_markers(const App *app, Rectangle cell, int3
 /**
  * Returns the id of the item whose bar the pointer is over, or 0.
  */
-static int64_t draw_grid_cell_events(const App *app, Rectangle cell, int32_t day_number,
+static int64_t draw_grid_cell_events(App const *app, Rectangle cell, int32_t day_number,
                                      int32_t column) {
-    const float slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
+    float const slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
     float top = cell.y + CELL_TOP_LINE_PIXELS;
     int32_t slot_count =
         (int32_t)((cell.y + cell.height - CELL_BOTTOM_MARGIN_PIXELS - top) / slot_height);
@@ -3301,7 +3334,7 @@ static int64_t draw_grid_cell_events(const App *app, Rectangle cell, int32_t day
 
     int32_t overlap_count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
-        const Event *event = &app->events[i];
+        Event const *event = &app->events[i];
         if (event_in_day_cell(event, app->range) && event_occurs_on_day(event, day_number)) {
             overlap_count++;
         }
@@ -3318,7 +3351,7 @@ static int64_t draw_grid_cell_events(const App *app, Rectangle cell, int32_t day
     for (int32_t pass = 0; pass < 2; pass++) {
         bool multi_day_pass = pass == 0;
         for (int32_t i = 0; i < app->event_count && bar_index < bar_count; i++) {
-            const Event *event = &app->events[i];
+            Event const *event = &app->events[i];
             int32_t start_day = 0;
             if ((event_duration_days(event) > 0) != multi_day_pass) {
                 continue;
@@ -3349,13 +3382,13 @@ static int64_t draw_grid_cell_events(const App *app, Rectangle cell, int32_t day
  * start_day is the start of the occurrence that covers day_number. Returns whether the pointer
  * is over the bar.
  */
-static bool draw_grid_cell_event_bar(const App *app, const Event *event, Rectangle bar_slot,
+static bool draw_grid_cell_event_bar(App const *app, Event const *event, Rectangle bar_slot,
                                      int32_t day_number, int32_t start_day, int32_t column) {
     assert(start_day <= day_number);
 
-    const bool task = event->kind == EVENT_KIND_TASK;
-    const bool done = task && app_task_done(app, event->id, start_day);
-    const Color color = event_color(event, app_now(app));
+    bool const task = event->kind == EVENT_KIND_TASK;
+    bool const done = task && app_task_done(app, event->id, start_day);
+    Color const color = event_color(event, app_now(app));
     bool starts_here = day_number == start_day;
     bool ends_here = day_number == start_day + event_duration_days(event);
     // Multi-day events run edge to edge between days, so that they read as one bar.
@@ -3368,7 +3401,7 @@ static bool draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
         right -= 4.0f;
     }
     Rectangle bar = { left, bar_slot.y, right - left, bar_slot.height };
-    const bool hovered = CheckCollisionPointRec(GetMousePosition(), bar);
+    bool const hovered = CheckCollisionPointRec(GetMousePosition(), bar);
     // A problem is one day long, so it is always labelled; the problems view draws it alike.
     if (event->kind == EVENT_KIND_PROBLEM) {
         app_draw_problem_bar(app, str_from_cstr(event->title), event->tasks_done, bar);
@@ -3397,15 +3430,15 @@ static bool draw_grid_cell_event_bar(const App *app, const Event *event, Rectang
  * a task, or a tick for a used opportunity, and struck through for a done task. Shared by the
  * day cells' bars and the timeline's blocks, so that an item reads the same in both.
  */
-static void draw_event_label(const App *app, const Event *event, Str label, Rectangle area,
+static void draw_event_label(App const *app, Event const *event, Str label, Rectangle area,
                              bool done) {
     assert(area.height > 0.0f);
 
-    const bool task = event->kind == EVENT_KIND_TASK;
+    bool const task = event->kind == EVENT_KIND_TASK;
     assert(task || !done);
 
-    const Text_Style *style = &app->fonts.small;
-    const float line_height = (float)EVENT_BAR_HEIGHT_PIXELS;
+    Text_Style const *style = &app->fonts.small;
+    float const line_height = (float)EVENT_BAR_HEIGHT_PIXELS;
     float text_x = area.x + 4;
     Color text_color = WHITE;
     scissor_begin(&app->fonts, area.x, area.y, area.width, area.height);
@@ -3442,11 +3475,11 @@ static void draw_event_label(const App *app, const Event *event, Str label, Rect
  * A problem has no time; its "!" marks it even where its color is hard to tell apart, and a
  * done problem has a tick instead.
  */
-void app_draw_problem_bar(const App *app, Str title, bool done, Rectangle bar) {
+void app_draw_problem_bar(App const *app, Str title, bool done, Rectangle bar) {
     assert(bar.width > 0.0f);
     assert(bar.height > 0.0f);
 
-    const Text_Style *style = &app->fonts.small;
+    Text_Style const *style = &app->fonts.small;
     Color fill = problem_color;
     Str marker = STR("! ");
     if (done) {
@@ -3473,13 +3506,13 @@ void app_draw_problem_bar(const App *app, Str title, bool done, Rectangle bar) {
  * The label starts where it would in a day cell, so that the checkbox is where draw_event_label
  * draws it.
  */
-Rectangle app_draw_task_bar(const App *app, const Task_Occurrence *occurrence, Rectangle bar) {
+Rectangle app_draw_task_bar(App const *app, Task_Occurrence const *occurrence, Rectangle bar) {
     assert(occurrence->task.kind == EVENT_KIND_TASK);
     assert(bar.width > 0.0f);
     assert(bar.height > 0.0f);
 
-    const Event task = event_occurrence_at(&occurrence->task, occurrence->start_day);
-    const Color color = event_color(&task, app_now(app));
+    Event const task = event_occurrence_at(&occurrence->task, occurrence->start_day);
+    Color const color = event_color(&task, app_now(app));
     DrawRectangleRec(bar, Fade(color, task_fill_alpha(occurrence->done)));
     draw_bar_outline(bar, true, true, Fade(color, task_outline_alpha(occurrence->done)));
 
@@ -3548,20 +3581,20 @@ static void draw_check_mark(Rectangle box, bool done, Color color) {
 
 static void draw_panel(App *app, Rectangle panel) {
     GuiPanel(panel, NULL);
-    const float padding = (float)PADDING_PIXELS;
+    float const padding = (float)PADDING_PIXELS;
     Rectangle area = { panel.x + padding, panel.y + padding, panel.width - 2 * padding,
                        panel.height - 2 * padding };
 
     draw_text(&app->fonts.ui, weekday_name(date_weekday(app->selected)), area.x, area.y,
               style_color(TEXT_COLOR_DISABLED));
     char heading[TEXT_LINE_SIZE] = "";
-    const Str selected_month = month_name(app->selected.month);
+    Str const selected_month = month_name(app->selected.month);
     snprintf(heading, sizeof(heading), "%" PRId32 " %.*s %" PRId32, app->selected.day,
              STR_ARGUMENTS(selected_month), app->selected.year);
     draw_text(&app->fonts.heading, str_from_cstr(heading), area.x, area.y + TEXT_LINE_HEIGHT_PIXELS,
               style_color(TEXT_COLOR_NORMAL));
 
-    const float heading_height = 72;
+    float const heading_height = 72;
     Rectangle body = { area.x, area.y + heading_height, area.width,
                        area.height - heading_height };
     if (app->form.open) {
@@ -3575,10 +3608,10 @@ static void draw_panel(App *app, Rectangle panel) {
  * Two rows of two buttons, because "New opportunity" does not fit in a quarter of the panel.
  */
 static void draw_panel_events(App *app, Rectangle body) {
-    const float gap = 8;
-    const float button_width = (body.width - gap) / 2;
-    const float right_x = body.x + button_width + gap;
-    const float second_y = body.y + BUTTON_HEIGHT_PIXELS + gap;
+    float const gap = 8;
+    float const button_width = (body.width - gap) / 2;
+    float const right_x = body.x + button_width + gap;
+    float const second_y = body.y + BUTTON_HEIGHT_PIXELS + gap;
     Rectangle event_button = { body.x, body.y, button_width, BUTTON_HEIGHT_PIXELS };
     Rectangle task_button = { right_x, body.y, button_width, BUTTON_HEIGHT_PIXELS };
     Rectangle problem_button = { body.x, second_y, button_width, BUTTON_HEIGHT_PIXELS };
@@ -3629,7 +3662,7 @@ static void draw_panel_events(App *app, Rectangle body) {
 /**
  * Height of the selected day's cards stacked with their gaps, or 0 when the day has none.
  */
-static float draw_panel_events_height(const App *app, float card_width) {
+static float draw_panel_events_height(App const *app, float card_width) {
     assert(card_width > 0.0f);
     assert(app->event_count <= EVENT_COUNT_MAX);
 
@@ -3662,8 +3695,8 @@ static void scroll_update(Scroll *scroll, Rectangle list, float content_height,
     assert(list.height > 0.0f);
     assert(content_height > 0.0f);
 
-    const Vector2 mouse = GetMousePosition();
-    const bool over = CheckCollisionPointRec(mouse, list);
+    Vector2 const mouse = GetMousePosition();
+    bool const over = CheckCollisionPointRec(mouse, list);
     // A press is forgotten one frame after its release, so that on the release frame the rows
     // still know whether it was a drag, and do not take it as a click.
     if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT) && !IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
@@ -3713,12 +3746,12 @@ static void scroll_update(Scroll *scroll, Rectangle list, float content_height,
 static void draw_panel_events_list(App *app, Rectangle list) {
     assert(list.height > 0.0f);
 
-    const Scroll *scroll = &app->panel_scroll;
+    Scroll const *scroll = &app->panel_scroll;
     assert(scroll->offset_pixels >= 0.0f);
 
-    const bool locked = scroll->dragging || !CheckCollisionPointRec(GetMousePosition(), list);
+    bool const locked = scroll->dragging || !CheckCollisionPointRec(GetMousePosition(), list);
     // Locked already when the app has no input; that lock stays until app_frame lifts it.
-    const bool locked_before = GuiIsLocked();
+    bool const locked_before = GuiIsLocked();
     if (locked) {
         GuiLock();
     }
@@ -3729,7 +3762,7 @@ static void draw_panel_events_list(App *app, Rectangle list) {
     int32_t selected_day = date_to_day_number(app->selected);
     float y = list.y - scroll->offset_pixels;
     for (int32_t i = 0; i < app->event_count; i++) {
-        const Event *event = &app->events[i];
+        Event const *event = &app->events[i];
         int32_t start_day = 0;
         if (!event_occurrence_on_day(event, selected_day, &start_day)) {
             continue;
@@ -3772,15 +3805,15 @@ static void draw_panel_events_reveal(App *app, Rectangle list) {
     assert(app->panel_reveal_focused);
 
     app->panel_reveal_focused = false;
-    const int32_t selected_day = date_to_day_number(app->selected);
+    int32_t const selected_day = date_to_day_number(app->selected);
     float card_top = 0.0f;
     for (int32_t i = 0; i < app->event_count; i++) {
-        const Event *event = &app->events[i];
+        Event const *event = &app->events[i];
         int32_t start_day = 0;
         if (!event_occurrence_on_day(event, selected_day, &start_day)) {
             continue;
         }
-        const float card_height = event_card_height(&app->fonts, event,
+        float const card_height = event_card_height(&app->fonts, event,
                                                     event->id == app->event_delete_id,
                                                     list.width);
         if (event->id == app->event_focused_id) {
@@ -3823,25 +3856,25 @@ static void draw_scrollbar(Rectangle list, float content_height, float offset_pi
  * the card, because it is permanent and also removes every repeat of a repeating event.
  * A task's checkbox marks the occurrence on this card, which starts on event->start_date.
  */
-static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) {
-    const float x = card.x + 16;
-    const Rectangle delete_button = { card.x + card.width - 82, card.y + 6, 72, 24 };
-    const Rectangle checkbox = { x, card.y + 8, 16, 16 };
-    const Rectangle confirm_button = { x, card.y + card.height - 40, 110, 32 };
-    const Rectangle cancel_button = { x + 122, confirm_button.y, 110, 32 };
-    const bool task = event->kind == EVENT_KIND_TASK;
-    const int32_t start_day = date_to_day_number(event->start_date);
-    const bool done = task && app_task_done(app, event->id, start_day);
-    const bool confirming = event->id == app->event_delete_id;
-    const bool focused = event->id == app->event_focused_id;
-    const Vector2 mouse = GetMousePosition();
+static bool draw_panel_event_card(App *app, Event const *event, Rectangle card) {
+    float const x = card.x + 16;
+    Rectangle const delete_button = { card.x + card.width - 82, card.y + 6, 72, 24 };
+    Rectangle const checkbox = { x, card.y + 8, 16, 16 };
+    Rectangle const confirm_button = { x, card.y + card.height - 40, 110, 32 };
+    Rectangle const cancel_button = { x + 122, confirm_button.y, 110, 32 };
+    bool const task = event->kind == EVENT_KIND_TASK;
+    int32_t const start_day = date_to_day_number(event->start_date);
+    bool const done = task && app_task_done(app, event->id, start_day);
+    bool const confirming = event->id == app->event_delete_id;
+    bool const focused = event->id == app->event_focused_id;
+    Vector2 const mouse = GetMousePosition();
     bool hovered = CheckCollisionPointRec(mouse, card);
 
     draw_panel_event_card_frame(app, event, card, hovered, focused, confirming);
     draw_panel_event_card_title(app, event, card, done);
 
     if (confirming) {
-        const Str question = event_delete_question(event);
+        Str const question = event_delete_question(event);
         draw_text(&app->fonts.small, question, x, card.y + 8 + TEXT_LINE_HEIGHT_PIXELS_SMALL,
                   error_color);
         if (GuiButton(confirm_button, "Delete")) {
@@ -3875,7 +3908,7 @@ static bool draw_panel_event_card(App *app, const Event *event, Rectangle card) 
  * The card's background, its stripe in the item's color, and its border, which is thicker while
  * the card is focused or asks about deleting.
  */
-static void draw_panel_event_card_frame(const App *app, const Event *event, Rectangle card,
+static void draw_panel_event_card_frame(App const *app, Event const *event, Rectangle card,
                                         bool hovered, bool focused, bool confirming) {
     int32_t card_property = BASE_COLOR_NORMAL;
     if (hovered) {
@@ -3900,11 +3933,11 @@ static void draw_panel_event_card_frame(const App *app, const Event *event, Rect
  * and a missed opportunity's dimmed; a done target's has a tick before it, in the green of its
  * stripe.
  */
-static void draw_panel_event_card_title(const App *app, const Event *event, Rectangle card,
+static void draw_panel_event_card_title(App const *app, Event const *event, Rectangle card,
                                         bool done) {
-    const Text_Style *title_style = &app->fonts.small_strong;
-    const float x = card.x + 16;
-    const bool dimmed = done || event_is_missed(event, app_now(app));
+    Text_Style const *title_style = &app->fonts.small_strong;
+    float const x = card.x + 16;
+    bool const dimmed = done || event_is_missed(event, app_now(app));
     // Room for the checkbox of a task, or the tick of a used opportunity, before the title.
     float title_x = x;
     if (event->kind == EVENT_KIND_TASK || event->tasks_done) {
@@ -3914,7 +3947,7 @@ static void draw_panel_event_card_title(const App *app, const Event *event, Rect
     if (dimmed) {
         title_property = TEXT_COLOR_DISABLED;
     }
-    const Color title_color = style_color(title_property);
+    Color const title_color = style_color(title_property);
     scissor_begin(&app->fonts, card.x, card.y, card.width - 90, card.height);
     if (event->tasks_done) {
         draw_tick((Rectangle){ x + 1, card.y + 9, 14, 13 }, 2.5f, target_done_color);
@@ -3933,11 +3966,11 @@ static void draw_panel_event_card_title(const App *app, const Event *event, Rect
  * The lines below the title: dates and repeat, location, description, repeat end, and creation,
  * with how long ago that was. A problem shows only its kind, description and creation.
  */
-static void draw_panel_event_card_details(const Fonts *fonts, const Event *event, Date_Time now,
+static void draw_panel_event_card_details(Fonts const *fonts, Event const *event, Date_Time now,
                                           Rectangle card) {
-    const float x = card.x + 16;
-    const float line = (float)TEXT_LINE_HEIGHT_PIXELS_SMALL;
-    const Text_Style *style = &fonts->small;
+    float const x = card.x + 16;
+    float const line = (float)TEXT_LINE_HEIGHT_PIXELS_SMALL;
+    Text_Style const *style = &fonts->small;
     char text[TEXT_LINE_SIZE] = "";
     scissor_begin(fonts, card.x, card.y, card.width - 4, card.height);
     float y = card.y + 8 + line;
@@ -3949,7 +3982,7 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
         draw_text(style, str_from_cstr(text), x, y, style_color(TEXT_COLOR_NORMAL));
     }
     if (event->description[0] != '\0') {
-        const Str description = str_from_cstr(event->description);
+        Str const description = str_from_cstr(event->description);
         Text_Lines lines = text_wrap(style, description,
                                      card.width - (float)CARD_TEXT_MARGIN_PIXELS);
         for (int32_t i = 0; i < lines.count; i++) {
@@ -3968,7 +4001,7 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
     if (event->repeat_has_end) {
         y += line;
         Date end = event->repeat_end_date;
-        const Str end_month = month_short_name(end.month);
+        Str const end_month = month_short_name(end.month);
         snprintf(text, sizeof(text), "Repeats until %" PRId32 " %.*s %" PRId32, end.day,
                  STR_ARGUMENTS(end_month), end.year);
         draw_text(style, str_from_cstr(text), x, y, style_color(TEXT_COLOR_NORMAL));
@@ -3982,10 +4015,10 @@ static void draw_panel_event_card_details(const Fonts *fonts, const Event *event
 /**
  * Explains the grid's creation dots.
  */
-static void draw_panel_legend(const Fonts *fonts, Rectangle area) {
-    const Color sample = event_colors[0];
-    const Color dim = style_color(TEXT_COLOR_DISABLED);
-    const float text_x = area.x + 26;
+static void draw_panel_legend(Fonts const *fonts, Rectangle area) {
+    Color const sample = event_colors[0];
+    Color const dim = style_color(TEXT_COLOR_DISABLED);
+    float const text_x = area.x + 26;
     DrawCircleV((Vector2){ area.x + 8, area.y + 8 }, CREATION_MARKER_RADIUS_PIXELS, sample);
     draw_text(&fonts->small, STR("Day it was created"), text_x, area.y, dim);
 
@@ -3998,10 +4031,17 @@ static void draw_panel_legend(const Fonts *fonts, Rectangle area) {
 
 static void draw_panel_form(App *app, Rectangle body) {
     Form *form = &app->form;
-    static const char *const headings[EVENT_KIND_COUNT] = {
+    // While the picker is open, it is on top: the controls under it are locked, so that a
+    // press meant for it does not reach them. It reads the pointer itself, below.
+    bool const locked_before = GuiIsLocked();
+    bool const picker_locks = form->picker_open && !locked_before;
+    if (picker_locks) {
+        GuiLock();
+    }
+    static char const *const headings[EVENT_KIND_COUNT] = {
         "Edit event", "Edit task", "Edit problem", "Edit opportunity",
     };
-    const bool editing = form->editing_id != 0;
+    bool const editing = form->editing_id != 0;
     // A new entry has no heading: the kind selector in its place says what it is.
     if (editing) {
         draw_text(&app->fonts.ui, str_from_cstr(headings[form->kind]), body.x, body.y,
@@ -4014,7 +4054,7 @@ static void draw_panel_form(App *app, Rectangle body) {
     }
 
     // The first field's label sits below the heading and its box below the label.
-    const float fields_y = body.y + 32 + FORM_LABEL_HEIGHT_PIXELS;
+    float const fields_y = body.y + 32 + FORM_LABEL_HEIGHT_PIXELS;
     float y = draw_panel_form_fields(app, body, fields_y);
     // An error takes the hint's line, because both are about the fields and the error is what
     // needs reading then; sharing the line leaves a task's checklist more room.
@@ -4031,7 +4071,7 @@ static void draw_panel_form(App *app, Rectangle body) {
     // The buttons sit at the bottom of the panel, so that they stay in place whatever the kind,
     // and a task's checklist of targets, or an opportunity's tasks, fill the room between the
     // fields and them.
-    const float buttons_y = body.y + body.height - BUTTON_HEIGHT_PIXELS;
+    float const buttons_y = body.y + body.height - BUTTON_HEIGHT_PIXELS;
     if (form->kind == EVENT_KIND_TASK) {
         draw_panel_form_targets(app, body, y + FORM_LABEL_HEIGHT_PIXELS,
                                 buttons_y - FORM_ROW_GAP_PIXELS);
@@ -4041,6 +4081,13 @@ static void draw_panel_form(App *app, Rectangle body) {
                                      buttons_y - FORM_ROW_GAP_PIXELS);
     }
     draw_panel_form_buttons(app, body, buttons_y);
+    if (picker_locks) {
+        GuiUnlock();
+    }
+    // Last, so that it covers the fields and buttons it overlaps.
+    if (form->picker_open) {
+        draw_panel_form_picker(app, body);
+    }
 }
 
 /**
@@ -4049,7 +4096,7 @@ static void draw_panel_form(App *app, Rectangle body) {
  * wide as its label, because "Opportunity" needs more room than an even share leaves it.
  */
 static void draw_panel_form_kinds(App *app, Rectangle body, bool editing) {
-    static const char *const names[EVENT_KIND_COUNT] = { "Event", "Task", "Problem",
+    static char const *const names[EVENT_KIND_COUNT] = { "Event", "Task", "Problem",
                                                          "Opportunity" };
     static_assert(EVENT_KIND_EVENT == 0, "Event and task are the first kinds.");
     static_assert(EVENT_KIND_TASK == 1, "Event and task are the first kinds.");
@@ -4091,18 +4138,18 @@ static void draw_panel_form_kinds(App *app, Rectangle body, bool editing) {
  * permanent and also removes every repeat.
  */
 static void draw_panel_form_buttons(App *app, Rectangle body, float y) {
-    const float gap = 12;
-    const bool editing = app->form.editing_id != 0;
+    float const gap = 12;
+    bool const editing = app->form.editing_id != 0;
     int32_t button_count = 2;
     if (editing) {
         button_count = 3;
     }
-    const float button_width = (body.width - (float)(button_count - 1) * gap) / (float)button_count;
+    float const button_width = (body.width - (float)(button_count - 1) * gap) / (float)button_count;
     if (GuiButton((Rectangle){ body.x, y, button_width, BUTTON_HEIGHT_PIXELS }, "Cancel")) {
         form_close(&app->form);
         return;
     }
-    const float save_x = body.x + button_width + gap;
+    float const save_x = body.x + button_width + gap;
     if (GuiButton((Rectangle){ save_x, y, button_width, BUTTON_HEIGHT_PIXELS }, "Save")) {
         app_form_submit(app);
         return;
@@ -4110,16 +4157,16 @@ static void draw_panel_form_buttons(App *app, Rectangle body, float y) {
     if (!editing) {
         return;
     }
-    const Rectangle delete_button = { save_x + button_width + gap, y, button_width,
+    Rectangle const delete_button = { save_x + button_width + gap, y, button_width,
                                       BUTTON_HEIGHT_PIXELS };
     // Red for this button only; the styles are global in raygui, so put them back after.
-    static const int32_t properties[] = { BASE_COLOR_NORMAL, BASE_COLOR_FOCUSED,
+    static int32_t const properties[] = { BASE_COLOR_NORMAL, BASE_COLOR_FOCUSED,
                                           BASE_COLOR_PRESSED, BORDER_COLOR_NORMAL,
                                           BORDER_COLOR_FOCUSED, BORDER_COLOR_PRESSED,
                                           TEXT_COLOR_NORMAL, TEXT_COLOR_FOCUSED,
                                           TEXT_COLOR_PRESSED };
     enum { PROPERTY_COUNT = sizeof(properties) / sizeof(properties[0]) };
-    const Color reds[PROPERTY_COUNT] = {
+    Color const reds[PROPERTY_COUNT] = {
         { 185, 40, 40, 255 }, { 210, 55, 55, 255 }, { 150, 30, 30, 255 },
         { 120, 20, 20, 255 }, { 120, 20, 20, 255 }, { 120, 20, 20, 255 },
         { 255, 255, 255, 255 }, { 255, 255, 255, 255 }, { 255, 255, 255, 255 },
@@ -4129,12 +4176,12 @@ static void draw_panel_form_buttons(App *app, Rectangle body, float y) {
         saved[i] = GuiGetStyle(BUTTON, properties[i]);
         GuiSetStyle(BUTTON, properties[i], (int32_t)ColorToInt(reds[i]));
     }
-    const bool pressed = GuiButton(delete_button, "Delete");
+    bool const pressed = GuiButton(delete_button, "Delete");
     for (int32_t i = 0; i < PROPERTY_COUNT; i++) {
         GuiSetStyle(BUTTON, properties[i], saved[i]);
     }
     if (pressed) {
-        const int64_t id = app->form.editing_id;
+        int64_t const id = app->form.editing_id;
         form_close(&app->form);
         app->event_delete_id = id;
         app->event_focused_id = id;
@@ -4147,7 +4194,7 @@ static void draw_panel_form_buttons(App *app, Rectangle body, float y) {
  * hidden fields, so that what follows them does not move as the repeat choice changes.
  */
 static float draw_panel_form_rows_end(float y) {
-    const float row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
+    float const row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
     return y + (FORM_ROW_COUNT - 1) * row_height + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
 }
 
@@ -4156,16 +4203,16 @@ static float draw_panel_form_rows_end(float y) {
  */
 static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     Form *form = &app->form;
-    const Fonts *fonts = &app->fonts;
-    const float row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
-    const float gap = 12;
-    const float time_width = 96;
-    const float date_width = body.width - time_width - gap;
-    const float time_x = body.x + date_width + gap;
-    const float city_width = 136;
-    const float address_width = body.width - city_width - gap;
-    const float city_x = body.x + address_width + gap;
-    const float end_y = draw_panel_form_rows_end(y);
+    Fonts const *fonts = &app->fonts;
+    float const row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
+    float const gap = 12;
+    float const time_width = 96;
+    float const date_width = body.width - time_width - gap;
+    float const time_x = body.x + date_width + gap;
+    float const city_width = 136;
+    float const address_width = body.width - city_width - gap;
+    float const city_x = body.x + address_width + gap;
+    float const end_y = draw_panel_form_rows_end(y);
     if (form->kind == EVENT_KIND_PROBLEM) {
         draw_panel_form_fields_problem(app, body, y, end_y);
         return end_y;
@@ -4174,19 +4221,20 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     draw_panel_form_field(fonts, form, FORM_FIELD_TITLE, STR("Title"),
                           (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
     y += row_height;
-    draw_panel_form_field(fonts, form, FORM_FIELD_START_DATE, STR("Start date"),
-                          (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+    draw_panel_form_date_field(fonts, form, app->selected, FORM_FIELD_START_DATE,
+                               STR("Start date"),
+                               (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
     draw_panel_form_field(fonts, form, FORM_FIELD_START_TIME, STR("Time"),
                           (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
     y += row_height;
     // An opportunity's end is the last moment it can be used.
-    const bool opportunity = form->kind == EVENT_KIND_OPPORTUNITY;
+    bool const opportunity = form->kind == EVENT_KIND_OPPORTUNITY;
     Str end_label = STR("End date");
     if (opportunity) {
         end_label = STR("Deadline");
     }
-    draw_panel_form_field(fonts, form, FORM_FIELD_END_DATE, end_label,
-                          (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+    draw_panel_form_date_field(fonts, form, app->selected, FORM_FIELD_END_DATE, end_label,
+                               (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
     draw_panel_form_field(fonts, form, FORM_FIELD_END_TIME, STR("Time"),
                           (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
     y += row_height;
@@ -4214,15 +4262,16 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     // The row is kept while hidden, so that the buttons do not move under the pointer.
     y += row_height;
     if (form_field_visible(form, FORM_FIELD_REPEAT_END_DATE)) {
-        draw_panel_form_field(fonts, form, FORM_FIELD_REPEAT_END_DATE,
-                              STR("Repeat until (optional)"),
-                              (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+        draw_panel_form_date_field(fonts, form, app->selected, FORM_FIELD_REPEAT_END_DATE,
+                                   STR("Repeat until (optional)"),
+                                   (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
     }
     // Never both: a task that repeats has no deadline, and one that does not has no repeat end.
     if (form_field_visible(form, FORM_FIELD_DEADLINE_DATE)) {
         assert(!form_field_visible(form, FORM_FIELD_REPEAT_END_DATE));
-        draw_panel_form_field(fonts, form, FORM_FIELD_DEADLINE_DATE, STR("Deadline (optional)"),
-                              (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
+        draw_panel_form_date_field(fonts, form, app->selected, FORM_FIELD_DEADLINE_DATE,
+                                   STR("Deadline (optional)"),
+                                   (Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS });
         draw_panel_form_field(fonts, form, FORM_FIELD_DEADLINE_TIME, STR("Time"),
                               (Rectangle){ time_x, y, time_width, FIELD_HEIGHT_PIXELS });
     }
@@ -4236,8 +4285,8 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
  */
 static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, float end_y) {
     Form *form = &app->form;
-    const Fonts *fonts = &app->fonts;
-    const float row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
+    Fonts const *fonts = &app->fonts;
+    float const row_height = FORM_LABEL_HEIGHT_PIXELS + FIELD_HEIGHT_PIXELS + FORM_ROW_GAP_PIXELS;
     draw_panel_form_field(fonts, form, FORM_FIELD_TITLE, STR("Name"),
                           (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
     y += row_height;
@@ -4254,8 +4303,8 @@ static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, fl
         (void)parsed; // Unused when assertions are compiled out.
     }
     char text[TEXT_LINE_SIZE] = "";
-    const Str date_weekday_name = weekday_name(date_weekday(date));
-    const Str date_month_name = month_name(date.month);
+    Str const date_weekday_name = weekday_name(date_weekday(date));
+    Str const date_month_name = month_name(date.month);
     snprintf(text, sizeof(text), "On %.*s, %" PRId32 " %.*s %" PRId32,
              STR_ARGUMENTS(date_weekday_name), date.day, STR_ARGUMENTS(date_month_name),
              date.year);
@@ -4270,13 +4319,13 @@ static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, fl
  * The status on the label line above y, then one line per linked task, with whether it is
  * done, down to end_y. Tasks that do not fit are counted on the last line.
  */
-static void draw_panel_form_target_tasks(const App *app, Rectangle body, float y, float end_y) {
-    const Form *form = &app->form;
-    const Fonts *fonts = &app->fonts;
+static void draw_panel_form_target_tasks(App const *app, Rectangle body, float y, float end_y) {
+    Form const *form = &app->form;
+    Fonts const *fonts = &app->fonts;
     assert(form->task_count <= LINK_COUNT_MAX);
     assert(y < end_y);
-    const Color normal = style_color(TEXT_COLOR_NORMAL);
-    const Color dim = style_color(TEXT_COLOR_DISABLED);
+    Color const normal = style_color(TEXT_COLOR_NORMAL);
+    Color const dim = style_color(TEXT_COLOR_DISABLED);
     if (!form->links_loaded) {
         draw_text(&fonts->ui, STR("Status unknown"), body.x, y - FORM_LABEL_HEIGHT_PIXELS, normal);
         return;
@@ -4287,20 +4336,20 @@ static void draw_panel_form_target_tasks(const App *app, Rectangle body, float y
         return;
     }
 
-    const float line = TEXT_LINE_HEIGHT_PIXELS_SMALL;
-    const int32_t line_count = (int32_t)((end_y - y) / line);
+    float const line = TEXT_LINE_HEIGHT_PIXELS_SMALL;
+    int32_t const line_count = (int32_t)((end_y - y) / line);
     // A phone too short for a task and the count of the rest shows only the status.
     if (line_count < 2) {
         return;
     }
-    const bool all_fit = form->task_count <= line_count && !form->links_truncated;
+    bool const all_fit = form->task_count <= line_count && !form->links_truncated;
     int32_t shown = line_count - 1;
     if (all_fit) {
         shown = form->task_count;
     }
     for (int32_t i = 0; i < shown; i++) {
-        const Linked_Task *task = &form->tasks[i];
-        const float line_y = y + 4 + (float)i * line;
+        Linked_Task const *task = &form->tasks[i];
+        float const line_y = y + 4 + (float)i * line;
         // In the task's own color, as on the calendar, so that it is easy to find there.
         Color color = event_color(&(Event){ .id = task->task_id, .kind = EVENT_KIND_TASK },
                                   app_now(app));
@@ -4314,7 +4363,7 @@ static void draw_panel_form_target_tasks(const App *app, Rectangle body, float y
         scissor_end(fonts);
     }
     if (!all_fit) {
-        const char *others = "";
+        char const *others = "";
         if (form->links_truncated) {
             others = ", and others not loaded";
         }
@@ -4329,8 +4378,8 @@ static void draw_panel_form_target_tasks(const App *app, Rectangle body, float y
  * The target's status on the label line above y, with how many of its tasks are done while some
  * are still to do; in the error color for an opportunity whose deadline has passed.
  */
-static void draw_panel_form_target_tasks_status(const App *app, Rectangle body, float y) {
-    const Form *form = &app->form;
+static void draw_panel_form_target_tasks_status(App const *app, Rectangle body, float y) {
+    Form const *form = &app->form;
     int32_t done_count = 0;
     for (int32_t i = 0; i < form->task_count; i++) {
         done_count += (int32_t)form->tasks[i].done;
@@ -4339,7 +4388,7 @@ static void draw_panel_form_target_tasks_status(const App *app, Rectangle body, 
     // one target is far beyond any real use (see LINK_COUNT_MAX).
     Target_Status status = target_status(form->task_count, done_count);
     // An opportunity's deadline as the form has it now, so that changing it shows at once.
-    const bool missed = form->kind == EVENT_KIND_OPPORTUNITY &&
+    bool const missed = form->kind == EVENT_KIND_OPPORTUNITY &&
                         form_deadline_is_missed(form, app_now(app),
                                                 status == TARGET_STATUS_DONE);
     Str name = target_status_name(status);
@@ -4370,7 +4419,7 @@ static void draw_panel_form_target_tasks_status(const App *app, Rectangle body, 
 static void draw_panel_form_targets(App *app, Rectangle body, float y, float end_y) {
     Form *form = &app->form;
     char heading[TEXT_LINE_SIZE] = "";
-    const char *newest_only = "";
+    char const *newest_only = "";
     if (form->links_truncated) {
         newest_only = ", newest only";
     }
@@ -4382,7 +4431,7 @@ static void draw_panel_form_targets(App *app, Rectangle body, float y, float end
               style_color(TEXT_COLOR_NORMAL));
     scissor_end(&app->fonts);
     if (!form->links_loaded || form->target_count == 0) {
-        const char *text = "Problems and opportunities could not be loaded.";
+        char const *text = "Problems and opportunities could not be loaded.";
         if (form->links_loaded) {
             text = "No problems or opportunities yet.";
         }
@@ -4397,14 +4446,14 @@ static void draw_panel_form_targets(App *app, Rectangle body, float y, float end
     }
 
     Rectangle list = { body.x, y, body.width, end_y - y };
-    const float content_height = (float)form->target_count * TARGET_ROW_HEIGHT_PIXELS;
+    float const content_height = (float)form->target_count * TARGET_ROW_HEIGHT_PIXELS;
     if (content_height > list.height) {
         list.width -= SCROLLBAR_GAP_PIXELS;
     }
     scroll_update(&form->targets_scroll, list, content_height, true);
-    const Scroll *scroll = &form->targets_scroll;
+    Scroll const *scroll = &form->targets_scroll;
     // A release opens nothing unless the press began here and stayed a tap.
-    const bool clickable = scroll->pressed && !scroll->dragging &&
+    bool const clickable = scroll->pressed && !scroll->dragging &&
                            CheckCollisionPointRec(GetMousePosition(), list);
     app->fonts.clip = list;
     app->fonts.clipping = true;
@@ -4430,20 +4479,20 @@ static void draw_panel_form_targets(App *app, Rectangle body, float y, float end
  * Returns true when the row was tapped or clicked, which toggles its check box. The box has the
  * target's color, so that problems and opportunities tell apart as on the calendar.
  */
-static bool draw_panel_form_targets_row(const App *app, const Link_Target *target,
+static bool draw_panel_form_targets_row(App const *app, Link_Target const *target,
                                         Rectangle row, bool clickable) {
     assert(event_kind_is_target(target->kind));
 
-    const Fonts *fonts = &app->fonts;
-    const bool hovered = CheckCollisionPointRec(GetMousePosition(), row);
+    Fonts const *fonts = &app->fonts;
+    bool const hovered = CheckCollisionPointRec(GetMousePosition(), row);
     if (hovered) {
         DrawRectangleRec(row, style_color(BASE_COLOR_FOCUSED));
     }
     DrawRectangleRec((Rectangle){ row.x, row.y + row.height - 1, row.width, 1 },
                      style_color(BORDER_COLOR_NORMAL));
-    const Target_Status status = target_status(target->task_count, target->task_done_count);
-    const bool done = status == TARGET_STATUS_DONE;
-    const bool missed = target->kind == EVENT_KIND_OPPORTUNITY &&
+    Target_Status const status = target_status(target->task_count, target->task_done_count);
+    bool const done = status == TARGET_STATUS_DONE;
+    bool const missed = target->kind == EVENT_KIND_OPPORTUNITY &&
                         opportunity_is_missed(target->end_date, target->end_minute, done,
                                               app_now(app));
     Color color = opportunity_color;
@@ -4453,14 +4502,14 @@ static bool draw_panel_form_targets_row(const App *app, const Link_Target *targe
     if (target->kind == EVENT_KIND_PROBLEM) {
         color = problem_color;
     }
-    const float box_size = 18;
+    float const box_size = 18;
     draw_check_mark((Rectangle){ row.x + 6, row.y + (row.height - box_size) / 2, box_size,
                                  box_size },
                     target->linked, color);
 
-    const float title_x = row.x + 34;
-    const float status_x = row.x + row.width - TARGET_STATUS_WIDTH_PIXELS;
-    const float text_y = row.y + (row.height - TEXT_LINE_HEIGHT_PIXELS) / 2;
+    float const title_x = row.x + 34;
+    float const status_x = row.x + row.width - TARGET_STATUS_WIDTH_PIXELS;
+    float const text_y = row.y + (row.height - TEXT_LINE_HEIGHT_PIXELS) / 2;
     scissor_begin(fonts, title_x, row.y, status_x - title_x - 8, row.height);
     draw_text(&fonts->ui, str_from_cstr(target->title), title_x, text_y,
               style_color(TEXT_COLOR_NORMAL));
@@ -4474,7 +4523,7 @@ static bool draw_panel_form_targets_row(const App *app, const Link_Target *targe
     return clickable && hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
 }
 
-static int32_t form_targets_linked_count(const Form *form) {
+static int32_t form_targets_linked_count(Form const *form) {
     assert(form->target_count >= 0);
     assert(form->target_count <= LINK_COUNT_MAX);
 
@@ -4489,7 +4538,7 @@ static int32_t form_targets_linked_count(const Form *form) {
  * Whether the deadline typed in the form has passed. A deadline not typed correctly yet is not
  * missed, because the form says what to fix when it is saved.
  */
-static bool form_deadline_is_missed(const Form *form, Date_Time now, bool tasks_done) {
+static bool form_deadline_is_missed(Form const *form, Date_Time now, bool tasks_done) {
     assert(form->kind == EVENT_KIND_OPPORTUNITY);
 
     Date end_date = { 0, 0, 0 };
@@ -4503,7 +4552,7 @@ static bool form_deadline_is_missed(const Form *form, Date_Time now, bool tasks_
     return opportunity_is_missed(end_date, end_minute, tasks_done, now);
 }
 
-static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field, Str label,
+static void draw_panel_form_field(Fonts const *fonts, Form *form, int32_t field, Str label,
                                   Rectangle box) {
     assert(field >= 0);
     assert(field < FORM_FIELD_COUNT);
@@ -4518,6 +4567,198 @@ static void draw_panel_form_field(const Fonts *fonts, Form *form, int32_t field,
             form->field_active = FORM_FIELD_NONE;
         } else {
             form->field_active = field;
+        }
+    }
+}
+
+/**
+ * A date field: the text box, narrowed to make room for a button at its right end that opens
+ * the date picker. Typing stays as it was. fallback is the month the picker shows when the text
+ * is not a date yet.
+ */
+static void draw_panel_form_date_field(Fonts const *fonts, Form *form, Date fallback,
+                                       int32_t field, Str label, Rectangle box) {
+    float const text_width = box.width - PICKER_BUTTON_WIDTH_PIXELS - PICKER_BUTTON_GAP_PIXELS;
+    draw_panel_form_field(fonts, form, field, label,
+                          (Rectangle){ box.x, box.y, text_width, box.height });
+    Rectangle const button = { box.x + box.width - PICKER_BUTTON_WIDTH_PIXELS, box.y,
+                               PICKER_BUTTON_WIDTH_PIXELS, box.height };
+    // Locked while the picker is open, so a press on it is the picker's to read.
+    if (GuiButton(button, "")) {
+        form_picker_open(form, field, fallback);
+    }
+    // A downward arrow, drawn because the font may lack a glyph for one.
+    Vector2 const middle = { button.x + button.width / 2, button.y + button.height / 2 };
+    DrawTriangle((Vector2){ middle.x - 5, middle.y - 3 }, (Vector2){ middle.x, middle.y + 4 },
+                 (Vector2){ middle.x + 5, middle.y - 3 }, style_color(TEXT_COLOR_NORMAL));
+    if (form->picker_open && form->picker_field == field) {
+        form->picker_anchor = box;
+        form->picker_button = button;
+    }
+}
+
+/**
+ * Opens the picker for the field, at the month of the date typed in it, or else at fallback's.
+ * The year is kept off the ends of the calendar's range, so that the weeks around the month
+ * are always valid dates.
+ */
+static void form_picker_open(Form *form, int32_t field, Date fallback) {
+    assert(field >= 0);
+    assert(field < FORM_FIELD_COUNT);
+
+    Date date = fallback;
+    Date typed = { 0, 0, 0 };
+    if (date_parse_iso(str_from_cstr(form->text[field]), &typed)) {
+        date = typed;
+    }
+    if (date.year <= DATE_YEAR_MIN) {
+        date = (Date){ DATE_YEAR_MIN + 1, 1, 1 };
+    }
+    if (date.year >= DATE_YEAR_MAX) {
+        date = (Date){ DATE_YEAR_MAX - 1, 12, 1 };
+    }
+    form->picker_open = true;
+    form->picker_field = field;
+    form->picker_month = (Date){ date.year, date.month, 1 };
+    // The picker is the one thing being edited now.
+    form->field_active = FORM_FIELD_NONE;
+}
+
+/**
+ * The date picker: a mini calendar of one month under the field it sets, with arrows to other
+ * months. A click on a day, even one of the neighbouring months shown to fill the weeks, writes
+ * it into the field as typed text and closes the picker; a click anywhere else closes it. Drawn
+ * and read with the pointer directly, over controls that draw_panel_form has locked.
+ */
+static void draw_panel_form_picker(App *app, Rectangle body) {
+    Form *form = &app->form;
+    Fonts const *fonts = &app->fonts;
+    assert(form->picker_open);
+    assert(form->picker_field >= 0);
+    assert(form->picker_field < FORM_FIELD_COUNT);
+
+    // Under the field, flipped above it when the panel ends first, and within the panel's width.
+    float const width = (float)PICKER_WIDTH_PIXELS;
+    float const height = (float)PICKER_HEIGHT_PIXELS;
+    Rectangle const anchor = form->picker_anchor;
+    float x = fminf(anchor.x, body.x + body.width - width);
+    x = fmaxf(x, body.x);
+    float y = anchor.y + anchor.height + 2;
+    if (y + height > body.y + body.height) {
+        y = fmaxf(anchor.y - height - 2, body.y);
+    }
+    Rectangle const popup = { x, y, width, height };
+    Vector2 const mouse = GetMousePosition();
+    bool const pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+
+    DrawRectangleRec(popup, style_color(BASE_COLOR_NORMAL));
+    DrawRectangleLinesEx(popup, 1, style_color(BORDER_COLOR_FOCUSED));
+
+    // The header: previous month, the month's name and year, next month.
+    float const pad = (float)PICKER_PADDING_PIXELS;
+    float const arrow_width = 32;
+    Rectangle const previous = { x + pad, y + pad, arrow_width, PICKER_HEADER_HEIGHT_PIXELS - pad };
+    Rectangle const next = { x + width - pad - arrow_width, y + pad, arrow_width,
+                             PICKER_HEADER_HEIGHT_PIXELS - pad };
+    // Months stop one year short of the calendar's ends, as form_picker_open keeps them.
+    bool const previous_ok = form->picker_month.year > DATE_YEAR_MIN + 1 ||
+                             form->picker_month.month > 1;
+    bool const next_ok = form->picker_month.year < DATE_YEAR_MAX - 1 ||
+                         form->picker_month.month < 12;
+    if (previous_ok && CheckCollisionPointRec(mouse, previous)) {
+        DrawRectangleRec(previous, style_color(BASE_COLOR_FOCUSED));
+        app->cursor = APP_CURSOR_HAND;
+        if (pressed) {
+            form->picker_month = date_add_months(form->picker_month, -1);
+        }
+    }
+    if (next_ok && CheckCollisionPointRec(mouse, next)) {
+        DrawRectangleRec(next, style_color(BASE_COLOR_FOCUSED));
+        app->cursor = APP_CURSOR_HAND;
+        if (pressed) {
+            form->picker_month = date_add_months(form->picker_month, 1);
+        }
+    }
+    int32_t arrow_color = TEXT_COLOR_NORMAL;
+    if (!previous_ok) {
+        arrow_color = TEXT_COLOR_DISABLED;
+    }
+    draw_text_centered(&fonts->ui, STR("<"), previous, style_color(arrow_color));
+    arrow_color = TEXT_COLOR_NORMAL;
+    if (!next_ok) {
+        arrow_color = TEXT_COLOR_DISABLED;
+    }
+    draw_text_centered(&fonts->ui, STR(">"), next, style_color(arrow_color));
+    char title[TEXT_LINE_SIZE] = "";
+    Str const month = month_name(form->picker_month.month);
+    snprintf(title, sizeof(title), "%.*s %" PRId32, STR_ARGUMENTS(month),
+             form->picker_month.year);
+    draw_text_centered(&fonts->ui, str_from_cstr(title),
+                       (Rectangle){ previous.x + arrow_width, previous.y,
+                                    next.x - previous.x - arrow_width, previous.height },
+                       style_color(TEXT_COLOR_NORMAL));
+
+    bool chosen = false;
+    draw_panel_form_picker_cells(fonts, form, popup, app->today, pressed, &chosen);
+    // A day chosen closes the picker. So does a press anywhere outside it, the field's own
+    // button included, which the controls under it never see because they are locked.
+    if (chosen || (pressed && !CheckCollisionPointRec(mouse, popup))) {
+        form->picker_open = false;
+    }
+}
+
+/**
+ * The picker's weekday names and six weeks of days from the Monday on or before the month's
+ * first. A day outside the month is dimmer, the date in the field has the accent fill and today
+ * an outline. A press on a day writes it into the field and sets *chosen.
+ */
+static void draw_panel_form_picker_cells(Fonts const *fonts, Form *form, Rectangle popup,
+                                         Date today, bool pressed, bool *chosen) {
+    float const pad = (float)PICKER_PADDING_PIXELS;
+    Vector2 const mouse = GetMousePosition();
+    float const names_y = popup.y + PICKER_HEADER_HEIGHT_PIXELS + pad;
+    for (int32_t weekday = 0; weekday < 7; weekday++) {
+        Rectangle const name = { popup.x + pad + (float)weekday * PICKER_CELL_WIDTH_PIXELS,
+                                 names_y, PICKER_CELL_WIDTH_PIXELS, PICKER_WEEKDAY_HEIGHT_PIXELS };
+        draw_text_centered(&fonts->small, weekday_short_name(weekday), name,
+                           style_color(TEXT_COLOR_DISABLED));
+    }
+
+    Date selected = { 0, 0, 0 };
+    bool const has_selected = date_parse_iso(
+        str_from_cstr(form->text[form->picker_field]), &selected);
+    Date const first = grid_first_date(form->picker_month);
+    float const cells_y = names_y + PICKER_WEEKDAY_HEIGHT_PIXELS;
+    for (int32_t i = 0; i < 42; i++) {
+        Date const date = date_add_days(first, i);
+        Rectangle const cell = {
+            popup.x + pad + (float)(i % 7) * PICKER_CELL_WIDTH_PIXELS,
+            cells_y + (float)(i / 7) * PICKER_CELL_HEIGHT_PIXELS,
+            PICKER_CELL_WIDTH_PIXELS, PICKER_CELL_HEIGHT_PIXELS,
+        };
+        bool const hovered = CheckCollisionPointRec(mouse, cell);
+        bool const is_selected = has_selected && date_equal(date, selected);
+        if (is_selected) {
+            DrawRectangleRec(cell, style_color(BASE_COLOR_PRESSED));
+        } else if (hovered) {
+            DrawRectangleRec(cell, style_color(BASE_COLOR_FOCUSED));
+        }
+        if (date_equal(date, today)) {
+            DrawRectangleLinesEx(cell, 1, style_color(BORDER_COLOR_PRESSED));
+        }
+        int32_t text_property = TEXT_COLOR_NORMAL;
+        if (date.month != form->picker_month.month) {
+            text_property = TEXT_COLOR_DISABLED;
+        }
+        if (is_selected) {
+            text_property = TEXT_COLOR_PRESSED;
+        }
+        char number[8] = "";
+        snprintf(number, sizeof(number), "%" PRId32, date.day);
+        draw_text_centered(&fonts->ui, str_from_cstr(number), cell, style_color(text_property));
+        if (hovered && pressed) {
+            date_format_iso(date, form->text[form->picker_field], DATE_ISO_SIZE);
+            *chosen = true;
         }
     }
 }
@@ -4562,7 +4803,7 @@ static void form_open(Form *form, Date date, int32_t kind) {
 /**
  * Fills the form from a stored event. Saving then updates that event instead of adding one.
  */
-static void form_open_edit(Form *form, const Event *event) {
+static void form_open_edit(Form *form, Event const *event) {
     assert(event->id > 0);
 
     form_open(form, event->start_date, event->kind);
@@ -4612,13 +4853,14 @@ static void form_close(Form *form) {
     assert(form->open);
 
     form->open = false;
+    form->picker_open = false;
     form->field_active = FORM_FIELD_NONE;
 }
 
 /**
  * The field after the active one for Tab, skipping the days field while it is hidden.
  */
-static int32_t form_field_next(const Form *form, bool backwards) {
+static int32_t form_field_next(Form const *form, bool backwards) {
     assert(form->field_active >= 0);
     assert(form->field_active < FORM_FIELD_COUNT);
 
@@ -4636,7 +4878,7 @@ static int32_t form_field_next(const Form *form, bool backwards) {
     return field;
 }
 
-static bool form_field_visible(const Form *form, int32_t field) {
+static bool form_field_visible(Form const *form, int32_t field) {
     assert(field >= 0);
     assert(field < FORM_FIELD_COUNT);
 
@@ -4659,7 +4901,7 @@ static bool form_field_visible(const Form *form, int32_t field) {
  * The repeat chosen, or none for an opportunity, which cannot repeat; the choice stays in the
  * form, hidden, in case the kind is switched back.
  */
-static int32_t form_repeat_option(const Form *form) {
+static int32_t form_repeat_option(Form const *form) {
     assert(form->repeat_option >= 0);
     assert(form->repeat_option < REPEAT_OPTION_COUNT);
 
@@ -4672,11 +4914,11 @@ static int32_t form_repeat_option(const Form *form) {
 /**
  * Fills event from the form. Returns an empty Str on success, or a message saying what to fix.
  */
-static Str form_parse(const Form *form, Date today, Event *event) {
+static Str form_parse(Form const *form, Date today, Event *event) {
     assert(event->id == 0);
 
     // Leading spaces would let a blank-looking title through.
-    const Str title = text_skip_spaces(str_from_cstr(form->text[FORM_FIELD_TITLE]));
+    Str const title = text_skip_spaces(str_from_cstr(form->text[FORM_FIELD_TITLE]));
     if (title.length == 0) {
         if (form->kind == EVENT_KIND_PROBLEM) {
             return STR("Enter a name.");
@@ -4695,7 +4937,7 @@ static Str form_parse(const Form *form, Date today, Event *event) {
  * description and repeat. Apart from form_parse, so that the timeline can show an unsaved item
  * at its times before it has a title, read exactly as saving will read it.
  */
-static Str form_parse_body(const Form *form, Event *event) {
+static Str form_parse_body(Form const *form, Event *event) {
     assert(form->kind != EVENT_KIND_PROBLEM);
 
     if (!date_parse_iso(str_from_cstr(form->text[FORM_FIELD_START_DATE]), &event->start_date)) {
@@ -4706,7 +4948,7 @@ static Str form_parse_body(const Form *form, Event *event) {
         return STR("Start time must be HH:MM.");
     }
     // Named as the form labels it.
-    const bool opportunity = form->kind == EVENT_KIND_OPPORTUNITY;
+    bool const opportunity = form->kind == EVENT_KIND_OPPORTUNITY;
     if (!date_parse_iso(str_from_cstr(form->text[FORM_FIELD_END_DATE]), &event->end_date)) {
         if (opportunity) {
             return STR("Deadline must be YYYY-MM-DD.");
@@ -4728,7 +4970,7 @@ static Str form_parse_body(const Form *form, Event *event) {
                       str_from_cstr(form->text[FORM_FIELD_DESCRIPTION]));
     assert(form->kind >= 0);
     assert(form->kind < EVENT_KIND_COUNT);
-    const int32_t repeat_option = form_repeat_option(form);
+    int32_t const repeat_option = form_repeat_option(form);
     event->kind = form->kind;
     event->repeat_unit = repeat_option_units[repeat_option];
     event->repeat_interval = 1;
@@ -4739,7 +4981,7 @@ static Str form_parse_body(const Form *form, Event *event) {
         }
     }
     // Ignored for one-time events, where the field is hidden.
-    const Str repeat_end = str_from_cstr(form->text[FORM_FIELD_REPEAT_END_DATE]);
+    Str const repeat_end = str_from_cstr(form->text[FORM_FIELD_REPEAT_END_DATE]);
     event->repeat_has_end = event->repeat_unit != REPEAT_NONE && repeat_end.length > 0;
     if (event->repeat_has_end) {
         if (!date_parse_iso(repeat_end, &event->repeat_end_date)) {
@@ -4747,8 +4989,8 @@ static Str form_parse_body(const Form *form, Event *event) {
         }
     }
     // Ignored while the fields are hidden, as the repeat end is for one-time events.
-    const Str deadline = str_from_cstr(form->text[FORM_FIELD_DEADLINE_DATE]);
-    const Str deadline_time = str_from_cstr(form->text[FORM_FIELD_DEADLINE_TIME]);
+    Str const deadline = str_from_cstr(form->text[FORM_FIELD_DEADLINE_DATE]);
+    Str const deadline_time = str_from_cstr(form->text[FORM_FIELD_DEADLINE_TIME]);
     event->has_deadline = form_field_visible(form, FORM_FIELD_DEADLINE_DATE) &&
                           (deadline.length > 0 || deadline_time.length > 0);
     if (event->has_deadline) {
@@ -4767,11 +5009,11 @@ static Str form_parse_body(const Form *form, Event *event) {
 /**
  * Checks that the parsed dates and times come in order. Returns an empty Str, or what to fix.
  */
-static Str form_parse_order(const Event *event) {
+static Str form_parse_order(Event const *event) {
     int32_t start_day = date_to_day_number(event->start_date);
     int32_t end_day = date_to_day_number(event->end_date);
     // Named as the form labels it.
-    const bool opportunity = event->kind == EVENT_KIND_OPPORTUNITY;
+    bool const opportunity = event->kind == EVENT_KIND_OPPORTUNITY;
     if (end_day < start_day) {
         if (opportunity) {
             return STR("Deadline is before start.");
@@ -4808,7 +5050,7 @@ static Str form_parse_order(const Event *event) {
 /**
  * The hidden fields of the form are ignored: a problem has no times, location or repeat.
  */
-static Str form_parse_problem(const Form *form, Date today, Event *event) {
+static Str form_parse_problem(Form const *form, Date today, Event *event) {
     assert(form->kind == EVENT_KIND_PROBLEM);
 
     event->kind = EVENT_KIND_PROBLEM;
@@ -4860,12 +5102,12 @@ static bool form_parse_repeat_days(Str text, int32_t *days) {
     return true;
 }
 
-static bool event_occurs_on_day(const Event *event, int32_t day_number) {
+static bool event_occurs_on_day(Event const *event, int32_t day_number) {
     int32_t start_day = 0;
     return event_occurrence_on_day(event, day_number, &start_day);
 }
 
-static bool event_created_on_day(const Event *event, int32_t day_number) {
+static bool event_created_on_day(Event const *event, int32_t day_number) {
     return date_to_day_number(event->created_date) == day_number;
 }
 
@@ -4892,7 +5134,7 @@ static float task_outline_alpha(bool done) {
  * What the card asks before deleting, said for what is deleted: a repeating item goes with all
  * of its repeats.
  */
-static Str event_delete_question(const Event *event) {
+static Str event_delete_question(Event const *event) {
     if (event->repeat_unit != REPEAT_NONE) {
         return STR("Delete it and all repeats?");
     }
@@ -4908,7 +5150,7 @@ static Str event_delete_question(const Event *event) {
     return STR("Delete this event?");
 }
 
-static bool event_is_timed(const Event *event) {
+static bool event_is_timed(Event const *event) {
     // A problem has no times, so it is always in the day cells.
     assert(event->kind != EVENT_KIND_PROBLEM || event->start_minute == TIME_NONE);
     if (event_duration_days(event) > 0) {
@@ -4920,7 +5162,7 @@ static bool event_is_timed(const Event *event) {
 /**
  * A month shows every item in its cells; a week or day only those that are not on the timeline.
  */
-static bool event_in_day_cell(const Event *event, int32_t range) {
+static bool event_in_day_cell(Event const *event, int32_t range) {
     assert(range >= 0);
     assert(range < RANGE_COUNT);
 
@@ -4931,7 +5173,7 @@ static bool event_in_day_cell(const Event *event, int32_t range) {
  * One more line for a location, one for a repeating event that ends, to say when, and one per
  * line of description.
  */
-static float event_card_height(const Fonts *fonts, const Event *event, bool confirming,
+static float event_card_height(Fonts const *fonts, Event const *event, bool confirming,
                                float card_width) {
     int32_t extra_lines = (int32_t)(event->location.id != 0) + (int32_t)event->repeat_has_end;
     if (event->description[0] != '\0') {
@@ -4950,9 +5192,9 @@ static float event_card_height(const Fonts *fonts, const Event *event, bool conf
  * Breaks text at spaces into at most DESCRIPTION_LINES_MAX lines that fit width_pixels, and
  * breaks inside a word only when one word alone is wider than a line.
  */
-static Text_Lines text_wrap(const Text_Style *style, Str text, float width_pixels) {
+static Text_Lines text_wrap(Text_Style const *style, Str text, float width_pixels) {
     Text_Lines lines = { .count = 0, .cut = false };
-    const int32_t length = (int32_t)text.length;
+    int32_t const length = (int32_t)text.length;
     int32_t position = 0;
     // Bounded by DESCRIPTION_LINES_MAX, and each pass either ends the loop or consumes text.
     while (lines.count < DESCRIPTION_LINES_MAX) {
@@ -4995,13 +5237,13 @@ static Text_Lines text_wrap(const Text_Style *style, Str text, float width_pixel
     return lines;
 }
 
-static bool text_line_fits(const Text_Style *style, Str line, float width_pixels) {
+static bool text_line_fits(Text_Style const *style, Str line, float width_pixels) {
     assert(line.length < EVENT_DESCRIPTION_SIZE);
 
     return measure_text(style, line).x <= width_pixels;
 }
 
-static bool event_is_missed(const Event *event, Date_Time now) {
+static bool event_is_missed(Event const *event, Date_Time now) {
     if (event->kind != EVENT_KIND_OPPORTUNITY) {
         return false;
     }
@@ -5011,7 +5253,7 @@ static bool event_is_missed(const Event *event, Date_Time now) {
 /**
  * now matters only for an opportunity, which turns gray once missed.
  */
-static Color event_color(const Event *event, Date_Time now) {
+static Color event_color(Event const *event, Date_Time now) {
     assert(event->id > 0);
 
     if (event_kind_is_target(event->kind) && event->tasks_done) {
@@ -5036,11 +5278,11 @@ static Color event_color(const Event *event, Date_Time now) {
  * the hour before the end, not from a start; a multi-day item's end is on another day, so it
  * has none. A missed opportunity says so first, because its gray alone could be any item.
  */
-static void event_format_label(const Event *event, bool with_time, Date_Time now, char *buffer,
+static void event_format_label(Event const *event, bool with_time, Date_Time now, char *buffer,
                                size_t buffer_size) {
     assert(buffer_size > 0);
 
-    const char *missed = "";
+    char const *missed = "";
     if (event_is_missed(event, now)) {
         missed = "Missed: ";
     }
@@ -5059,11 +5301,11 @@ static void event_format_label(const Event *event, bool with_time, Date_Time now
 /**
  * The dates and times, followed by how the event repeats, if it does.
  */
-static void event_format_range(const Event *event, Date_Time now, char *buffer,
+static void event_format_range(Event const *event, Date_Time now, char *buffer,
                                size_t buffer_size) {
     // A problem has no range: it is on its one day, which the panel heading shows.
     if (event->kind == EVENT_KIND_PROBLEM) {
-        const char *text = "Problem";
+        char const *text = "Problem";
         if (event->tasks_done) {
             text = "Problem, completed";
         }
@@ -5076,7 +5318,7 @@ static void event_format_range(const Event *event, Date_Time now, char *buffer,
         // "31 Dec 23:59", with room for any int32_t day as far as the compiler can tell.
         char deadline[32] = "";
         format_date_time_short(event->end_date, event->end_minute, deadline, sizeof(deadline));
-        const char *state = "Opportunity";
+        char const *state = "Opportunity";
         if (event_is_missed(event, now)) {
             state = "Missed opportunity";
         }
@@ -5109,7 +5351,7 @@ static void event_format_range(const Event *event, Date_Time now, char *buffer,
     }
 }
 
-static void event_format_range_dates(const Event *event, char *buffer, size_t buffer_size) {
+static void event_format_range_dates(Event const *event, char *buffer, size_t buffer_size) {
     char start[TEXT_LINE_SIZE] = "";
     char end[TEXT_LINE_SIZE] = "";
     if (date_equal(event->start_date, event->end_date)) {
@@ -5140,8 +5382,8 @@ static void event_format_range_dates(const Event *event, char *buffer, size_t bu
 /**
  * "Address, City", or whichever of the two the location has.
  */
-static void event_format_location(const Event *event, char *buffer, size_t buffer_size) {
-    const Location *location = &event->location;
+static void event_format_location(Event const *event, char *buffer, size_t buffer_size) {
+    Location const *location = &event->location;
     assert(location->id != 0);
     bool has_address = location->address[0] != '\0';
     bool has_city = location->city[0] != '\0';
@@ -5149,7 +5391,7 @@ static void event_format_location(const Event *event, char *buffer, size_t buffe
     if (has_address && has_city) {
         snprintf(buffer, buffer_size, "%s, %s", location->address, location->city);
     } else {
-        const char *place = location->city;
+        char const *place = location->city;
         if (has_address) {
             place = location->address;
         }
@@ -5166,7 +5408,7 @@ static void event_format_location(const Event *event, char *buffer, size_t buffe
  * of nothing but spaces looks blank.
  */
 static Str text_skip_spaces(Str text) {
-    const size_t first = str_find_not_any(text, STR(" "));
+    size_t const first = str_find_not_any(text, STR(" "));
     if (first == STR_NOT_FOUND) {
         return str_make("", 0);
     }
@@ -5183,14 +5425,14 @@ static void text_copy_trimmed(char *buffer, size_t buffer_size, Str text) {
 /**
  * "Created 18 Oct 2026, 20:47 (yesterday)": the exact moment, and how long ago it was.
  */
-static void event_format_created(const Event *event, Date_Time now, char *buffer,
+static void event_format_created(Event const *event, Date_Time now, char *buffer,
                                  size_t buffer_size) {
     char time[TIME_TEXT_SIZE] = "";
     time_format(event->created_minute, time, sizeof(time));
     char age[DATE_TIME_AGE_SIZE] = "";
     date_time_format_age((Date_Time){ event->created_date, event->created_minute }, now, age,
                          sizeof(age));
-    const Str month = month_short_name(event->created_date.month);
+    Str const month = month_short_name(event->created_date.month);
     snprintf(buffer, buffer_size, "Created %" PRId32 " %.*s %" PRId32 ", %s (%s)",
              event->created_date.day, STR_ARGUMENTS(month), event->created_date.year, time, age);
 }
@@ -5200,7 +5442,7 @@ static void event_format_created(const Event *event, Date_Time now, char *buffer
  */
 static void format_date_time_short(Date date, int32_t minute_of_day, char *buffer,
                                    size_t buffer_size) {
-    const Str month = month_short_name(date.month);
+    Str const month = month_short_name(date.month);
     if (minute_of_day == TIME_NONE) {
         snprintf(buffer, buffer_size, "%" PRId32 " %.*s", date.day, STR_ARGUMENTS(month));
         return;
@@ -5216,7 +5458,7 @@ static void format_date_time_short(Date date, int32_t minute_of_day, char *buffe
  */
 static void theme_apply(void) {
     for (int32_t i = 0; i < THEME_COLOR_COUNT; i++) {
-        const Theme_Color *color = &theme_colors[i];
+        Theme_Color const *color = &theme_colors[i];
         // A color property: raygui's base properties start with the colors, and
         // BACKGROUND_COLOR is the last of DEFAULT's extended ones.
         assert(color->property >= BORDER_COLOR_NORMAL);
@@ -5241,13 +5483,13 @@ static Color style_color(int32_t property) {
  * scale, map one to one onto screen pixels and stay sharp. A position may be left of or above
  * the screen, as in the phone's drawer while it slides in.
  */
-static void draw_text(const Text_Style *style, Str text, float x, float y, Color color) {
+static void draw_text(Text_Style const *style, Str text, float x, float y, Color color) {
     // Far beyond any screen, which would also overflow the rounding.
     assert(x > -(float)TEXT_POSITION_LIMIT_PIXELS);
     assert(x < (float)TEXT_POSITION_LIMIT_PIXELS);
     assert(y > -(float)TEXT_POSITION_LIMIT_PIXELS);
     assert(y < (float)TEXT_POSITION_LIMIT_PIXELS);
-    const float scale = style->scale;
+    float const scale = style->scale;
     Vector2 position = { draw_text_round(x, scale), draw_text_round(y, scale) };
     // The one place a Str meets raylib's drawing: it takes a C string.
     char c_text[TEXT_DRAW_SIZE_MAX] = "";
@@ -5263,13 +5505,13 @@ static void draw_text(const Text_Style *style, Str text, float x, float y, Color
 static float draw_text_round(float position, float scale) {
     assert(scale > 0.0f);
 
-    const float shift = (float)TEXT_POSITION_LIMIT_PIXELS * scale;
+    float const shift = (float)TEXT_POSITION_LIMIT_PIXELS * scale;
     float screen = position * scale + shift + 0.5f;
     assert(screen >= 0.0f);
     return ((float)(int32_t)screen - shift) / scale;
 }
 
-static Vector2 measure_text(const Text_Style *style, Str text) {
+static Vector2 measure_text(Text_Style const *style, Str text) {
     // As in draw_text, the same cut, so that the measure is of what is drawn.
     char c_text[TEXT_DRAW_SIZE_MAX] = "";
     (void)str_copy_truncated(text, c_text, sizeof(c_text));
@@ -5277,7 +5519,7 @@ static Vector2 measure_text(const Text_Style *style, Str text) {
                          (float)GuiGetStyle(DEFAULT, TEXT_SPACING));
 }
 
-static void draw_text_centered(const Text_Style *style, Str text, Rectangle area,
+static void draw_text_centered(Text_Style const *style, Str text, Rectangle area,
                                Color color) {
     Vector2 text_size = measure_text(style, text);
     draw_text(style, text, area.x + (area.width - text_size.x) / 2,
@@ -5288,7 +5530,7 @@ static void draw_text_centered(const Text_Style *style, Str text, Rectangle area
  * raylib's scissor rectangle is in screen pixels, so the layout rectangle is scaled to match.
  * Within a clip, such as the panel's scrolling list, only the part inside the clip is drawn.
  */
-static void scissor_begin(const Fonts *fonts, float x, float y, float width, float height) {
+static void scissor_begin(Fonts const *fonts, float x, float y, float width, float height) {
     assert(width >= 0.0f);
     assert(height >= 0.0f);
 
@@ -5297,7 +5539,7 @@ static void scissor_begin(const Fonts *fonts, float x, float y, float width, flo
         // An empty overlap clips everything, which is right for text wholly outside the clip.
         area = GetCollisionRec(area, fonts->clip);
     }
-    const float scale = fonts->scale;
+    float const scale = fonts->scale;
     BeginScissorMode((int)(fonts->origin.x + area.x * scale),
                      (int)(fonts->origin.y + area.y * scale), (int)(area.width * scale),
                      (int)(area.height * scale));
@@ -5307,7 +5549,7 @@ static void scissor_begin(const Fonts *fonts, float x, float y, float width, flo
  * Ends a scissor_begin. Within a clip, the clip's own scissor rectangle comes back, because
  * raylib cannot nest them.
  */
-static void scissor_end(const Fonts *fonts) {
+static void scissor_end(Fonts const *fonts) {
     if (fonts->clipping) {
         assert(fonts->clip.width > 0.0f);
         assert(fonts->clip.height > 0.0f);

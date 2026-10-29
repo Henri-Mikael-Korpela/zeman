@@ -28,6 +28,6 @@ void problems_view_init(Problems_View *view);
 /**
  * Reloads the problems when the backend's data changed, then draws them into area.
  */
-void problems_view_draw(Problems_View *view, Backend *backend, const App *app, Rectangle area);
+void problems_view_draw(Problems_View *view, Backend *backend, App const *app, Rectangle area);
 
 #endif

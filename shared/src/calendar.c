@@ -17,24 +17,24 @@ enum {
     UNIX_EPOCH_WEEKDAY = 3,
 };
 
-static const Str month_names[12] = {
+static Str const month_names[12] = {
     STR_INIT("January"), STR_INIT("February"), STR_INIT("March"), STR_INIT("April"),
     STR_INIT("May"), STR_INIT("June"), STR_INIT("July"), STR_INIT("August"),
     STR_INIT("September"), STR_INIT("October"), STR_INIT("November"), STR_INIT("December"),
 };
 
-static const Str month_short_names[12] = {
+static Str const month_short_names[12] = {
     STR_INIT("Jan"), STR_INIT("Feb"), STR_INIT("Mar"), STR_INIT("Apr"), STR_INIT("May"),
     STR_INIT("Jun"), STR_INIT("Jul"), STR_INIT("Aug"), STR_INIT("Sep"), STR_INIT("Oct"),
     STR_INIT("Nov"), STR_INIT("Dec"),
 };
 
-static const Str weekday_names[7] = {
+static Str const weekday_names[7] = {
     STR_INIT("Monday"), STR_INIT("Tuesday"), STR_INIT("Wednesday"), STR_INIT("Thursday"),
     STR_INIT("Friday"), STR_INIT("Saturday"), STR_INIT("Sunday"),
 };
 
-static const Str weekday_short_names[7] = {
+static Str const weekday_short_names[7] = {
     STR_INIT("Mon"), STR_INIT("Tue"), STR_INIT("Wed"), STR_INIT("Thu"), STR_INIT("Fri"),
     STR_INIT("Sat"), STR_INIT("Sun"),
 };
@@ -49,7 +49,7 @@ Date date_today(void) {
 Date_Time date_time_now(void) {
     time_t now = time(NULL);
     assert(now != (time_t)-1);
-    const struct tm *local = localtime(&now);
+    struct tm const *local = localtime(&now);
     assert(local != NULL);
 
     Date_Time moment = {
@@ -65,11 +65,11 @@ Date_Time date_time_now(void) {
 /**
  * "1 hour ago", "2 hours ago".
  */
-static void format_age_count(char *buffer, size_t buffer_size, int64_t count, const char *unit) {
+static void format_age_count(char *buffer, size_t buffer_size, int64_t count, char const *unit) {
     assert(count >= 1);
 
     // Plural for every count but one.
-    const char *plural = "s";
+    char const *plural = "s";
     if (count == 1) {
         plural = "";
     }
@@ -102,9 +102,9 @@ void date_time_format_age(Date_Time created, Date_Time now, char *buffer, size_t
     assert(now.minute_of_day < MINUTES_PER_DAY);
     assert(buffer_size >= DATE_TIME_AGE_SIZE);
 
-    const int64_t days = (int64_t)date_to_day_number(now.date) -
+    int64_t const days = (int64_t)date_to_day_number(now.date) -
                          date_to_day_number(created.date);
-    const int64_t minutes = days * MINUTES_PER_DAY + now.minute_of_day - created.minute_of_day;
+    int64_t const minutes = days * MINUTES_PER_DAY + now.minute_of_day - created.minute_of_day;
     if (minutes < 1) {
         snprintf(buffer, buffer_size, "just now");
     } else if (minutes < 60) {
@@ -162,7 +162,7 @@ int32_t days_in_month(int32_t year, int32_t month) {
     assert(month >= 1);
     assert(month <= 12);
 
-    static const int32_t days[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    static int32_t const days[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
     if (month == 2) {
         if (is_leap_year(year)) {
             return 29;
@@ -237,10 +237,10 @@ int32_t date_iso_week(Date date) {
     assert(date_is_valid(date));
 
     // The week belongs to the year its Thursday is in, and counts from that year's first one.
-    const int32_t thursday = date_to_day_number(date) - date_weekday(date) + 3;
-    const Date thursday_date = date_from_day_number(thursday);
-    const int32_t year_start = date_to_day_number((Date){ thursday_date.year, 1, 1 });
-    const int32_t week = (thursday - year_start) / 7 + 1;
+    int32_t const thursday = date_to_day_number(date) - date_weekday(date) + 3;
+    Date const thursday_date = date_from_day_number(thursday);
+    int32_t const year_start = date_to_day_number((Date){ thursday_date.year, 1, 1 });
+    int32_t const week = (thursday - year_start) / 7 + 1;
     assert(week >= 1);
     assert(week <= 53);
     return week;

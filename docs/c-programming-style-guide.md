@@ -76,6 +76,7 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 ## Constants
 
 - Use `static const` or `enum` for constants rather than `#define` where possible. Use `#define` only for macros that must be macros. Give every constant a unit or comment.
+- Place `const` after type name (e.g. `int const`).
 
 ## Globals
 

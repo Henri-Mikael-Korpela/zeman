@@ -59,6 +59,6 @@ bool qr_scanner_poll(QR_Scanner *scanner, char *text, size_t text_size);
 /**
  * Draws the newest frame upright, as large as fits in area.
  */
-void qr_scanner_draw(const QR_Scanner *scanner, Rectangle area);
+void qr_scanner_draw(QR_Scanner const *scanner, Rectangle area);
 
 #endif

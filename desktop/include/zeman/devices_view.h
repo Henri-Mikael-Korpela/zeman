@@ -26,8 +26,8 @@ typedef struct Devices_View {
 /**
  * Makes the QR code for the server's address. Call after server_start.
  */
-void devices_view_init(Devices_View *view, const Server *server);
-void devices_view_draw(const Devices_View *view, const Server *server, const App *app,
+void devices_view_init(Devices_View *view, Server const *server);
+void devices_view_draw(Devices_View const *view, Server const *server, App const *app,
                        Rectangle area);
 
 #endif

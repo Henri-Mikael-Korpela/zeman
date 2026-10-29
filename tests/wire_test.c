@@ -18,11 +18,11 @@ static void test_text_round_trip(void) {
     assert(writer.length == 2 + 7 + 2);
 
     Reader reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
-    const Str first = reader_str(&reader);
+    Str const first = reader_str(&reader);
     assert(str_eq(first, STR("Dentist")));
     // The view points into the message itself: no copy was made.
-    assert((const void *)first.data == (const void *)(bytes + 2));
-    const Str second = reader_str(&reader);
+    assert((void const *)first.data == (void const *)(bytes + 2));
+    Str const second = reader_str(&reader);
     assert(second.length == 0);
     assert(reader_done(&reader));
 
@@ -163,7 +163,7 @@ static void test_task_occurrence_round_trip(void) {
     assert(read.task.id == 0);
 }
 
-static Event test_event_round_trip(const Event *event, bool *accepted) {
+static Event test_event_round_trip(Event const *event, bool *accepted) {
     static uint8_t bytes[1024];
     Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
     writer_event(&writer, event);

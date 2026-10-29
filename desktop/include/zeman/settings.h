@@ -25,10 +25,10 @@ typedef struct Settings {
  * error: every setting then has its default. Returns false, with error set, when the file
  * exists but cannot be read or holds a setting that does not fit.
  */
-bool settings_load(Settings *settings, const char *directory);
+bool settings_load(Settings *settings, char const *directory);
 /**
  * Writes every setting to settings.ini in directory. Returns false, with error set, on failure.
  */
-bool settings_save(Settings *settings, const char *directory);
+bool settings_save(Settings *settings, char const *directory);
 
 #endif

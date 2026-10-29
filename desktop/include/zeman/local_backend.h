@@ -27,7 +27,7 @@ void local_backend_init(Local_Backend *local);
  * false, with error set, when the database cannot be opened; the open one then stays open.
  * On success the revision rises, so that the user interface and phones reload everything.
  */
-bool local_backend_switch(Local_Backend *local, const char *path, bool create);
+bool local_backend_switch(Local_Backend *local, char const *path, bool create);
 void local_backend_close(Local_Backend *local);
 Backend local_backend(Local_Backend *local);
 

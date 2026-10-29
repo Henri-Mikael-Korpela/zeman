@@ -17,7 +17,7 @@
  * A Str_Builder appends into a fixed buffer that the caller provides, and never grows.
  */
 typedef struct Str {
-    const char *data;
+    char const *data;
     size_t length;
 } Str;
 
@@ -31,7 +31,7 @@ typedef struct Str_Builder {
 /**
  * Returned by the search functions when nothing was found: an index that no string has.
  */
-static const size_t STR_NOT_FOUND = SIZE_MAX;
+static size_t const STR_NOT_FOUND = SIZE_MAX;
 
 /**
  * The initializer of a Str for a string literal, which a static or constant table needs, where
@@ -54,13 +54,13 @@ static const size_t STR_NOT_FOUND = SIZE_MAX;
 /**
  * Makes a Str from the pointer to its first byte and its length in bytes.
  */
-Str str_make(const char *data, size_t length);
+Str str_make(char const *data, size_t length);
 
 /**
  * Makes a Str from a NUL-terminated C string, for text that comes from the operating system or a
  * library. The terminator is not part of it. A NULL pointer is the empty string.
  */
-Str str_from_cstr(const char *cstr);
+Str str_from_cstr(char const *cstr);
 
 /**
  * The bytes from start up to but not including end, both kept within the string, so that the
@@ -140,6 +140,6 @@ bool str_builder_append(Str_Builder *builder, Str s);
 /**
  * What has been written so far, as a view of the builder's buffer.
  */
-Str str_builder_str(const Str_Builder *builder);
+Str str_builder_str(Str_Builder const *builder);
 
 #endif

@@ -21,15 +21,15 @@ typedef struct Settings_View {
 /**
  * Fills the text box with the path of the database in use, which may be empty.
  */
-void settings_view_init(Settings_View *view, const char *database_path);
+void settings_view_init(Settings_View *view, char const *database_path);
 /**
  * Draws the view into area. database_path is the database in use, or empty when none is open.
  * Returns true when the user asks to use the path in the text box, with Apply or Enter; the
  * path is then trimmed of spaces and of the quotes Explorer's "Copy as path" adds, and the
  * caller switches the database and says how that went with settings_view_set_message.
  */
-bool settings_view_draw(Settings_View *view, const App *app, const char *database_path,
-                        const char *settings_directory, Rectangle area);
+bool settings_view_draw(Settings_View *view, App const *app, char const *database_path,
+                        char const *settings_directory, Rectangle area);
 void settings_view_set_message(Settings_View *view, Str message);
 
 #endif

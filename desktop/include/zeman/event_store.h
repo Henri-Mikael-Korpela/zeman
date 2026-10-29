@@ -27,20 +27,20 @@ typedef struct Event_Store {
  * do not allocate statements. On failure, store->error explains why; call event_store_close
  * even then.
  */
-bool event_store_open(Event_Store *store, const char *path, bool create);
+bool event_store_open(Event_Store *store, char const *path, bool create);
 void event_store_close(Event_Store *store);
 
 /**
  * Inserts the event or task and returns its new id, or 0 on failure. The database sets
  * created_at.
  */
-int64_t event_store_insert(Event_Store *store, const Event *event);
+int64_t event_store_insert(Event_Store *store, Event const *event);
 
 /**
  * Replaces the stored fields of the event with event->id. created_at is kept, because it records
  * when the event was first made. Returns false if it fails or the event is not there.
  */
-bool event_store_update(Event_Store *store, const Event *event);
+bool event_store_update(Event_Store *store, Event const *event);
 
 /**
  * Deletes the event with all its repeats, and a task's completions with it.

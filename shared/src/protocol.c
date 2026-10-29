@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void writer_bytes(Writer *writer, const void *bytes, size_t count);
+static void writer_bytes(Writer *writer, void const *bytes, size_t count);
 static bool reader_bytes(Reader *reader, void *bytes, size_t count);
 
 Writer writer_make(Array_Slice buffer) {
@@ -55,7 +55,7 @@ void writer_date(Writer *writer, Date date) {
 /**
  * Every field, in declaration order; reader_event reads them back in the same order.
  */
-void writer_event(Writer *writer, const Event *event) {
+void writer_event(Writer *writer, Event const *event) {
     writer_i64(writer, event->id);
     writer_i64(writer, event->location.id);
     writer_text(writer, str_from_cstr(event->location.address));
@@ -96,12 +96,12 @@ void writer_event(Writer *writer, const Event *event) {
     writer_text(writer, str_from_cstr(event->description));
 }
 
-void writer_completion(Writer *writer, const Task_Completion *completion) {
+void writer_completion(Writer *writer, Task_Completion const *completion) {
     writer_i64(writer, completion->event_id);
     writer_i32(writer, completion->occurrence_start_day);
 }
 
-void writer_linked_task(Writer *writer, const Linked_Task *task) {
+void writer_linked_task(Writer *writer, Linked_Task const *task) {
     writer_i64(writer, task->task_id);
     writer_u8(writer, (uint8_t)task->done);
     writer_text(writer, str_from_cstr(task->title));
@@ -110,7 +110,7 @@ void writer_linked_task(Writer *writer, const Linked_Task *task) {
 /**
  * Every field, in declaration order; reader_link_target reads them back in the same order.
  */
-void writer_link_target(Writer *writer, const Link_Target *target) {
+void writer_link_target(Writer *writer, Link_Target const *target) {
     writer_i64(writer, target->target_id);
     writer_date(writer, target->end_date);
     writer_i32(writer, target->end_minute);
@@ -121,7 +121,7 @@ void writer_link_target(Writer *writer, const Link_Target *target) {
     writer_text(writer, str_from_cstr(target->title));
 }
 
-void writer_task_occurrence(Writer *writer, const Task_Occurrence *occurrence) {
+void writer_task_occurrence(Writer *writer, Task_Occurrence const *occurrence) {
     writer_event(writer, &occurrence->task);
     writer_i32(writer, occurrence->start_day);
     writer_u8(writer, (uint8_t)occurrence->done);
@@ -186,14 +186,14 @@ Str reader_str(Reader *reader) {
     if (!reader_bytes(reader, prefix, sizeof(prefix))) {
         return str_make("", 0);
     }
-    const size_t length = (size_t)prefix[0] | ((size_t)prefix[1] << 8);
-    const size_t available = (size_t)reader->buffer.count - reader->position;
+    size_t const length = (size_t)prefix[0] | ((size_t)prefix[1] << 8);
+    size_t const available = (size_t)reader->buffer.count - reader->position;
     if (length > available) {
         reader->failed = true;
         return str_make("", 0);
     }
-    const char *items = reader->buffer.items;
-    const Str text = str_make(items + reader->position, length);
+    char const *items = reader->buffer.items;
+    Str const text = str_make(items + reader->position, length);
     reader->position += length;
     // An embedded terminator would make the text shorter than it claims to be, as in reader_text.
     if (memchr(text.data, '\0', length) != NULL) {
@@ -230,7 +230,7 @@ Event reader_event(Reader *reader) {
     event.start_minute = reader_i32(reader);
     event.end_minute = reader_i32(reader);
     event.created_minute = reader_i32(reader);
-    const int32_t deadline_minute = reader_i32(reader);
+    int32_t const deadline_minute = reader_i32(reader);
     event.repeat_unit = reader_i32(reader);
     event.repeat_interval = reader_i32(reader);
     event.kind = reader_i32(reader);
@@ -332,8 +332,8 @@ Task_Occurrence reader_task_occurrence(Reader *reader) {
         reader->failed = true;
         return (Task_Occurrence){ 0 };
     }
-    const int32_t first_day = date_to_day_number(occurrence.task.start_date);
-    const int32_t last_valid_day = date_to_day_number((Date){ DATE_YEAR_MAX, 12, 31 });
+    int32_t const first_day = date_to_day_number(occurrence.task.start_date);
+    int32_t const last_valid_day = date_to_day_number((Date){ DATE_YEAR_MAX, 12, 31 });
     int32_t start_day = 0;
     if (occurrence.start_day < first_day || occurrence.start_day > last_valid_day ||
         !event_occurrence_on_day(&occurrence.task, occurrence.start_day, &start_day) ||
@@ -344,7 +344,7 @@ Task_Occurrence reader_task_occurrence(Reader *reader) {
     return occurrence;
 }
 
-bool reader_done(const Reader *reader) {
+bool reader_done(Reader const *reader) {
     return !reader->failed && reader->position == (size_t)reader->buffer.count;
 }
 
@@ -355,13 +355,13 @@ void protocol_length_write(uint8_t *bytes, uint32_t length) {
     bytes[3] = (uint8_t)((length >> 24) & 0xFF);
 }
 
-uint32_t protocol_length_read(const uint8_t *bytes) {
+uint32_t protocol_length_read(uint8_t const *bytes) {
     return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) | ((uint32_t)bytes[2] << 16) |
            ((uint32_t)bytes[3] << 24);
 }
 
-static void writer_bytes(Writer *writer, const void *bytes, size_t count) {
-    const size_t size = (size_t)writer->buffer.count;
+static void writer_bytes(Writer *writer, void const *bytes, size_t count) {
+    size_t const size = (size_t)writer->buffer.count;
     if (writer->overflow || count > size - writer->length) {
         writer->overflow = true;
         return;
@@ -372,13 +372,13 @@ static void writer_bytes(Writer *writer, const void *bytes, size_t count) {
 }
 
 static bool reader_bytes(Reader *reader, void *bytes, size_t count) {
-    const size_t length = (size_t)reader->buffer.count;
+    size_t const length = (size_t)reader->buffer.count;
     if (reader->failed || count > length - reader->position) {
         reader->failed = true;
         memset(bytes, 0, count);
         return false;
     }
-    const uint8_t *items = reader->buffer.items;
+    uint8_t const *items = reader->buffer.items;
     memcpy(bytes, items + reader->position, count);
     reader->position += count;
     return true;
@@ -395,7 +395,7 @@ bool protocol_link_parse(Str link, Str *address, uint16_t *port) {
     assert(address != NULL);
     assert(port != NULL);
 
-    const Str prefix = str_from_cstr(PROTOCOL_LINK_PREFIX);
+    Str const prefix = str_from_cstr(PROTOCOL_LINK_PREFIX);
     if (str_starts_with(link, prefix)) {
         link = str_slice(link, prefix.length, link.length);
     }
@@ -406,7 +406,7 @@ bool protocol_link_parse(Str link, Str *address, uint16_t *port) {
     }
     Str host = link;
     Str port_digits = str_make("", 0);
-    const bool has_port = str_split_once(link, STR(":"), &host, &port_digits);
+    bool const has_port = str_split_once(link, STR(":"), &host, &port_digits);
     if (host.length == 0) {
         return false;
     }

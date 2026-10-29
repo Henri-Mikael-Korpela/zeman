@@ -26,7 +26,7 @@ enum {
 bool net_startup(void);
 void net_cleanup(void);
 
-bool net_connect(const char *host, uint16_t port, int32_t timeout_ms, Net_Socket *socket_out,
+bool net_connect(char const *host, uint16_t port, int32_t timeout_ms, Net_Socket *socket_out,
                  char *error, size_t error_size);
 bool net_listen(uint16_t port, Net_Socket *socket_out, char *error, size_t error_size);
 /**
@@ -58,7 +58,7 @@ bool net_udp_open(uint16_t port, Net_Socket *socket_out, char *error, size_t err
 /**
  * address is a dotted IPv4 address, such as "255.255.255.255" for everyone on the network.
  */
-bool net_udp_send(Net_Socket socket, const char *address, uint16_t port, Array_Slice bytes);
+bool net_udp_send(Net_Socket socket, char const *address, uint16_t port, Array_Slice bytes);
 /**
  * Returns the bytes received, or 0 when nothing is waiting; fills in where they came from.
  */
@@ -70,7 +70,7 @@ int32_t net_udp_recv(Net_Socket socket, Array_Slice bytes, char *address, size_t
  * link-local (169.254/16) and this computer (127/8). The desktop app talks only to these,
  * so that the calendar is never reachable from the internet, even through a forwarded port.
  */
-bool net_address_is_local(const char *address);
+bool net_address_is_local(char const *address);
 
 /**
  * Milliseconds from an arbitrary start, never going backwards.

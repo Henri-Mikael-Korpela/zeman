@@ -21,7 +21,7 @@ enum {
 };
 
 // Column headings, indexed by Task_Group.
-static const char *const task_group_names[TASK_GROUP_COUNT] = { "Overdue", "Today", "Upcoming",
+static char const *const task_group_names[TASK_GROUP_COUNT] = { "Overdue", "Today", "Upcoming",
                                                                 "Completed" };
 
 // The task under the pointer while drawing, acted on once every column is drawn.
@@ -31,13 +31,13 @@ typedef struct Tasks_View_Hit {
 } Tasks_View_Hit;
 
 static void tasks_view_load(Tasks_View *view, Backend *backend, uint64_t revision, Date today);
-static void tasks_view_draw_header(const Tasks_View *view, const App *app, float x, float y,
+static void tasks_view_draw_header(Tasks_View const *view, App const *app, float x, float y,
                                    float width);
-static Tasks_View_Hit tasks_view_draw_column(const Tasks_View *view, const App *app,
+static Tasks_View_Hit tasks_view_draw_column(Tasks_View const *view, App const *app,
                                              Task_Group group, int32_t count, Rectangle header,
                                              Rectangle cell);
 static Tasks_View_Choice tasks_view_click(Tasks_View *view, Backend *backend, Tasks_View_Hit hit);
-static Task_Group tasks_view_group(const Task_Occurrence *occurrence, Date today);
+static Task_Group tasks_view_group(Task_Occurrence const *occurrence, Date today);
 
 void tasks_view_init(Tasks_View *view) {
     view->revision = 0;
@@ -48,21 +48,21 @@ void tasks_view_init(Tasks_View *view) {
     view->error[0] = '\0';
 }
 
-Tasks_View_Choice tasks_view_draw(Tasks_View *view, Backend *backend, const App *app,
+Tasks_View_Choice tasks_view_draw(Tasks_View *view, Backend *backend, App const *app,
                                   Rectangle area) {
     assert(area.width > 0.0f);
     assert(area.height > 0.0f);
 
     // Checking a task off anywhere changes the revision; a new day moves tasks along, from
     // Upcoming to Today to Overdue, and a repeating task on to its next occurrence.
-    const uint64_t revision = backend_revision(backend);
-    const Date today = date_today();
+    uint64_t const revision = backend_revision(backend);
+    Date const today = date_today();
     if (!view->loaded || revision != view->revision || !date_equal(today, view->today)) {
         tasks_view_load(view, backend, revision, today);
     }
 
-    const float x = area.x + PADDING_PIXELS;
-    const float width = area.width - 2 * PADDING_PIXELS;
+    float const x = area.x + PADDING_PIXELS;
+    float const width = area.width - 2 * PADDING_PIXELS;
     float y = area.y + PADDING_PIXELS;
     tasks_view_draw_header(view, app, x, y, width);
     y += HEADER_HEIGHT_PIXELS + PADDING_PIXELS / 2;
@@ -72,13 +72,13 @@ Tasks_View_Choice tasks_view_draw(Tasks_View *view, Backend *backend, const App 
     for (int32_t i = 0; i < view->task_count; i++) {
         counts[tasks_view_group(&view->tasks[i], view->today)]++;
     }
-    const float column_width = width / (float)TASK_GROUP_COUNT;
-    const float cell_y = y + COLUMN_HEADER_HEIGHT_PIXELS;
-    const float cell_height = area.y + area.height - PADDING_PIXELS - cell_y;
+    float const column_width = width / (float)TASK_GROUP_COUNT;
+    float const cell_y = y + COLUMN_HEADER_HEIGHT_PIXELS;
+    float const cell_height = area.y + area.height - PADDING_PIXELS - cell_y;
     Tasks_View_Hit hit = { .index = -1, .check_box = false };
     // Left to right from the most pressing, as the groups are ordered.
     for (int32_t group = 0; group < TASK_GROUP_COUNT; group++) {
-        const float column_x = x + (float)group * column_width;
+        float const column_x = x + (float)group * column_width;
         Rectangle header = { column_x, y, column_width, COLUMN_HEADER_HEIGHT_PIXELS };
         Rectangle cell = { column_x, cell_y, column_width, cell_height };
         Tasks_View_Hit column_hit = tasks_view_draw_column(view, app, (Task_Group)group,
@@ -119,7 +119,7 @@ static void tasks_view_load(Tasks_View *view, Backend *backend, uint64_t revisio
  * The heading, and at the right what went wrong or, failing that, that some tasks are left out.
  * The columns stay below an error, so that a failed check-off does not hide the tasks.
  */
-static void tasks_view_draw_header(const Tasks_View *view, const App *app, float x, float y,
+static void tasks_view_draw_header(Tasks_View const *view, App const *app, float x, float y,
                                    float width) {
     assert(width > 0.0f);
 
@@ -134,7 +134,7 @@ static void tasks_view_draw_header(const Tasks_View *view, const App *app, float
     if (note.length == 0) {
         return;
     }
-    const float note_width = app_measure_text(app, APP_TEXT_DIM, note);
+    float const note_width = app_measure_text(app, APP_TEXT_DIM, note);
     app_draw_text(app, APP_TEXT_DIM, note, x + width - note_width, y + 10);
 }
 
@@ -143,7 +143,7 @@ static void tasks_view_draw_header(const Tasks_View *view, const App *app, float
  * above its day. When not all fit, the last line counts the rest. Returns the task under the
  * pointer, if it is in this column.
  */
-static Tasks_View_Hit tasks_view_draw_column(const Tasks_View *view, const App *app,
+static Tasks_View_Hit tasks_view_draw_column(Tasks_View const *view, App const *app,
                                              Task_Group group, int32_t count, Rectangle header,
                                              Rectangle cell) {
     assert(count >= 0);
@@ -151,8 +151,8 @@ static Tasks_View_Hit tasks_view_draw_column(const Tasks_View *view, const App *
 
     char text[LABEL_SIZE] = "";
     snprintf(text, sizeof(text), "%s (%" PRId32 ")", task_group_names[group], count);
-    const Str label = str_from_cstr(text);
-    const float text_width = app_measure_text(app, APP_TEXT_NORMAL, label);
+    Str const label = str_from_cstr(text);
+    float const text_width = app_measure_text(app, APP_TEXT_NORMAL, label);
     app_draw_text(app, APP_TEXT_NORMAL, label, header.x + (header.width - text_width) / 2,
                   header.y + 4);
     DrawRectangleRec(cell, GetColor((unsigned int)GuiGetStyle(DEFAULT, BASE_COLOR_NORMAL)));
@@ -160,9 +160,9 @@ static Tasks_View_Hit tasks_view_draw_column(const Tasks_View *view, const App *
                                                                      BORDER_COLOR_NORMAL)));
 
     Tasks_View_Hit hit = { .index = -1, .check_box = false };
-    const float slot_height = APP_BAR_HEIGHT_PIXELS + APP_BAR_GAP_PIXELS;
-    const float top = cell.y + COLUMN_TOP_PIXELS;
-    const int32_t slot_count = (int32_t)((cell.y + cell.height - 4 - top) / slot_height);
+    float const slot_height = APP_BAR_HEIGHT_PIXELS + APP_BAR_GAP_PIXELS;
+    float const top = cell.y + COLUMN_TOP_PIXELS;
+    int32_t const slot_count = (int32_t)((cell.y + cell.height - 4 - top) / slot_height);
     if (slot_count <= 0) {
         return hit;
     }
@@ -170,7 +170,7 @@ static Tasks_View_Hit tasks_view_draw_column(const Tasks_View *view, const App *
     if (count > slot_count) {
         bar_count = slot_count - 1;
     }
-    const Vector2 mouse = GetMousePosition();
+    Vector2 const mouse = GetMousePosition();
     int32_t bar_index = 0;
     for (int32_t i = 0; i < view->task_count && bar_index < bar_count; i++) {
         // The tasks are in start order; the completed ones go the other way, so that those
@@ -179,16 +179,16 @@ static Tasks_View_Hit tasks_view_draw_column(const Tasks_View *view, const App *
         if (group == TASK_GROUP_DONE) {
             index = view->task_count - 1 - i;
         }
-        const Task_Occurrence *occurrence = &view->tasks[index];
+        Task_Occurrence const *occurrence = &view->tasks[index];
         if (tasks_view_group(occurrence, view->today) != group) {
             continue;
         }
         // Inset as a one-day bar is in its day cell.
         Rectangle bar = { cell.x + 4, top + (float)bar_index * slot_height, cell.width - 8,
                           APP_BAR_HEIGHT_PIXELS };
-        const Rectangle box = app_draw_task_bar(app, occurrence, bar);
+        Rectangle const box = app_draw_task_bar(app, occurrence, bar);
         if (CheckCollisionPointRec(mouse, bar)) {
-            const float box_right = box.x + box.width + CHECK_BOX_MARGIN_PIXELS;
+            float const box_right = box.x + box.width + CHECK_BOX_MARGIN_PIXELS;
             hit = (Tasks_View_Hit){ .index = index, .check_box = mouse.x < box_right };
         }
         bar_index++;
@@ -213,8 +213,8 @@ static Tasks_View_Choice tasks_view_click(Tasks_View *view, Backend *backend, Ta
     if (hit.index < 0 || !IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         return choice;
     }
-    const Task_Occurrence *occurrence = &view->tasks[hit.index];
-    const Date start = date_from_day_number(occurrence->start_day);
+    Task_Occurrence const *occurrence = &view->tasks[hit.index];
+    Date const start = date_from_day_number(occurrence->start_day);
     if (!hit.check_box) {
         choice.date = start;
         choice.task_id = occurrence->task.id;
@@ -227,13 +227,13 @@ static Tasks_View_Choice tasks_view_click(Tasks_View *view, Backend *backend, Ta
     return choice;
 }
 
-static Task_Group tasks_view_group(const Task_Occurrence *occurrence, Date today) {
+static Task_Group tasks_view_group(Task_Occurrence const *occurrence, Date today) {
     assert(occurrence->task.kind == EVENT_KIND_TASK);
 
     if (occurrence->done) {
         return TASK_GROUP_DONE;
     }
-    const int32_t today_day = date_to_day_number(today);
+    int32_t const today_day = date_to_day_number(today);
     if (occurrence->start_day > today_day) {
         return TASK_GROUP_UPCOMING;
     }

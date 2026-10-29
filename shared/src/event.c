@@ -16,23 +16,23 @@ enum {
     YEAR_DAYS_MIN = 365,
 };
 
-static bool event_occurrence_on_day_monthly(const Event *event, int32_t day_number,
+static bool event_occurrence_on_day_monthly(Event const *event, int32_t day_number,
                                             int32_t month_step, int32_t *start_day);
-static int32_t event_occurrence_due_latest(const Event *event, int32_t day_number);
-static bool event_occurrence_due_next(const Event *event, int32_t start_day, int32_t *next_day);
-static int32_t event_repeat_day_step(const Event *event);
-static int32_t event_repeat_month_step(const Event *event);
+static int32_t event_occurrence_due_latest(Event const *event, int32_t day_number);
+static bool event_occurrence_due_next(Event const *event, int32_t start_day, int32_t *next_day);
+static int32_t event_repeat_day_step(Event const *event);
+static int32_t event_repeat_month_step(Event const *event);
 static bool minute_is_valid(int32_t minute_of_day);
-static bool text_is_terminated(const char *text, size_t size);
+static bool text_is_terminated(char const *text, size_t size);
 
-int32_t event_duration_days(const Event *event) {
+int32_t event_duration_days(Event const *event) {
     int32_t duration = date_to_day_number(event->end_date) -
                        date_to_day_number(event->start_date);
     assert(duration >= 0);
     return duration;
 }
 
-int32_t event_repeat_gap_days_min(const Event *event) {
+int32_t event_repeat_gap_days_min(Event const *event) {
     assert(event->repeat_interval >= 1);
     assert(event->repeat_interval <= REPEAT_INTERVAL_MAX);
 
@@ -59,7 +59,7 @@ int32_t event_repeat_gap_days_min(const Event *event) {
  * Occurrences never overlap (see event_repeat_gap_days_min), so the latest occurrence that
  * starts on or before the day is the only one that can cover it.
  */
-bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *start_day) {
+bool event_occurrence_on_day(Event const *event, int32_t day_number, int32_t *start_day) {
     assert(event->repeat_unit >= 0);
     assert(event->repeat_unit < REPEAT_UNIT_COUNT);
 
@@ -112,11 +112,11 @@ bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *st
     return true;
 }
 
-int32_t event_occurrence_due(const Event *event, int32_t day_number) {
+int32_t event_occurrence_due(Event const *event, int32_t day_number) {
     assert(event->repeat_unit >= 0);
     assert(event->repeat_unit < REPEAT_UNIT_COUNT);
 
-    const int32_t first_day = date_to_day_number(event->start_date);
+    int32_t const first_day = date_to_day_number(event->start_date);
     if (day_number < first_day || event->repeat_unit == REPEAT_NONE) {
         return first_day;
     }
@@ -128,12 +128,12 @@ int32_t event_occurrence_due(const Event *event, int32_t day_number) {
     // it is next, unless the repeat ends first; then the latest is the last.
     int32_t last_day = day_number;
     if (event->repeat_has_end) {
-        const int32_t end_day = date_to_day_number(event->repeat_end_date);
+        int32_t const end_day = date_to_day_number(event->repeat_end_date);
         if (end_day < last_day) {
             last_day = end_day;
         }
     }
-    const int32_t latest_day = event_occurrence_due_latest(event, last_day);
+    int32_t const latest_day = event_occurrence_due_latest(event, last_day);
     int32_t next_day = 0;
     if (!event_occurrence_due_next(event, latest_day, &next_day)) {
         return latest_day;
@@ -145,7 +145,7 @@ int32_t event_occurrence_due(const Event *event, int32_t day_number) {
     return next_day;
 }
 
-Event event_occurrence_at(const Event *event, int32_t start_day) {
+Event event_occurrence_at(Event const *event, int32_t start_day) {
     assert(start_day >= date_to_day_number(event->start_date));
 
     Event occurrence = *event;
@@ -155,7 +155,7 @@ Event event_occurrence_at(const Event *event, int32_t start_day) {
     return occurrence;
 }
 
-void event_format_repeat(const Event *event, char *buffer, size_t buffer_size) {
+void event_format_repeat(Event const *event, char *buffer, size_t buffer_size) {
     assert(buffer_size > 0);
 
     switch ((Repeat_Unit)event->repeat_unit) {
@@ -189,7 +189,7 @@ void event_format_repeat(const Event *event, char *buffer, size_t buffer_size) {
  * Finds the latest occurrence on or before day_number for events that repeat every
  * month_step months on the start's day of the month.
  */
-static bool event_occurrence_on_day_monthly(const Event *event, int32_t day_number,
+static bool event_occurrence_on_day_monthly(Event const *event, int32_t day_number,
                                             int32_t month_step, int32_t *start_day) {
     assert(month_step >= 1);
 
@@ -218,13 +218,13 @@ static bool event_occurrence_on_day_monthly(const Event *event, int32_t day_numb
  * The latest start on or before day_number, which is not before the first, whether or not that
  * occurrence still covers the day.
  */
-static int32_t event_occurrence_due_latest(const Event *event, int32_t day_number) {
+static int32_t event_occurrence_due_latest(Event const *event, int32_t day_number) {
     assert(event->repeat_unit != REPEAT_NONE);
 
-    const int32_t first_day = date_to_day_number(event->start_date);
+    int32_t const first_day = date_to_day_number(event->start_date);
     assert(day_number >= first_day);
 
-    const int32_t day_step = event_repeat_day_step(event);
+    int32_t const day_step = event_repeat_day_step(event);
     if (day_step > 0) {
         return first_day + (day_number - first_day) / day_step * day_step;
     }
@@ -243,12 +243,12 @@ static int32_t event_occurrence_due_latest(const Event *event, int32_t day_numbe
  * false past the last valid date, or when monthly occurrences are not found within the search
  * bound.
  */
-static bool event_occurrence_due_next(const Event *event, int32_t start_day, int32_t *next_day) {
+static bool event_occurrence_due_next(Event const *event, int32_t start_day, int32_t *next_day) {
     assert(event->repeat_unit != REPEAT_NONE);
     assert(start_day >= date_to_day_number(event->start_date));
 
-    const int32_t last_valid_day = date_to_day_number((Date){ DATE_YEAR_MAX, 12, 31 });
-    const int32_t day_step = event_repeat_day_step(event);
+    int32_t const last_valid_day = date_to_day_number((Date){ DATE_YEAR_MAX, 12, 31 });
+    int32_t const day_step = event_repeat_day_step(event);
     if (day_step > 0) {
         if (start_day > last_valid_day - day_step) {
             return false;
@@ -256,17 +256,17 @@ static bool event_occurrence_due_next(const Event *event, int32_t start_day, int
         *next_day = start_day + day_step;
         return true;
     }
-    const int32_t month_step = event_repeat_month_step(event);
-    const Date first = event->start_date;
-    const Date start = date_from_day_number(start_day);
-    const int32_t first_month_index = first.year * 12 + (first.month - 1);
-    const int32_t start_month_index = start.year * 12 + (start.month - 1);
+    int32_t const month_step = event_repeat_month_step(event);
+    Date const first = event->start_date;
+    Date const start = date_from_day_number(start_day);
+    int32_t const first_month_index = first.year * 12 + (first.month - 1);
+    int32_t const start_month_index = start.year * 12 + (start.month - 1);
     // Later occurrences skip months without the start's day, as in event_occurrence_on_day_monthly.
     int32_t occurrence_index = (start_month_index - first_month_index) / month_step;
     for (int32_t i = 0; i < MONTH_SEARCH_STEP_MAX; i++) {
         occurrence_index++;
-        const int32_t month_index = first_month_index + occurrence_index * month_step;
-        const Date occurrence = { month_index / 12, month_index % 12 + 1, first.day };
+        int32_t const month_index = first_month_index + occurrence_index * month_step;
+        Date const occurrence = { month_index / 12, month_index % 12 + 1, first.day };
         if (occurrence.year > DATE_YEAR_MAX) {
             return false;
         }
@@ -282,7 +282,7 @@ static bool event_occurrence_due_next(const Event *event, int32_t start_day, int
 /**
  * Days between starts for an event that repeats by days or weeks, or 0 for one by months.
  */
-static int32_t event_repeat_day_step(const Event *event) {
+static int32_t event_repeat_day_step(Event const *event) {
     switch ((Repeat_Unit)event->repeat_unit) {
     case REPEAT_DAY:
         return event->repeat_interval;
@@ -302,7 +302,7 @@ static int32_t event_repeat_day_step(const Event *event) {
 /**
  * Months between starts for an event that repeats by months or years.
  */
-static int32_t event_repeat_month_step(const Event *event) {
+static int32_t event_repeat_month_step(Event const *event) {
     switch ((Repeat_Unit)event->repeat_unit) {
     case REPEAT_MONTH:
         return event->repeat_interval;
@@ -318,7 +318,7 @@ static int32_t event_repeat_month_step(const Event *event) {
     return 1;
 }
 
-bool event_is_valid(const Event *event) {
+bool event_is_valid(Event const *event) {
     if (!text_is_terminated(event->title, sizeof(event->title))) {
         return false;
     }
@@ -424,9 +424,9 @@ bool opportunity_is_missed(Date end_date, int32_t end_minute, bool tasks_done, D
         deadline_minute = MINUTES_PER_DAY - 1;
     }
     // int64_t, because minutes since 1970 pass INT32_MAX in the year 6053.
-    const int64_t deadline = (int64_t)date_to_day_number(end_date) * MINUTES_PER_DAY +
+    int64_t const deadline = (int64_t)date_to_day_number(end_date) * MINUTES_PER_DAY +
                              deadline_minute;
-    const int64_t current = (int64_t)date_to_day_number(now.date) * MINUTES_PER_DAY +
+    int64_t const current = (int64_t)date_to_day_number(now.date) * MINUTES_PER_DAY +
                             now.minute_of_day;
     return current > deadline;
 }
@@ -469,6 +469,6 @@ static bool minute_is_valid(int32_t minute_of_day) {
     return minute_of_day == TIME_NONE || (minute_of_day >= 0 && minute_of_day < MINUTES_PER_DAY);
 }
 
-static bool text_is_terminated(const char *text, size_t size) {
+static bool text_is_terminated(char const *text, size_t size) {
     return memchr(text, '\0', size) != NULL;
 }

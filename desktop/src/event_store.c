@@ -17,7 +17,7 @@ enum {
 // Dates are ISO text ("YYYY-MM-DD") so that they compare correctly as strings and stay
 // readable with any SQLite tool. A NULL time means the event has no time of day on that end.
 // created_at is local time, because the whole calendar works in local time.
-static const char schema_sql[] =
+static char const schema_sql[] =
     "CREATE TABLE IF NOT EXISTS events ("
     "    id INTEGER PRIMARY KEY,"
     "    title TEXT NOT NULL CHECK (length(title) > 0),"
@@ -34,7 +34,7 @@ static const char schema_sql[] =
 
 // Schema versions, kept in PRAGMA user_version. The table above is version 0, and migration i
 // moves a database from version i to i + 1, so that databases from earlier builds still open.
-static const char *const migrations_sql[] = {
+static char const *const migrations_sql[] = {
     // Repeating events. A NULL repeat_unit means that the event happens once.
     "ALTER TABLE events ADD COLUMN repeat_unit TEXT"
     "    CHECK (repeat_unit IN ('day', 'week', 'month', 'year'));"
@@ -160,12 +160,12 @@ static const char *const migrations_sql[] = {
 enum { SCHEMA_VERSION = sizeof(migrations_sql) / sizeof(migrations_sql[0]) };
 
 // Text stored in repeat_unit, indexed by Repeat_Unit. NULL is stored for REPEAT_NONE.
-static const char *const repeat_unit_names[REPEAT_UNIT_COUNT] = {
+static char const *const repeat_unit_names[REPEAT_UNIT_COUNT] = {
     NULL, "day", "week", "month", "year",
 };
 
 // Text stored in kind, indexed by Event_Kind.
-static const char *const event_kind_names[EVENT_KIND_COUNT] = { "event", "task", "problem",
+static char const *const event_kind_names[EVENT_KIND_COUNT] = { "event", "task", "problem",
                                                                  "opportunity" };
 
 typedef enum Statement {
@@ -191,7 +191,7 @@ static_assert((int)STATEMENT_COUNT == (int)EVENT_STORE_STATEMENT_COUNT,
               "Event_Store holds every statement.");
 
 // Insert and update share parameters 1 to 13, so that both bind with event_store_bind_fields.
-static const char *const statements_sql[STATEMENT_COUNT] = {
+static char const *const statements_sql[STATEMENT_COUNT] = {
     [STATEMENT_INSERT] =
         "INSERT INTO events"
         " (title, start_date, start_time, end_date, end_time, repeat_unit, repeat_interval,"
@@ -321,21 +321,21 @@ enum {
     TARGET_COLUMN_END_TIME,
 };
 
-static bool event_store_fail(Event_Store *store, const char *context);
+static bool event_store_fail(Event_Store *store, char const *context);
 static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_count_max);
 static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Task *task);
 static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Target *target);
 static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_id,
                                               Array_Slice target_ids);
 static int event_store_load_tasks_done(Event_Store *store, Task_Occurrence *occurrence);
-static int event_store_load_tasks_compare(const void *a, const void *b);
+static int event_store_load_tasks_compare(void const *a, void const *b);
 static bool event_store_migrate(Event_Store *store);
 static bool event_store_check_foreign_keys(Event_Store *store);
 static bool event_store_migrate_step(Event_Store *store, int32_t version);
 static bool event_store_write(Event_Store *store, sqlite3_stmt *statement, int result,
-                              const char *context, bool row_expected);
+                              char const *context, bool row_expected);
 static int bind_range(sqlite3_stmt *statement, Date first, Date last, int32_t row_count_max);
-static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event);
+static int event_store_bind_fields(sqlite3_stmt *statement, Event const *event);
 static int bind_time(sqlite3_stmt *statement, int index, int32_t minute_of_day);
 static int bind_date(sqlite3_stmt *statement, int index, Date date);
 static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event);
@@ -348,7 +348,7 @@ static bool column_parse_target(sqlite3_stmt *statement, Event *event);
 static bool column_parse_deadline(sqlite3_stmt *statement, Event *event);
 static bool column_parse_location(sqlite3_stmt *statement, Event *event);
 
-bool event_store_open(Event_Store *store, const char *path, bool create) {
+bool event_store_open(Event_Store *store, char const *path, bool create) {
     assert(store != NULL);
     assert(path != NULL);
 
@@ -412,7 +412,7 @@ void event_store_close(Event_Store *store) {
     *store = (Event_Store){ 0 };
 }
 
-int64_t event_store_insert(Event_Store *store, const Event *event) {
+int64_t event_store_insert(Event_Store *store, Event const *event) {
     assert(store != NULL);
     assert(event != NULL);
     assert(event->id == 0);
@@ -429,7 +429,7 @@ int64_t event_store_insert(Event_Store *store, const Event *event) {
     return id;
 }
 
-bool event_store_update(Event_Store *store, const Event *event) {
+bool event_store_update(Event_Store *store, Event const *event) {
     assert(store != NULL);
     assert(event->id > 0);
     assert(event->title[0] != '\0');
@@ -506,7 +506,7 @@ int32_t event_store_load_range(Event_Store *store, Date first, Date last, Array_
     assert(truncated != NULL);
 
     Event *event_items = events.items;
-    const int32_t event_count_max = events.count;
+    int32_t const event_count_max = events.count;
 
     sqlite3_stmt *statement = store->statements[STATEMENT_SELECT_RANGE];
     int result = bind_range(statement, first, last, event_count_max);
@@ -554,7 +554,7 @@ int32_t event_store_load_completions(Event_Store *store, Date first, Date last,
     assert(truncated != NULL);
 
     Task_Completion *completion_items = completions.items;
-    const int32_t completion_count_max = completions.count;
+    int32_t const completion_count_max = completions.count;
 
     Date lookback = date_add_days(first, -COMPLETION_LOOKBACK_DAYS);
     sqlite3_stmt *statement = store->statements[STATEMENT_COMPLETION_SELECT_RANGE];
@@ -603,7 +603,7 @@ int32_t event_store_load_target_tasks(Event_Store *store, int64_t target_id, Arr
     assert(tasks.count > 0);
 
     Linked_Task *task_items = tasks.items;
-    const int32_t task_count_max = tasks.count;
+    int32_t const task_count_max = tasks.count;
     sqlite3_stmt *statement = store->statements[STATEMENT_TARGET_TASKS];
     int result = bind_id_and_limit(statement, target_id, task_count_max);
     int32_t task_count = 0;
@@ -644,7 +644,7 @@ int32_t event_store_load_task_targets(Event_Store *store, int64_t task_id, bool 
     assert(targets.count > 0);
 
     Link_Target *target_items = targets.items;
-    const int32_t target_count_max = targets.count;
+    int32_t const target_count_max = targets.count;
     sqlite3_stmt *statement = store->statements[STATEMENT_TASK_TARGETS];
     // A task not stored yet has id 0, which no link has, so that no target comes back linked.
     int result = bind_id_and_limit(statement, task_id, target_count_max);
@@ -715,7 +715,7 @@ bool event_store_set_task_targets(Event_Store *store, int64_t task_id, Array_Sli
  */
 static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_id,
                                               Array_Slice target_ids) {
-    const int64_t *ids = target_ids.items;
+    int64_t const *ids = target_ids.items;
     sqlite3_stmt *statement = store->statements[STATEMENT_LINK_DELETE];
     int result = sqlite3_bind_int64(statement, 1, task_id);
     // No row check: a task may have had no links.
@@ -756,8 +756,8 @@ int32_t event_store_load_tasks(Event_Store *store, Date today, Array_Slice tasks
     assert(tasks.count > 0);
 
     Task_Occurrence *task_items = tasks.items;
-    const int32_t task_count_max = tasks.count;
-    const int32_t today_day = date_to_day_number(today);
+    int32_t const task_count_max = tasks.count;
+    int32_t const today_day = date_to_day_number(today);
     sqlite3_stmt *statement = store->statements[STATEMENT_TASKS];
     int result = sqlite3_bind_int(statement, 1, task_count_max + 1);
     int32_t task_count = 0;
@@ -811,7 +811,7 @@ static int event_store_load_tasks_done(Event_Store *store, Task_Occurrence *occu
         result = bind_date(statement, 2, date_from_day_number(occurrence->start_day));
     }
     if (result == SQLITE_OK) {
-        const int step = sqlite3_step(statement);
+        int const step = sqlite3_step(statement);
         occurrence->done = step == SQLITE_ROW;
         if (step != SQLITE_ROW && step != SQLITE_DONE) {
             result = step;
@@ -826,21 +826,21 @@ static int event_store_load_tasks_done(Event_Store *store, Task_Occurrence *occu
  * By the occurrence's start day, then its time, those without a time first as the calendar
  * lists them, then by id, so that the order is the same on every load.
  */
-static int event_store_load_tasks_compare(const void *a, const void *b) {
-    const Task_Occurrence *first = a;
-    const Task_Occurrence *second = b;
+static int event_store_load_tasks_compare(void const *a, void const *b) {
+    Task_Occurrence const *first = a;
+    Task_Occurrence const *second = b;
     if (first->start_day != second->start_day) {
         return (first->start_day > second->start_day) - (first->start_day < second->start_day);
     }
-    const int32_t first_minute = first->task.start_minute;
-    const int32_t second_minute = second->task.start_minute;
+    int32_t const first_minute = first->task.start_minute;
+    int32_t const second_minute = second->task.start_minute;
     if (first_minute != second_minute) {
         return (first_minute > second_minute) - (first_minute < second_minute);
     }
     return (first->task.id > second->task.id) - (first->task.id < second->task.id);
 }
 
-static bool event_store_fail(Event_Store *store, const char *context) {
+static bool event_store_fail(Event_Store *store, char const *context) {
     assert(store != NULL);
     assert(context != NULL);
 
@@ -856,7 +856,7 @@ static bool event_store_fail(Event_Store *store, const char *context) {
  * for example from another tool.
  */
 static bool event_store_write(Event_Store *store, sqlite3_stmt *statement, int result,
-                              const char *context, bool row_expected) {
+                              char const *context, bool row_expected) {
     if (result == SQLITE_OK) {
         result = sqlite3_step(statement);
     }
@@ -892,7 +892,7 @@ static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_co
  * Longer titles from outside this program are cut to fit, as in event_store_load_range_row.
  */
 static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Task *task) {
-    const char *title = (const char *)sqlite3_column_text(statement, 1);
+    char const *title = (char const *)sqlite3_column_text(statement, 1);
     if (title == NULL || title[0] == '\0') {
         return false;
     }
@@ -905,7 +905,7 @@ static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Ta
 }
 
 static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Target *target) {
-    const char *title = (const char *)sqlite3_column_text(statement, TARGET_COLUMN_TITLE);
+    char const *title = (char const *)sqlite3_column_text(statement, TARGET_COLUMN_TITLE);
     if (title == NULL || title[0] == '\0') {
         return false;
     }
@@ -951,7 +951,7 @@ static int bind_range(sqlite3_stmt *statement, Date first, Date last, int32_t ro
     return result;
 }
 
-static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event) {
+static int event_store_bind_fields(sqlite3_stmt *statement, Event const *event) {
     assert(event->repeat_unit >= 0);
     assert(event->repeat_unit < REPEAT_UNIT_COUNT);
     assert(event->kind >= 0);
@@ -972,7 +972,7 @@ static int event_store_bind_fields(sqlite3_stmt *statement, const Event *event) 
         result = bind_time(statement, 5, event->end_minute);
     }
     if (result == SQLITE_OK) {
-        const char *unit = repeat_unit_names[event->repeat_unit];
+        char const *unit = repeat_unit_names[event->repeat_unit];
         if (unit == NULL) {
             result = sqlite3_bind_null(statement, 6);
         } else {
@@ -1049,7 +1049,7 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
 
     *event = (Event){ .id = sqlite3_column_int64(statement, COLUMN_ID) };
 
-    const char *title = (const char *)sqlite3_column_text(statement, COLUMN_TITLE);
+    char const *title = (char const *)sqlite3_column_text(statement, COLUMN_TITLE);
     if (title == NULL || title[0] == '\0') {
         return false;
     }
@@ -1071,7 +1071,7 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
 
     // "YYYY-MM-DD HH:MM:SS": the date is its first ten bytes and the time the five after the
     // space. SQLite tells the length of what it gives, so nothing here looks for a terminator.
-    const Str created_at = column_text(statement, COLUMN_CREATED_AT);
+    Str const created_at = column_text(statement, COLUMN_CREATED_AT);
     if (created_at.length < 16) {
         return false;
     }
@@ -1100,7 +1100,7 @@ static bool event_store_load_range_row(sqlite3_stmt *statement, Event *event) {
         return false;
     }
     // Longer text from outside this program is cut to fit, as titles are.
-    const char *description = (const char *)sqlite3_column_text(statement, COLUMN_DESCRIPTION);
+    char const *description = (char const *)sqlite3_column_text(statement, COLUMN_DESCRIPTION);
     if (description == NULL) {
         return false;
     }
@@ -1166,8 +1166,8 @@ static bool column_parse_location(sqlite3_stmt *statement, Event *event) {
     if (sqlite3_column_type(statement, COLUMN_LOCATION_ID) == SQLITE_NULL) {
         return true;
     }
-    const char *address = (const char *)sqlite3_column_text(statement, COLUMN_LOCATION_ADDRESS);
-    const char *city = (const char *)sqlite3_column_text(statement, COLUMN_LOCATION_CITY);
+    char const *address = (char const *)sqlite3_column_text(statement, COLUMN_LOCATION_ADDRESS);
+    char const *city = (char const *)sqlite3_column_text(statement, COLUMN_LOCATION_CITY);
     if (address == NULL || city == NULL) {
         return false;
     }
@@ -1183,7 +1183,7 @@ static bool column_parse_location(sqlite3_stmt *statement, Event *event) {
  * them apart asks sqlite3_column_type first.
  */
 static Str column_text(sqlite3_stmt *statement, int column) {
-    const char *text = (const char *)sqlite3_column_text(statement, column);
+    char const *text = (char const *)sqlite3_column_text(statement, column);
     if (text == NULL) {
         return str_make("", 0);
     }
@@ -1210,7 +1210,7 @@ static bool column_parse_time(sqlite3_stmt *statement, int column, int32_t *minu
  * unit, an interval in range, and occurrences that do not overlap.
  */
 static bool column_parse_repeat(sqlite3_stmt *statement, Event *event) {
-    const char *unit = (const char *)sqlite3_column_text(statement, COLUMN_REPEAT_UNIT);
+    char const *unit = (char const *)sqlite3_column_text(statement, COLUMN_REPEAT_UNIT);
     // REPEAT_UNIT_COUNT stands for a unit that is not known, until one matches below.
     event->repeat_unit = REPEAT_UNIT_COUNT;
     if (unit == NULL) {
@@ -1249,7 +1249,7 @@ static bool column_parse_repeat(sqlite3_stmt *statement, Event *event) {
 }
 
 static bool column_parse_kind(sqlite3_stmt *statement, int column, int32_t *kind) {
-    const char *text = (const char *)sqlite3_column_text(statement, column);
+    char const *text = (char const *)sqlite3_column_text(statement, column);
     if (text == NULL) {
         return false;
     }

@@ -19,10 +19,10 @@ enum {
 };
 
 static void problems_view_load(Problems_View *view, Backend *backend, uint64_t revision);
-static void problems_view_draw_column(const Problems_View *view, const App *app,
+static void problems_view_draw_column(Problems_View const *view, App const *app,
                                       Target_Status status, int32_t count, Rectangle header,
                                       Rectangle cell);
-static Target_Status problems_view_status(const Link_Target *problem);
+static Target_Status problems_view_status(Link_Target const *problem);
 
 void problems_view_init(Problems_View *view) {
     view->revision = 0;
@@ -32,18 +32,18 @@ void problems_view_init(Problems_View *view) {
     view->error[0] = '\0';
 }
 
-void problems_view_draw(Problems_View *view, Backend *backend, const App *app, Rectangle area) {
+void problems_view_draw(Problems_View *view, Backend *backend, App const *app, Rectangle area) {
     assert(area.width > 0.0f);
     assert(area.height > 0.0f);
 
     // Checking a task off anywhere changes the revision, and moves its problems along.
-    const uint64_t revision = backend_revision(backend);
+    uint64_t const revision = backend_revision(backend);
     if (!view->loaded || revision != view->revision) {
         problems_view_load(view, backend, revision);
     }
 
-    const float x = area.x + PADDING_PIXELS;
-    const float width = area.width - 2 * PADDING_PIXELS;
+    float const x = area.x + PADDING_PIXELS;
+    float const width = area.width - 2 * PADDING_PIXELS;
     float y = area.y + PADDING_PIXELS;
     app_draw_text(app, APP_TEXT_HEADING, STR("Problems"), x, y + 4);
     if (view->error[0] != '\0') {
@@ -64,12 +64,12 @@ void problems_view_draw(Problems_View *view, Backend *backend, const App *app, R
     for (int32_t i = 0; i < view->problem_count; i++) {
         counts[problems_view_status(&view->problems[i])]++;
     }
-    const float column_width = width / (float)TARGET_STATUS_COUNT;
-    const float cell_y = y + COLUMN_HEADER_HEIGHT_PIXELS;
-    const float cell_height = area.y + area.height - PADDING_PIXELS - cell_y;
+    float const column_width = width / (float)TARGET_STATUS_COUNT;
+    float const cell_y = y + COLUMN_HEADER_HEIGHT_PIXELS;
+    float const cell_height = area.y + area.height - PADDING_PIXELS - cell_y;
     // Left to right from the least complete, as the statuses are ordered.
     for (int32_t status = 0; status < TARGET_STATUS_COUNT; status++) {
-        const float column_x = x + (float)status * column_width;
+        float const column_x = x + (float)status * column_width;
         Rectangle header = { column_x, y, column_width, COLUMN_HEADER_HEIGHT_PIXELS };
         Rectangle cell = { column_x, cell_y, column_width, cell_height };
         problems_view_draw_column(view, app, (Target_Status)status, counts[status], header,
@@ -105,16 +105,16 @@ static void problems_view_load(Problems_View *view, Backend *backend, uint64_t r
  * The state and its count above, and the problems in that state as bars in a cell below, like
  * a weekday name above its day. When not all fit, the last line counts the rest.
  */
-static void problems_view_draw_column(const Problems_View *view, const App *app,
+static void problems_view_draw_column(Problems_View const *view, App const *app,
                                       Target_Status status, int32_t count, Rectangle header,
                                       Rectangle cell) {
     assert(count >= 0);
     assert(count <= view->problem_count);
 
     char text[LABEL_SIZE] = "";
-    const Str status_name = target_status_name(status);
+    Str const status_name = target_status_name(status);
     snprintf(text, sizeof(text), "%.*s (%" PRId32 ")", STR_ARGUMENTS(status_name), count);
-    const Str label = str_from_cstr(text);
+    Str const label = str_from_cstr(text);
     float text_width = app_measure_text(app, APP_TEXT_NORMAL, label);
     app_draw_text(app, APP_TEXT_NORMAL, label, header.x + (header.width - text_width) / 2,
                   header.y + 4);
@@ -122,9 +122,9 @@ static void problems_view_draw_column(const Problems_View *view, const App *app,
     DrawRectangleLinesEx(cell, 1, GetColor((unsigned int)GuiGetStyle(DEFAULT,
                                                                      BORDER_COLOR_NORMAL)));
 
-    const float slot_height = APP_BAR_HEIGHT_PIXELS + APP_BAR_GAP_PIXELS;
-    const float top = cell.y + COLUMN_TOP_PIXELS;
-    const int32_t slot_count = (int32_t)((cell.y + cell.height - 4 - top) / slot_height);
+    float const slot_height = APP_BAR_HEIGHT_PIXELS + APP_BAR_GAP_PIXELS;
+    float const top = cell.y + COLUMN_TOP_PIXELS;
+    int32_t const slot_count = (int32_t)((cell.y + cell.height - 4 - top) / slot_height);
     if (slot_count <= 0) {
         return;
     }
@@ -134,7 +134,7 @@ static void problems_view_draw_column(const Problems_View *view, const App *app,
     }
     int32_t bar_index = 0;
     for (int32_t i = 0; i < view->problem_count && bar_index < bar_count; i++) {
-        const Link_Target *problem = &view->problems[i];
+        Link_Target const *problem = &view->problems[i];
         assert(problem->kind == EVENT_KIND_PROBLEM);
         if (problems_view_status(problem) != status) {
             continue;
@@ -152,7 +152,7 @@ static void problems_view_draw_column(const Problems_View *view, const App *app,
     }
 }
 
-static Target_Status problems_view_status(const Link_Target *problem) {
+static Target_Status problems_view_status(Link_Target const *problem) {
     Target_Status status = target_status(problem->task_count, problem->task_done_count);
     assert((int32_t)status >= 0);
     assert(status < TARGET_STATUS_COUNT);

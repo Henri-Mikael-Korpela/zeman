@@ -14,20 +14,20 @@ enum {
 };
 
 static bool client_connect(Client *client);
-static void client_disconnect(Client *client, const char *reason);
+static void client_disconnect(Client *client, char const *reason);
 static Writer client_request_begin(Client *client, Protocol_Operation operation);
-static bool client_exchange(Client *client, const Writer *request, Reader *response);
-static bool client_call(Client *client, const Writer *request, Reader *response);
-static bool client_response_done(Client *client, const Reader *response);
-static int32_t client_response_count(Client *client, const Reader *response, int32_t count);
-static int64_t client_response_id(Client *client, const Reader *response, int64_t id);
+static bool client_exchange(Client *client, Writer const *request, Reader *response);
+static bool client_call(Client *client, Writer const *request, Reader *response);
+static bool client_response_done(Client *client, Reader const *response);
+static int32_t client_response_count(Client *client, Reader const *response, int32_t count);
+static int64_t client_response_id(Client *client, Reader const *response, int64_t id);
 
 static int32_t client_load_range(void *context, Date first, Date last, Array_Slice events,
                                  bool *truncated);
 static int32_t client_load_completions(void *context, Date first, Date last,
                                        Array_Slice completions, bool *truncated);
-static int64_t client_insert(void *context, const Event *event);
-static bool client_update(void *context, const Event *event);
+static int64_t client_insert(void *context, Event const *event);
+static bool client_update(void *context, Event const *event);
 static bool client_remove(void *context, int64_t id);
 static bool client_set_task_done(void *context, int64_t id, Date occurrence_start, bool done);
 static int64_t client_location(void *context, Str address, Str city);
@@ -38,9 +38,9 @@ static int32_t client_load_task_targets(void *context, int64_t task_id, bool pro
 static bool client_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
 static int32_t client_load_tasks(void *context, Date today, Array_Slice tasks, bool *truncated);
 static uint64_t client_revision(void *context);
-static Str client_error(const void *context);
+static Str client_error(void const *context);
 
-static const Backend_Ops client_ops = {
+static Backend_Ops const client_ops = {
     .load_range = client_load_range,
     .load_completions = client_load_completions,
     .insert = client_insert,
@@ -84,7 +84,7 @@ void client_set_server(Client *client, Str host, uint16_t port) {
     client->revision_checked_ms = 0;
 }
 
-bool client_is_connected(const Client *client) {
+bool client_is_connected(Client const *client) {
     return client->connected;
 }
 
@@ -142,7 +142,7 @@ static int32_t client_load_completions(void *context, Date first, Date last,
     return client_response_count(client, &response, count);
 }
 
-static int64_t client_insert(void *context, const Event *event) {
+static int64_t client_insert(void *context, Event const *event) {
     Client *client = context;
     Writer request = client_request_begin(client, PROTOCOL_INSERT);
     writer_event(&request, event);
@@ -154,7 +154,7 @@ static int64_t client_insert(void *context, const Event *event) {
     return client_response_id(client, &response, id);
 }
 
-static bool client_update(void *context, const Event *event) {
+static bool client_update(void *context, Event const *event) {
     Client *client = context;
     Writer request = client_request_begin(client, PROTOCOL_UPDATE);
     writer_event(&request, event);
@@ -253,7 +253,7 @@ static bool client_set_task_targets(void *context, int64_t task_id, Array_Slice 
     assert(task_id > 0);
     assert(target_ids.count >= 0);
     assert(target_ids.count <= LINK_COUNT_MAX);
-    const int64_t *ids = target_ids.items;
+    int64_t const *ids = target_ids.items;
     Writer request = client_request_begin(client, PROTOCOL_SET_TASK_TARGETS);
     writer_i64(&request, task_id);
     writer_i32(&request, target_ids.count);
@@ -314,8 +314,8 @@ static uint64_t client_revision(void *context) {
     return revision;
 }
 
-static Str client_error(const void *context) {
-    const Client *client = context;
+static Str client_error(void const *context) {
+    Client const *client = context;
     return str_from_cstr(client->error);
 }
 
@@ -371,7 +371,7 @@ static bool client_connect(Client *client) {
     return true;
 }
 
-static void client_disconnect(Client *client, const char *reason) {
+static void client_disconnect(Client *client, char const *reason) {
     net_close(client->socket);
     client->socket = NET_SOCKET_INVALID;
     client->connected = false;
@@ -399,7 +399,7 @@ static Writer client_request_begin(Client *client, Protocol_Operation operation)
  * connected). Every request is written after PROTOCOL_LENGTH_SIZE free bytes, where the length
  * prefix goes.
  */
-static bool client_exchange(Client *client, const Writer *request, Reader *response) {
+static bool client_exchange(Client *client, Writer const *request, Reader *response) {
     assert(client->connected);
     // Every request is far smaller than its buffer; overflowing it is a programmer error.
     assert(!request->overflow);
@@ -441,7 +441,7 @@ static bool client_exchange(Client *client, const Writer *request, Reader *respo
     return true;
 }
 
-static bool client_call(Client *client, const Writer *request, Reader *response) {
+static bool client_call(Client *client, Writer const *request, Reader *response) {
     if (!client->connected && !client_connect(client)) {
         return false;
     }
@@ -452,7 +452,7 @@ static bool client_call(Client *client, const Writer *request, Reader *response)
  * A response with fields missing, left over or breaking their rules means the two apps do not
  * understand each other, so the connection is dropped rather than trusted.
  */
-static bool client_response_done(Client *client, const Reader *response) {
+static bool client_response_done(Client *client, Reader const *response) {
     if (!reader_done(response)) {
         client_disconnect(client, "The desktop app sent an invalid answer.");
         return false;
@@ -463,7 +463,7 @@ static bool client_response_done(Client *client, const Reader *response) {
 /**
  * count, once the whole answer has been read as it should be, or -1 for a load that failed.
  */
-static int32_t client_response_count(Client *client, const Reader *response, int32_t count) {
+static int32_t client_response_count(Client *client, Reader const *response, int32_t count) {
     assert(count >= 0);
 
     if (client_response_done(client, response)) {
@@ -476,7 +476,7 @@ static int32_t client_response_count(Client *client, const Reader *response, int
  * The id a write answered with, once the whole answer has been read as it should be, or 0 for
  * one that failed or came back without a stored id.
  */
-static int64_t client_response_id(Client *client, const Reader *response, int64_t id) {
+static int64_t client_response_id(Client *client, Reader const *response, int64_t id) {
     if (!client_response_done(client, response)) {
         return 0;
     }

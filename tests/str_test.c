@@ -12,7 +12,7 @@ static void test_make_and_slice(void) {
     assert(str_from_cstr("abc").length == 3);
     assert(STR("abc").length == 3);
 
-    const Str s = STR("hello");
+    Str const s = STR("hello");
     assert(str_eq(str_slice(s, 1, 3), STR("el")));
     assert(str_eq(str_slice(s, 0, 99), STR("hello"))); // Past the end is the end.
     assert(str_slice(s, 4, 2).length == 0);            // Start after end is empty.

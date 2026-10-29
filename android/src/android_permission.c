@@ -10,12 +10,12 @@
 // Defined by raylib's Android platform code.
 struct android_app *GetAndroidApp(void);
 
-static const char CAMERA_PERMISSION[] = "android.permission.CAMERA";
+static char const CAMERA_PERMISSION[] = "android.permission.CAMERA";
 // Identifies the request in Android's answer, which native code does not receive anyway.
-static const jint REQUEST_CODE = 1;
+static jint const REQUEST_CODE = 1;
 
 static JNIEnv *permission_attach(JavaVM *vm);
-static bool permission_failed(JNIEnv *env, const void *result);
+static bool permission_failed(JNIEnv *env, void const *result);
 
 bool android_camera_permitted(void) {
     struct android_app *app = GetAndroidApp();
@@ -85,7 +85,7 @@ static JNIEnv *permission_attach(JavaVM *vm) {
  * True, with the exception cleared, when a JNI call failed, so that no later call runs with an
  * exception pending.
  */
-static bool permission_failed(JNIEnv *env, const void *result) {
+static bool permission_failed(JNIEnv *env, void const *result) {
     if (result == NULL || (*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         return true;

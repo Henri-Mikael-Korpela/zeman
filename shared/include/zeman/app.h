@@ -14,7 +14,7 @@
 typedef struct App_Config {
     // Prefix for the "fonts/..." files: the executable's folder on the desktop, and "" on
     // Android, where raylib reads relative paths from the APK's assets.
-    const char *font_directory;
+    char const *font_directory;
     // Screen pixels per layout pixel. 1 on the desktop; on a phone, large enough that the
     // portrait layout is 420 layout pixels wide.
     float scale;
@@ -42,7 +42,7 @@ typedef enum App_Text {
 /**
  * Creates the one App. Needs the window, because fonts are loaded into textures.
  */
-App *app_create(Backend *backend, const App_Config *config);
+App *app_create(Backend *backend, App_Config const *config);
 void app_destroy(App *app);
 /**
  * Handles input and draws the calendar into area, in screen pixels, between the caller's
@@ -54,20 +54,20 @@ void app_frame(App *app, Rectangle area);
  * Draws text in one of the calendar's styles, at a position in screen pixels divided by the
  * scale (layout pixels), outside app_frame.
  */
-void app_draw_text(const App *app, App_Text style, Str text, float x, float y);
-float app_measure_text(const App *app, App_Text style, Str text);
+void app_draw_text(App const *app, App_Text style, Str text, float x, float y);
+float app_measure_text(App const *app, App_Text style, Str text);
 /**
  * Draws a problem as the calendar does in its day cells, in layout pixels outside app_frame:
  * red with a "!" while open, green with a check mark once done.
  */
-void app_draw_problem_bar(const App *app, Str title, bool done, Rectangle bar);
+void app_draw_problem_bar(App const *app, Str title, bool done, Rectangle bar);
 /**
  * Draws a task as the calendar does in its day cells, in layout pixels outside app_frame: tinted
  * in its color, with a checkbox, and faded and struck through once done. Its occurrence's date
  * comes before the time and title, as it is not in a day cell. Returns the checkbox, so that the
  * caller can check the task off with a click there.
  */
-Rectangle app_draw_task_bar(const App *app, const Task_Occurrence *occurrence, Rectangle bar);
+Rectangle app_draw_task_bar(App const *app, Task_Occurrence const *occurrence, Rectangle bar);
 /**
  * Selects the date and focuses the item with id on it, as a click on its bar in the calendar
  * does, for when another view sends the user to it. The item must occur on the date.
@@ -98,11 +98,11 @@ typedef enum App_Cursor {
 /**
  * The cursor for the pointer's place after app_frame.
  */
-App_Cursor app_cursor(const App *app);
+App_Cursor app_cursor(App const *app);
 /**
  * True while a form field is being typed into, so that Android can show its keyboard.
  */
-bool app_text_input_active(const App *app);
+bool app_text_input_active(App const *app);
 /**
  * With input off, app_frame still draws and loads but ignores the pointer and keys, for example
  * while the phone's navigation drawer covers the calendar. On at start.

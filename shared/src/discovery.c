@@ -66,7 +66,7 @@ bool discovery_poll(Discovery *discovery) {
         }
         uint16_t port = 0;
         // The datagram has a length of its own, so it needs no terminator to be read.
-        const Str answer_text = str_make(answer, (size_t)length);
+        Str const answer_text = str_make(answer, (size_t)length);
         if (net_address_is_local(address) && discovery_parse_answer(answer_text, &port)) {
             snprintf(discovery->found_address, sizeof(discovery->found_address), "%s", address);
             discovery->found_port = port;
@@ -81,7 +81,7 @@ bool discovery_poll(Discovery *discovery) {
  * "ZEMAN-SERVER 1 47800": the reply prefix, then a port of digits only.
  */
 static bool discovery_parse_answer(Str answer, uint16_t *port) {
-    const Str prefix = str_from_cstr(PROTOCOL_DISCOVERY_REPLY);
+    Str const prefix = str_from_cstr(PROTOCOL_DISCOVERY_REPLY);
     if (!str_starts_with(answer, prefix)) {
         return false;
     }

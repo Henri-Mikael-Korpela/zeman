@@ -56,6 +56,6 @@ typedef struct Server {
 bool server_start(Server *server, Backend *backend, uint16_t port);
 void server_stop(Server *server);
 void server_poll(Server *server);
-int32_t server_client_count(const Server *server);
+int32_t server_client_count(Server const *server);
 
 #endif

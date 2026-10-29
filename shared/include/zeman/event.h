@@ -139,7 +139,7 @@ typedef enum Target_Status {
  * store's assertions must never see. That a problem falls on the day it was created is left to
  * the caller and the database.
  */
-bool event_is_valid(const Event *event);
+bool event_is_valid(Event const *event);
 
 /**
  * A link target that tasks can be linked to: a problem or an opportunity.
@@ -155,35 +155,35 @@ bool opportunity_is_missed(Date end_date, int32_t end_minute, bool tasks_done, D
 /**
  * Whole days from the start date to the end date of one occurrence; 0 for a one-day event.
  */
-int32_t event_duration_days(const Event *event);
+int32_t event_duration_days(Event const *event);
 
 /**
  * The fewest days between the starts of two occurrences. An occurrence must be shorter than
  * this, so that occurrences never overlap and at most one covers any given day.
  */
-int32_t event_repeat_gap_days_min(const Event *event);
+int32_t event_repeat_gap_days_min(Event const *event);
 
 /**
  * Finds the occurrence that covers day_number. Returns false if none does.
  */
-bool event_occurrence_on_day(const Event *event, int32_t day_number, int32_t *start_day);
+bool event_occurrence_on_day(Event const *event, int32_t day_number, int32_t *start_day);
 
 /**
  * The start day of the occurrence that is due on day_number: the one that covers the day, else
  * the first that starts after it, else, when every occurrence is past, the last one. A
  * repeating task's missed occurrences are passed over for the next, which asks the same again.
  */
-int32_t event_occurrence_due(const Event *event, int32_t day_number);
+int32_t event_occurrence_due(Event const *event, int32_t day_number);
 
 /**
  * A copy of the event with its dates moved to the occurrence that starts on start_day.
  */
-Event event_occurrence_at(const Event *event, int32_t start_day);
+Event event_occurrence_at(Event const *event, int32_t start_day);
 
 /**
  * "every week", "every 10 days", and so on; empty for an event that does not repeat.
  */
-void event_format_repeat(const Event *event, char *buffer, size_t buffer_size);
+void event_format_repeat(Event const *event, char *buffer, size_t buffer_size);
 
 Target_Status target_status(int32_t task_count, int32_t task_done_count);
 /**

@@ -45,10 +45,10 @@ static_assert((int32_t)INPUT_KEY_COUNT > (int32_t)KEY_KB_MENU,
 // How long an idle wait may sleep before the app polls phones and the backend again. Phones are
 // then answered within 20 ms, near the 16 ms of a frame at 60 FPS, while a wake-up that finds
 // nothing to do costs microseconds rather than a frame's drawing.
-static const double IDLE_WAIT_SECONDS = 0.020;
+static double const IDLE_WAIT_SECONDS = 0.020;
 // The longest the window goes without a frame while idle, so that text that changes with time
 // alone, such as how long ago an item was created and which day is today, is never stale.
-static const double REDRAW_INTERVAL_SECONDS = 1.0;
+static double const REDRAW_INTERVAL_SECONDS = 1.0;
 
 // ZEMAN_DATABASE_NEXT_TO_EXECUTABLE (see desktop/CMakeLists.txt, the mingw-package preset) means
 // a packaged release: the database goes beside the executable at run time (database_path), so
@@ -59,7 +59,7 @@ static const double REDRAW_INTERVAL_SECONDS = 1.0;
 #ifndef ZEMAN_DATABASE_PATH
 #error "ZEMAN_DATABASE_PATH must be defined by the build."
 #endif
-static const char DATABASE_PATH[] = ZEMAN_DATABASE_PATH;
+static char const DATABASE_PATH[] = ZEMAN_DATABASE_PATH;
 static_assert(sizeof(DATABASE_PATH) > 1, "The database path is not empty.");
 static_assert(sizeof(DATABASE_PATH) <= SETTINGS_PATH_SIZE, "The path fits the Settings view.");
 
@@ -75,7 +75,7 @@ typedef enum View {
 } View;
 
 // Navigation items, top to bottom, indexed by View.
-static const char *const view_names[VIEW_COUNT] = { "Calendar", "Problems", "Tasks",
+static char const *const view_names[VIEW_COUNT] = { "Calendar", "Problems", "Tasks",
                                                     "Connected Devices", "Settings" };
 
 // What the last frame showed, to tell when the window needs a new one. Drawing every frame at
@@ -123,12 +123,12 @@ typedef struct Desktop_Frame {
 } Desktop_Frame;
 
 static bool options_parse(int argc, char **argv, Options *options);
-static bool port_parse(const char *text, uint16_t *port);
-static void desktop_open(Desktop *desktop, const Options *options);
+static bool port_parse(char const *text, uint16_t *port);
+static void desktop_open(Desktop *desktop, Options const *options);
 static void desktop_close(Desktop *desktop);
 static void desktop_database_open(Desktop *desktop);
 static void desktop_database_apply(Desktop *desktop, App *app);
-static const char *database_path(char *buffer, int32_t buffer_size);
+static char const *database_path(char *buffer, int32_t buffer_size);
 static bool desktop_redraw_needed(Desktop *desktop);
 static bool desktop_window_has_area(void);
 static void desktop_wait(void);
@@ -137,8 +137,8 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height);
 static void desktop_window_refresh(GLFWwindow *window);
 static bool input_is_active(void);
 static int desktop_cursor_shape(App_Cursor cursor);
-static View navigation_draw(const App *app, View current, Rectangle area);
-static void info_update(const Server *server, App *app);
+static View navigation_draw(App const *app, View current, Rectangle area);
+static void info_update(Server const *server, App *app);
 
 /**
  * The desktop app keeps the calendar in its SQLite database and serves it to phones on the
@@ -215,7 +215,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-static void desktop_open(Desktop *desktop, const Options *options) {
+static void desktop_open(Desktop *desktop, Options const *options) {
     desktop->client_mode = options->connect_host[0] != '\0';
     desktop->view = VIEW_CALENDAR;
     desktop->info[0] = '\0';
@@ -258,9 +258,9 @@ static void desktop_database_open(Desktop *desktop) {
         settings_view_set_message(view, str_from_cstr(message));
         return;
     }
-    const bool configured = desktop->settings.database_path[0] != '\0';
+    bool const configured = desktop->settings.database_path[0] != '\0';
     char default_path[SETTINGS_PATH_SIZE] = "";
-    const char *path = database_path(default_path, sizeof(default_path));
+    char const *path = database_path(default_path, sizeof(default_path));
     if (configured) {
         path = desktop->settings.database_path;
     }
@@ -313,7 +313,7 @@ static void desktop_database_apply(Desktop *desktop, App *app) {
  * That directory is unknown until the executable runs there, since a packaged release can be
  * copied anywhere, so that case cannot be a compile-time constant the way the dev path is.
  */
-static const char *database_path(char *buffer, int32_t buffer_size) {
+static char const *database_path(char *buffer, int32_t buffer_size) {
     assert(buffer != NULL);
     assert(buffer_size > 0);
 
@@ -396,7 +396,7 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height) 
         problems_view_draw(&desktop->problems, &desktop->backend, app, content);
         break;
     case VIEW_TASKS: {
-        const Tasks_View_Choice choice = tasks_view_draw(&desktop->tasks, &desktop->backend, app,
+        Tasks_View_Choice const choice = tasks_view_draw(&desktop->tasks, &desktop->backend, app,
                                                          content);
         if (choice.hovered) {
             cursor = APP_CURSOR_HAND;
@@ -536,11 +536,11 @@ static bool input_is_active(void) {
     if (IsWindowResized()) {
         return true;
     }
-    const Vector2 mouse_delta = GetMouseDelta();
+    Vector2 const mouse_delta = GetMouseDelta();
     if (mouse_delta.x != 0.0f || mouse_delta.y != 0.0f) {
         return true;
     }
-    const Vector2 wheel_move = GetMouseWheelMoveV();
+    Vector2 const wheel_move = GetMouseWheelMoveV();
     if (wheel_move.x != 0.0f || wheel_move.y != 0.0f) {
         return true;
     }
@@ -561,11 +561,11 @@ static bool input_is_active(void) {
 /**
  * Draws the items and returns the view to show: the one clicked this frame, or current.
  */
-static View navigation_draw(const App *app, View current, Rectangle area) {
+static View navigation_draw(App const *app, View current, Rectangle area) {
     DrawRectangleRec(area, GetColor((unsigned int)GuiGetStyle(DEFAULT, BASE_COLOR_NORMAL)));
     DrawRectangleRec((Rectangle){ area.x + area.width - 1, area.y, 1, area.height },
                      GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_NORMAL)));
-    const Vector2 mouse = GetMousePosition();
+    Vector2 const mouse = GetMousePosition();
     View chosen = current;
     for (int32_t i = 0; i < VIEW_COUNT; i++) {
         Rectangle item = { area.x, area.y + 16 + (float)(i * NAVIGATION_ITEM_HEIGHT_PIXELS),
@@ -615,7 +615,7 @@ static bool options_parse(int argc, char **argv, Options *options) {
  * Parses port number.
  * @returns True on success, false on failure.
  */
-static bool port_parse(const char *text, uint16_t *port) {
+static bool port_parse(char const *text, uint16_t *port) {
     char *end = NULL;
     long value = strtol(text, &end, 10);
     if (end == text || *end != '\0' || value < 1 || value > UINT16_MAX) {
@@ -628,7 +628,7 @@ static bool port_parse(const char *text, uint16_t *port) {
 /**
  * Tells the user where phones connect, and how many are connected.
  */
-static void info_update(const Server *server, App *app) {
+static void info_update(Server const *server, App *app) {
     if (!server->listening) {
         return;
     }

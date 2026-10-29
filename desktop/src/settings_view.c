@@ -27,7 +27,7 @@ static bool settings_view_edit(Settings_View *view, Rectangle box);
 static void settings_view_paste(Settings_View *view);
 static void settings_view_path_clean(char *path);
 
-void settings_view_init(Settings_View *view, const char *database_path) {
+void settings_view_init(Settings_View *view, char const *database_path) {
     assert(view != NULL);
     assert(database_path != NULL);
     assert(strlen(database_path) < sizeof(view->path));
@@ -36,12 +36,12 @@ void settings_view_init(Settings_View *view, const char *database_path) {
     snprintf(view->path, sizeof(view->path), "%s", database_path);
 }
 
-bool settings_view_draw(Settings_View *view, const App *app, const char *database_path,
-                        const char *settings_directory, Rectangle area) {
+bool settings_view_draw(Settings_View *view, App const *app, char const *database_path,
+                        char const *settings_directory, Rectangle area) {
     assert(database_path != NULL);
     assert(settings_directory != NULL);
 
-    const float x = area.x + MARGIN_PIXELS;
+    float const x = area.x + MARGIN_PIXELS;
     float y = area.y + MARGIN_PIXELS;
     app_draw_text(app, APP_TEXT_HEADING, STR("Settings"), x, y);
     y += 2 * LINE_PIXELS;
@@ -58,11 +58,11 @@ bool settings_view_draw(Settings_View *view, const App *app, const char *databas
                   x, y);
     y += LINE_PIXELS + 4;
 
-    const float room = area.width - 2 * MARGIN_PIXELS - GAP_PIXELS - BUTTON_WIDTH_PIXELS;
-    const float box_width = float_min(room, (float)BOX_WIDTH_PIXELS_MAX);
-    const Rectangle box = { x, y, box_width, CONTROL_HEIGHT_PIXELS };
+    float const room = area.width - 2 * MARGIN_PIXELS - GAP_PIXELS - BUTTON_WIDTH_PIXELS;
+    float const box_width = float_min(room, (float)BOX_WIDTH_PIXELS_MAX);
+    Rectangle const box = { x, y, box_width, CONTROL_HEIGHT_PIXELS };
     bool apply = settings_view_edit(view, box);
-    const Rectangle button = { x + box_width + GAP_PIXELS, y, BUTTON_WIDTH_PIXELS,
+    Rectangle const button = { x + box_width + GAP_PIXELS, y, BUTTON_WIDTH_PIXELS,
                                CONTROL_HEIGHT_PIXELS };
     if (GuiButton(button, "Apply")) {
         apply = true;
@@ -105,7 +105,7 @@ static bool settings_view_edit(Settings_View *view, Rectangle box) {
     if (!GuiTextBox(box, view->path, (int)sizeof(view->path), view->editing)) {
         return false;
     }
-    const bool was_editing = view->editing;
+    bool const was_editing = view->editing;
     view->editing = !view->editing;
     if (!was_editing) {
         return false;
@@ -128,11 +128,11 @@ static void settings_view_paste(Settings_View *view) {
         return;
     }
     // NULL when the clipboard is empty, holds no text, or does not exist.
-    const char *clipboard = GetClipboardText();
+    char const *clipboard = GetClipboardText();
     if (clipboard == NULL) {
         return;
     }
-    const int32_t length = (int32_t)strlen(view->path);
+    int32_t const length = (int32_t)strlen(view->path);
     int32_t cursor_index = text_box_cursor_index();
     if (cursor_index > length) {
         cursor_index = length; // raygui clamps it only when it next draws the box.

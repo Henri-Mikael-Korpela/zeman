@@ -17,15 +17,15 @@ enum {
     SETTINGS_FILE_PATH_SIZE = SETTINGS_PATH_SIZE + 32,
 };
 
-static const char FILE_NAME[] = "settings.ini";
-static const char KEY_DATABASE_PATH[] = "database_path";
+static char const FILE_NAME[] = "settings.ini";
+static char const KEY_DATABASE_PATH[] = "database_path";
 
-static bool settings_file_path(char *buffer, size_t buffer_size, const char *directory);
+static bool settings_file_path(char *buffer, size_t buffer_size, char const *directory);
 static bool settings_parse(Settings *settings, Str text);
 static bool settings_parse_line(Settings *settings, Str line);
 static bool settings_line_is_skipped(Str line);
 
-bool settings_load(Settings *settings, const char *directory) {
+bool settings_load(Settings *settings, char const *directory) {
     assert(settings != NULL);
     assert(directory != NULL);
 
@@ -45,10 +45,10 @@ bool settings_load(Settings *settings, const char *directory) {
         return false;
     }
     char text[SETTINGS_FILE_SIZE_MAX] = "";
-    const size_t size = fread(text, 1, SETTINGS_FILE_SIZE_MAX, file);
-    const bool failed = ferror(file) != 0;
+    size_t const size = fread(text, 1, SETTINGS_FILE_SIZE_MAX, file);
+    bool const failed = ferror(file) != 0;
     // A full buffer may hide more: one byte more tells.
-    const bool too_large = !failed && size == SETTINGS_FILE_SIZE_MAX && fgetc(file) != EOF;
+    bool const too_large = !failed && size == SETTINGS_FILE_SIZE_MAX && fgetc(file) != EOF;
     // Closing a file that was only read loses nothing, so its result does not matter.
     (void)fclose(file);
     if (failed) {
@@ -64,7 +64,7 @@ bool settings_load(Settings *settings, const char *directory) {
     return settings_parse(settings, str_make(text, size));
 }
 
-bool settings_save(Settings *settings, const char *directory) {
+bool settings_save(Settings *settings, char const *directory) {
     assert(settings != NULL);
     assert(directory != NULL);
     // A line break would end the value early and make the rest read as another line. The path
@@ -87,11 +87,11 @@ bool settings_save(Settings *settings, const char *directory) {
         return false;
     }
     // Windows line breaks, so that any text editor shows the file as lines.
-    const int written = fprintf(file, "; Zeman desktop settings, written by the app.\r\n"
+    int const written = fprintf(file, "; Zeman desktop settings, written by the app.\r\n"
                                       "%s=%s\r\n",
                                 KEY_DATABASE_PATH, settings->database_path);
     // Closing flushes the write, so its failure is a failed write too.
-    const bool closed = fclose(file) == 0;
+    bool const closed = fclose(file) == 0;
     if (written < 0 || !closed) {
         snprintf(settings->error, sizeof(settings->error), "Cannot write %s: %s.", FILE_NAME,
                  strerror(errno));
@@ -100,25 +100,25 @@ bool settings_save(Settings *settings, const char *directory) {
     return true;
 }
 
-static bool settings_file_path(char *buffer, size_t buffer_size, const char *directory) {
+static bool settings_file_path(char *buffer, size_t buffer_size, char const *directory) {
     assert(buffer != NULL);
     assert(buffer_size > 0);
 
-    const int written = snprintf(buffer, buffer_size, "%s%s", directory, FILE_NAME);
+    int const written = snprintf(buffer, buffer_size, "%s%s", directory, FILE_NAME);
     return written > 0 && (size_t)written < buffer_size;
 }
 
 static bool settings_parse(Settings *settings, Str text) {
     // Notepad may start a file it saves with a UTF-8 byte order mark, which is no part of the
     // first key.
-    const Str byte_order_mark = STR("\xEF\xBB\xBF");
+    Str const byte_order_mark = STR("\xEF\xBB\xBF");
     if (str_starts_with(text, byte_order_mark)) {
         text = str_slice(text, byte_order_mark.length, text.length);
     }
     Str rest = text;
     for (int32_t i = 0; i < SETTINGS_LINE_COUNT_MAX; i++) {
         Str line = rest;
-        const bool has_more = str_split_once(rest, STR("\n"), &line, &rest);
+        bool const has_more = str_split_once(rest, STR("\n"), &line, &rest);
         if (!settings_parse_line(settings, line)) {
             return false;
         }
@@ -136,8 +136,8 @@ static bool settings_parse(Settings *settings, Str text) {
  */
 static bool settings_parse_line(Settings *settings, Str line) {
     // Spaces, tabs and the carriage return of a Windows line break are not part of any text.
-    const Str blanks = STR(" \t\r");
-    const Str trimmed = str_trim_any(line, blanks);
+    Str const blanks = STR(" \t\r");
+    Str const trimmed = str_trim_any(line, blanks);
     if (settings_line_is_skipped(trimmed)) {
         return true;
     }
@@ -164,7 +164,7 @@ static bool settings_parse_line(Settings *settings, Str line) {
         return false;
     }
     // Fits, as just checked, so nothing is cut.
-    const bool copied = str_to_cstr(value, settings->database_path,
+    bool const copied = str_to_cstr(value, settings->database_path,
                                     sizeof(settings->database_path));
     assert(copied);
     (void)copied; // Unused when assertions are compiled out
