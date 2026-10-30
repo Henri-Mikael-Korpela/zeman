@@ -21,7 +21,7 @@ enum {
 };
 
 // Column headings, indexed by Task_Group.
-static char const *const task_group_names[TASK_GROUP_COUNT] = { "Overdue", "Today", "Upcoming",
+static char const *const TASK_GROUP_NAMES[TASK_GROUP_COUNT] = { "Overdue", "Today", "Upcoming",
                                                                 "Completed" };
 
 // The task under the pointer while drawing, acted on once every column is drawn.
@@ -150,7 +150,7 @@ static Tasks_View_Hit tasks_view_draw_column(Tasks_View const *view, App const *
     assert(count <= view->task_count);
 
     char text[LABEL_SIZE] = "";
-    snprintf(text, sizeof(text), "%s (%" PRId32 ")", task_group_names[group], count);
+    snprintf(text, sizeof(text), "%s (%" PRId32 ")", TASK_GROUP_NAMES[group], count);
     Str const label = str_from_cstr(text);
     float const text_width = app_measure_text(app, APP_TEXT_NORMAL, label);
     app_draw_text(app, APP_TEXT_NORMAL, label, header.x + (header.width - text_width) / 2,

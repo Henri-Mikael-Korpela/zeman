@@ -17,24 +17,24 @@ enum {
     UNIX_EPOCH_WEEKDAY = 3,
 };
 
-static Str const month_names[12] = {
+static Str const MONTH_NAMES[12] = {
     STR_INIT("January"), STR_INIT("February"), STR_INIT("March"), STR_INIT("April"),
     STR_INIT("May"), STR_INIT("June"), STR_INIT("July"), STR_INIT("August"),
     STR_INIT("September"), STR_INIT("October"), STR_INIT("November"), STR_INIT("December"),
 };
 
-static Str const month_short_names[12] = {
+static Str const MONTH_SHORT_NAMES[12] = {
     STR_INIT("Jan"), STR_INIT("Feb"), STR_INIT("Mar"), STR_INIT("Apr"), STR_INIT("May"),
     STR_INIT("Jun"), STR_INIT("Jul"), STR_INIT("Aug"), STR_INIT("Sep"), STR_INIT("Oct"),
     STR_INIT("Nov"), STR_INIT("Dec"),
 };
 
-static Str const weekday_names[7] = {
+static Str const WEEKDAY_NAMES[7] = {
     STR_INIT("Monday"), STR_INIT("Tuesday"), STR_INIT("Wednesday"), STR_INIT("Thursday"),
     STR_INIT("Friday"), STR_INIT("Saturday"), STR_INIT("Sunday"),
 };
 
-static Str const weekday_short_names[7] = {
+static Str const WEEKDAY_SHORT_NAMES[7] = {
     STR_INIT("Mon"), STR_INIT("Tue"), STR_INIT("Wed"), STR_INIT("Thu"), STR_INIT("Fri"),
     STR_INIT("Sat"), STR_INIT("Sun"),
 };
@@ -162,13 +162,13 @@ int32_t days_in_month(int32_t year, int32_t month) {
     assert(month >= 1);
     assert(month <= 12);
 
-    static int32_t const days[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    static int32_t const MONTH_DAY_COUNTS[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
     if (month == 2) {
         if (is_leap_year(year)) {
             return 29;
         }
     }
-    return days[month - 1];
+    return MONTH_DAY_COUNTS[month - 1];
 }
 
 int32_t date_to_day_number(Date date) {
@@ -347,28 +347,28 @@ Str month_name(int32_t month) {
     assert(month >= 1);
     assert(month <= 12);
 
-    return month_names[month - 1];
+    return MONTH_NAMES[month - 1];
 }
 
 Str month_short_name(int32_t month) {
     assert(month >= 1);
     assert(month <= 12);
 
-    return month_short_names[month - 1];
+    return MONTH_SHORT_NAMES[month - 1];
 }
 
 Str weekday_name(int32_t weekday) {
     assert(weekday >= 0);
     assert(weekday < 7);
 
-    return weekday_names[weekday];
+    return WEEKDAY_NAMES[weekday];
 }
 
 Str weekday_short_name(int32_t weekday) {
     assert(weekday >= 0);
     assert(weekday < 7);
 
-    return weekday_short_names[weekday];
+    return WEEKDAY_SHORT_NAMES[weekday];
 }
 
 static bool is_leap_year(int32_t year) {

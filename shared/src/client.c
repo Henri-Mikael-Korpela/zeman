@@ -40,7 +40,7 @@ static int32_t client_load_tasks(void *context, Date today, Array_Slice tasks, b
 static uint64_t client_revision(void *context);
 static Str client_error(void const *context);
 
-static Backend_Ops const client_ops = {
+static Backend_Ops const CLIENT_OPS = {
     .load_range = client_load_range,
     .load_completions = client_load_completions,
     .insert = client_insert,
@@ -89,7 +89,7 @@ bool client_is_connected(Client const *client) {
 }
 
 Backend client_backend(Client *client) {
-    return (Backend){ .ops = &client_ops, .context = client };
+    return (Backend){ .ops = &CLIENT_OPS, .context = client };
 }
 
 static int32_t client_load_range(void *context, Date first, Date last, Array_Slice events,

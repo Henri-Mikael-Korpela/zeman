@@ -24,7 +24,7 @@ static int32_t local_load_tasks(void *context, Date today, Array_Slice tasks, bo
 static uint64_t local_revision(void *context);
 static Str local_error(void const *context);
 
-static Backend_Ops const local_ops = {
+static Backend_Ops const LOCAL_OPS = {
     .load_range = local_load_range,
     .load_completions = local_load_completions,
     .insert = local_insert,
@@ -82,7 +82,7 @@ void local_backend_close(Local_Backend *local) {
 }
 
 Backend local_backend(Local_Backend *local) {
-    return (Backend){ .ops = &local_ops, .context = local };
+    return (Backend){ .ops = &LOCAL_OPS, .context = local };
 }
 
 /**

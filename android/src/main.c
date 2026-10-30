@@ -52,7 +52,7 @@ typedef enum View {
     VIEW_COUNT,
 } View;
 
-static char const *const view_names[VIEW_COUNT] = { "Calendar", "Connection settings" };
+static char const *const VIEW_NAMES[VIEW_COUNT] = { "Calendar", "Connection settings" };
 
 typedef enum Connect_Result {
     CONNECT_NONE,
@@ -519,7 +519,7 @@ static void drawer_draw(Drawer const *drawer, App const *app, View current, char
             DrawRectangleRec((Rectangle){ item.x, item.y, 4, item.height },
                              GetColor((unsigned int)GuiGetStyle(DEFAULT, BORDER_COLOR_PRESSED)));
         }
-        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(view_names[i]), item.x + 20, item.y + 16);
+        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(VIEW_NAMES[i]), item.x + 20, item.y + 16);
     }
     app_draw_text(app, APP_TEXT_DIM, STR("Desktop"), x + 20, height - 64);
     app_draw_text(app, APP_TEXT_SMALL, str_from_cstr(status), x + 20, height - 40);

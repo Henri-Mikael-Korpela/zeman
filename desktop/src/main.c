@@ -75,7 +75,7 @@ typedef enum View {
 } View;
 
 // Navigation items, top to bottom, indexed by View.
-static char const *const view_names[VIEW_COUNT] = { "Calendar", "Problems", "Tasks",
+static char const *const VIEW_NAMES[VIEW_COUNT] = { "Calendar", "Problems", "Tasks",
                                                     "Connected Devices", "Settings" };
 
 // What the last frame showed, to tell when the window needs a new one. Drawing every frame at
@@ -158,9 +158,11 @@ int main(int argc, char **argv) {
     }
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
-    InitWindow(WINDOW_WIDTH_PIXELS,
-               WINDOW_HEIGHT_PIXELS,
-               options.connect_host[0] != '\0' ? "Zeman (client)" : "Zeman");
+    char const *window_title = "Zeman";
+    if (options.connect_host[0] != '\0') {
+        window_title = "Zeman (client)";
+    }
+    InitWindow(WINDOW_WIDTH_PIXELS, WINDOW_HEIGHT_PIXELS, window_title);
     SetWindowMinSize(WINDOW_WIDTH_PIXELS_MIN, WINDOW_HEIGHT_PIXELS_MIN);
     SetTargetFPS(60);
     // Escape cancels the event form; closing the window stays with the window controls.
@@ -581,7 +583,7 @@ static View navigation_draw(App const *app, View current, Rectangle area) {
             DrawRectangleRec(item, GetColor((unsigned int)GuiGetStyle(DEFAULT,
                                                                        BASE_COLOR_FOCUSED)));
         }
-        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(view_names[i]), item.x + 20, item.y + 12);
+        app_draw_text(app, APP_TEXT_NORMAL, str_from_cstr(VIEW_NAMES[i]), item.x + 20, item.y + 12);
         if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             chosen = (View)i;
         }

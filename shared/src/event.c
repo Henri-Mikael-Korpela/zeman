@@ -23,6 +23,8 @@ static bool event_occurrence_due_next(Event const *event, int32_t start_day, int
 static int32_t event_repeat_day_step(Event const *event);
 static int32_t event_repeat_month_step(Event const *event);
 static bool minute_is_valid(int32_t minute_of_day);
+static bool event_text_is_valid(Event const *event);
+static bool event_deadline_is_valid(Event const *event, int32_t start_day);
 static bool text_is_terminated(char const *text, size_t size);
 
 int32_t event_duration_days(Event const *event) {
@@ -318,7 +320,13 @@ static int32_t event_repeat_month_step(Event const *event) {
     return 1;
 }
 
-bool event_is_valid(Event const *event) {
+/**
+ * Whether every text is terminated within its buffer, and the title and location are sensible:
+ * a title is required, and a location id is never negative.
+ */
+static bool event_text_is_valid(Event const *event) {
+    assert(event != NULL);
+
     if (!text_is_terminated(event->title, sizeof(event->title))) {
         return false;
     }
@@ -331,7 +339,30 @@ bool event_is_valid(Event const *event) {
     if (!text_is_terminated(event->location.city, sizeof(event->location.city))) {
         return false;
     }
-    if (event->title[0] == '\0' || event->location.id < 0) {
+    return event->title[0] != '\0' && event->location.id >= 0;
+}
+
+/**
+ * Only a task that does not repeat has a deadline, which is a valid date and time, not before
+ * the start day. An event without one is valid here whatever its deadline fields hold.
+ */
+static bool event_deadline_is_valid(Event const *event, int32_t start_day) {
+    assert(event != NULL);
+
+    if (!event->has_deadline) {
+        return true;
+    }
+    if (event->kind != EVENT_KIND_TASK || event->repeat_unit != REPEAT_NONE) {
+        return false;
+    }
+    if (!date_is_valid(event->deadline_date) || !minute_is_valid(event->deadline_minute)) {
+        return false;
+    }
+    return date_to_day_number(event->deadline_date) >= start_day;
+}
+
+bool event_is_valid(Event const *event) {
+    if (!event_text_is_valid(event)) {
         return false;
     }
     if (!date_is_valid(event->start_date) || !date_is_valid(event->end_date)) {
@@ -375,16 +406,8 @@ bool event_is_valid(Event const *event) {
     if (event->kind == EVENT_KIND_OPPORTUNITY && event->repeat_unit != REPEAT_NONE) {
         return false;
     }
-    if (event->has_deadline) {
-        if (event->kind != EVENT_KIND_TASK || event->repeat_unit != REPEAT_NONE) {
-            return false;
-        }
-        if (!date_is_valid(event->deadline_date) || !minute_is_valid(event->deadline_minute)) {
-            return false;
-        }
-        if (date_to_day_number(event->deadline_date) < start_day) {
-            return false;
-        }
+    if (!event_deadline_is_valid(event, start_day)) {
+        return false;
     }
     if (event->kind == EVENT_KIND_PROBLEM) {
         if (event_duration_days(event) != 0 || event->start_minute != TIME_NONE) {

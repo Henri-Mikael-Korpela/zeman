@@ -100,6 +100,7 @@ Put `main` at the top of the file when it is the entry point, and the most impor
 - Split compound conditions into nested `if` statements where that makes each branch clear. Prefer positive conditions (`if (index < length)`) over negations.
 - State invariants positively. For `else` branches, make sure the case is handled or deliberately asserted unreachable.
 - Handle every case in a `switch` explicitly. Do not add a `default:` that hides a missing case; assert unreachable instead.
+- When matching against an enumeration in a `switch` statement, sort enumeration keys alphabetically unless performance matters. If it's likely one key should come before another key, comment this and explain performance-related reason for this.
 - Do not use of ternary operator unless mandatory.
 
 ## Control flow

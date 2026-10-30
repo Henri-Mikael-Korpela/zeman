@@ -111,7 +111,7 @@ typedef struct Key_Symbol {
 // A table rather than a switch, because key codes come from the system and the many codes that
 // type nothing are no mistake to assert on, and because each key then states both its symbols
 // once. Keys that type the same with and without Shift list it twice.
-static Key_Symbol const key_symbols[] = {
+static Key_Symbol const KEY_SYMBOLS[] = {
     { AKEYCODE_SPACE, ' ', ' ' },
     { AKEYCODE_COMMA, ',', '<' },
     { AKEYCODE_PERIOD, '.', '>' },
@@ -129,7 +129,7 @@ static Key_Symbol const key_symbols[] = {
     { AKEYCODE_STAR, '*', '*' },
     { AKEYCODE_POUND, '#', '#' },
 };
-enum { KEY_SYMBOL_COUNT = sizeof(key_symbols) / sizeof(key_symbols[0]) };
+enum { KEY_SYMBOL_COUNT = sizeof(KEY_SYMBOLS) / sizeof(KEY_SYMBOLS[0]) };
 
 /**
  * The character a key types on a US keyboard, or 0 for keys that type none.
@@ -146,19 +146,19 @@ static int32_t android_key_character(int32_t key_code, int32_t meta_state) {
         return 'a' + offset;
     }
     if (key_code >= AKEYCODE_0 && key_code <= AKEYCODE_9) {
-        static char const shifted_digits[] = ")!@#$%^&*(";
+        static char const SHIFTED_DIGITS[] = ")!@#$%^&*(";
         int32_t digit = key_code - AKEYCODE_0;
         if (shift) {
-            return shifted_digits[digit];
+            return SHIFTED_DIGITS[digit];
         }
         return '0' + digit;
     }
     for (int32_t i = 0; i < KEY_SYMBOL_COUNT; i++) {
-        if (key_symbols[i].key_code == key_code) {
+        if (KEY_SYMBOLS[i].key_code == key_code) {
             if (shift) {
-                return key_symbols[i].shifted;
+                return KEY_SYMBOLS[i].shifted;
             }
-            return key_symbols[i].plain;
+            return KEY_SYMBOLS[i].plain;
         }
     }
     return 0;

@@ -199,7 +199,7 @@ enum {
 };
 
 // Buffer size of each field, which raygui also uses to cap how much can be typed.
-static int32_t const form_field_sizes[FORM_FIELD_COUNT] = {
+static int32_t const FORM_FIELD_SIZES[FORM_FIELD_COUNT] = {
     EVENT_TITLE_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
     LOCATION_ADDRESS_SIZE, LOCATION_CITY_SIZE, EVENT_DESCRIPTION_SIZE, REPEAT_DAYS_TEXT_SIZE,
     DATE_ISO_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
@@ -216,10 +216,10 @@ typedef enum Repeat_Option {
 } Repeat_Option;
 
 // raygui separates combo box items with semicolons.
-static char const repeat_option_labels[] =
+static char const REPEAT_OPTION_LABELS[] =
     "Does not repeat;Every week;Every X days;Every month;Every year";
 
-static int32_t const repeat_option_units[REPEAT_OPTION_COUNT] = {
+static int32_t const REPEAT_OPTION_UNITS[REPEAT_OPTION_COUNT] = {
     REPEAT_NONE, REPEAT_WEEK, REPEAT_DAY, REPEAT_MONTH, REPEAT_YEAR,
 };
 
@@ -244,7 +244,7 @@ static_assert((int)EVENT_DESCRIPTION_SIZE <= (int)TEXT_BOX_SIZE_MAX, "Every fiel
 
 // Mid-tones: dark enough for white text on a bar, yet bright enough to stand out from the dark
 // surfaces. Picked by event id, so an event keeps its color in every view.
-static Color const event_colors[] = {
+static Color const EVENT_COLORS[] = {
     { 59, 111, 216, 255 },   // Blue
     { 200, 70, 60, 255 },    // Red
     { 46, 138, 78, 255 },    // Green
@@ -254,24 +254,24 @@ static Color const event_colors[] = {
     { 192, 90, 16, 255 },    // Orange
     { 180, 60, 140, 255 },   // Magenta
 };
-enum { EVENT_COLOR_COUNT = sizeof(event_colors) / sizeof(event_colors[0]) };
+enum { EVENT_COLOR_COUNT = sizeof(EVENT_COLORS) / sizeof(EVENT_COLORS[0]) };
 
 // Light, because error text is drawn on the dark surfaces, not on a bar.
-static Color const error_color = { 248, 113, 113, 255 };
+static Color const ERROR_COLOR = { 248, 113, 113, 255 };
 // Every problem has this color, darker than any event color, so that problems read as problems
 // at a glance rather than as one more event.
-static Color const problem_color = { 160, 36, 48, 255 };
+static Color const PROBLEM_COLOR = { 160, 36, 48, 255 };
 // A solved problem or used opportunity turns green, the usual color for "resolved", dark enough
 // for white text.
-static Color const target_done_color = { 40, 140, 76, 255 };
+static Color const TARGET_DONE_COLOR = { 40, 140, 76, 255 };
 // Every opportunity is gold, unlike any event color, so that a chance stands out as one. A
 // missed one turns gray, so that it recedes like anything past.
-static Color const opportunity_color = { 168, 124, 16, 255 };
-static Color const opportunity_missed_color = { 92, 98, 110, 255 };
+static Color const OPPORTUNITY_COLOR = { 168, 124, 16, 255 };
+static Color const OPPORTUNITY_MISSED_COLOR = { 92, 98, 110, 255 };
 // The part of a day between its first and last timed item, dark blue so that it reads as a
 // span of the day and stays quieter than the items on it; lighter when the day is hovered.
-static Color const timeline_busy_color = { 17, 27, 52, 255 };
-static Color const timeline_busy_hovered_color = { 22, 35, 66, 255 };
+static Color const TIMELINE_BUSY_COLOR = { 17, 27, 52, 255 };
+static Color const TIMELINE_BUSY_HOVERED_COLOR = { 22, 35, 66, 255 };
 
 // One color of the theme: a raygui DEFAULT property and its value, as 0xRRGGBBAA.
 typedef struct Theme_Color {
@@ -283,7 +283,7 @@ typedef struct Theme_Color {
 // apps draw themselves, reads its colors from raygui's style table, so this table is the whole
 // theme. Near-black surfaces with a slight blue cast, borders just above the surfaces so that
 // the grid recedes behind the entries, and one blue accent for what is selected or today.
-static Theme_Color const theme_colors[] = {
+static Theme_Color const THEME_COLORS[] = {
     { 0x0E1014FF, BACKGROUND_COLOR },       // Window, panel, days outside the month
     { 0x262A33FF, LINE_COLOR },             // Panel outline
     { 0x171A20FF, BASE_COLOR_NORMAL },      // Day cells, cards, buttons, navigation
@@ -300,7 +300,7 @@ static Theme_Color const theme_colors[] = {
     // Secondary text as well, so it keeps a contrast of about 5:1 on the cells and cards.
     { 0x828A96FF, TEXT_COLOR_DISABLED },
 };
-enum { THEME_COLOR_COUNT = sizeof(theme_colors) / sizeof(theme_colors[0]) };
+enum { THEME_COLOR_COUNT = sizeof(THEME_COLORS) / sizeof(THEME_COLORS[0]) };
 
 // How many days the calendar shows at once. Every range uses the same day cells; a week is one
 // row of seven, and a day one cell the width of the calendar, so that whole titles show. A week
@@ -314,7 +314,7 @@ typedef enum Calendar_Range {
 } Calendar_Range;
 
 // raygui separates toggle group items with semicolons; the order is Calendar_Range's.
-static char const range_labels[] = "Month;Week;Day";
+static char const RANGE_LABELS[] = "Month;Week;Day";
 
 typedef struct Key_Step {
     int32_t key;     // raylib KeyboardKey
@@ -323,13 +323,13 @@ typedef struct Key_Step {
 
 // The arrow keys move the selection by a day or a week, whatever the range; Page Up and Page
 // Down move by the range (see range_step).
-static Key_Step const key_steps[] = {
+static Key_Step const KEY_STEPS[] = {
     { KEY_LEFT, -1 },
     { KEY_RIGHT, 1 },
     { KEY_UP, -7 },
     { KEY_DOWN, 7 },
 };
-enum { KEY_STEP_COUNT = sizeof(key_steps) / sizeof(key_steps[0]) };
+enum { KEY_STEP_COUNT = sizeof(KEY_STEPS) / sizeof(KEY_STEPS[0]) };
 
 // A list that scrolls by the wheel, or by dragging it with a finger or the mouse.
 typedef struct Scroll {
@@ -697,6 +697,7 @@ static void draw_panel_form_field(Fonts const *fonts, Form *form, int32_t field,
 static void draw_panel_form_date_field(Fonts const *fonts, Form *form, Date fallback,
                                        int32_t field, Str label, Rectangle box);
 static void draw_panel_form_picker(App *app, Rectangle body);
+static void draw_panel_form_picker_header(App *app, Rectangle popup, bool pressed);
 static void draw_panel_form_picker_cells(Fonts const *fonts, Form *form, Rectangle popup,
                                          Date today, bool pressed, bool *chosen);
 static void form_picker_open(Form *form, int32_t field, Date fallback);
@@ -1032,8 +1033,8 @@ static void app_handle_keys(App *app, Layout const *layout) {
     }
     Date target = app->selected;
     for (int32_t i = 0; i < KEY_STEP_COUNT; i++) {
-        if (IsKeyPressed(key_steps[i].key)) {
-            target = date_add_days(target, key_steps[i].days);
+        if (IsKeyPressed(KEY_STEPS[i].key)) {
+            target = date_add_days(target, KEY_STEPS[i].days);
         }
     }
     if (IsKeyPressed(KEY_PAGE_UP)) {
@@ -1314,7 +1315,7 @@ static void app_form_clipboard(App *app) {
         if (cursor_index > length) {
             cursor_index = length; // raygui clamps it only when it next draws the box.
         }
-        text_box_cursor_index_set(text_box_paste(text, form_field_sizes[field], cursor_index,
+        text_box_cursor_index_set(text_box_paste(text, FORM_FIELD_SIZES[field], cursor_index,
                                                  str_from_cstr(clipboard)));
     }
 }
@@ -1750,7 +1751,7 @@ static void draw_header(App *app, Layout const *layout) {
         Rectangle item = { layout->range_bar.x, layout->range_bar.y,
                            (layout->range_bar.width - 2 * (RANGE_COUNT - 1)) / RANGE_COUNT,
                            layout->range_bar.height };
-        GuiToggleGroup(item, range_labels, &app->range);
+        GuiToggleGroup(item, RANGE_LABELS, &app->range);
     }
 
     char title[TEXT_LINE_SIZE] = "";
@@ -3017,9 +3018,9 @@ static void draw_timeline_day_background(Rectangle day, int32_t busy_top, int32_
         float const pixels_per_minute = (float)TIMELINE_HOUR_HEIGHT_PIXELS / 60.0f;
         Rectangle busy = { day.x, day.y + (float)busy_top * pixels_per_minute, day.width,
                            (float)(busy_bottom - busy_top) * pixels_per_minute };
-        Color busy_color = timeline_busy_color;
+        Color busy_color = TIMELINE_BUSY_COLOR;
         if (hovered) {
-            busy_color = timeline_busy_hovered_color;
+            busy_color = TIMELINE_BUSY_HOVERED_COLOR;
         }
         DrawRectangleRec(busy, busy_color);
     }
@@ -3538,10 +3539,10 @@ void app_draw_problem_bar(App const *app, Str title, bool done, Rectangle bar) {
     assert(bar.height > 0.0f);
 
     Text_Style const *style = &app->fonts.small;
-    Color fill = problem_color;
+    Color fill = PROBLEM_COLOR;
     Str marker = STR("! ");
     if (done) {
-        fill = target_done_color;
+        fill = TARGET_DONE_COLOR;
         marker = STR("");
     }
     DrawRectangleRec(bar, fill);
@@ -3934,7 +3935,7 @@ static bool draw_panel_event_card(App *app, Event const *event, Rectangle card) 
     if (confirming) {
         Str const question = event_delete_question(event);
         draw_text(&app->fonts.small, question, x, card.y + 8 + TEXT_LINE_HEIGHT_PIXELS_SMALL,
-                  error_color);
+                  ERROR_COLOR);
         if (GuiButton(confirm_button, "Delete")) {
             app_event_delete(app, event->id);
         }
@@ -4008,7 +4009,7 @@ static void draw_panel_event_card_title(App const *app, Event const *event, Rect
     Color const title_color = style_color(title_property);
     scissor_begin(&app->fonts, card.x, card.y, card.width - 90, card.height);
     if (event->tasks_done) {
-        draw_tick((Rectangle){ x + 1, card.y + 9, 14, 13 }, 2.5f, target_done_color);
+        draw_tick((Rectangle){ x + 1, card.y + 9, 14, 13 }, 2.5f, TARGET_DONE_COLOR);
     }
     draw_text(title_style, str_from_cstr(event->title), title_x, card.y + 8, title_color);
     if (done) {
@@ -4074,7 +4075,7 @@ static void draw_panel_event_card_details(Fonts const *fonts, Event const *event
  * Explains the grid's creation dots.
  */
 static void draw_panel_legend(Fonts const *fonts, Rectangle area) {
-    Color const sample = event_colors[0];
+    Color const sample = EVENT_COLORS[0];
     Color const dim = style_color(TEXT_COLOR_DISABLED);
     float const text_x = area.x + 26;
     DrawCircleV((Vector2){ area.x + 8, area.y + 8 }, CREATION_MARKER_RADIUS_PIXELS, sample);
@@ -4096,13 +4097,13 @@ static void draw_panel_form(App *app, Rectangle body) {
     if (picker_locks) {
         GuiLock();
     }
-    static char const *const headings[EVENT_KIND_COUNT] = {
+    static char const *const FORM_HEADINGS[EVENT_KIND_COUNT] = {
         "Edit event", "Edit task", "Edit problem", "Edit opportunity",
     };
     bool const editing = form->editing_id != 0;
     // A new entry has no heading: the kind selector in its place says what it is.
     if (editing) {
-        draw_text(&app->fonts.ui, str_from_cstr(headings[form->kind]), body.x, body.y,
+        draw_text(&app->fonts.ui, str_from_cstr(FORM_HEADINGS[form->kind]), body.x, body.y,
                   style_color(TEXT_COLOR_NORMAL));
     }
     // An existing link target keeps its kind: a problem must stay on the day it was created,
@@ -4118,7 +4119,7 @@ static void draw_panel_form(App *app, Rectangle body) {
     // needs reading then; sharing the line leaves a task's checklist more room.
     if (form->error[0] != '\0') {
         scissor_begin(&app->fonts, body.x, y, body.width, TEXT_LINE_HEIGHT_PIXELS);
-        draw_text(&app->fonts.ui, str_from_cstr(form->error), body.x, y, error_color);
+        draw_text(&app->fonts.ui, str_from_cstr(form->error), body.x, y, ERROR_COLOR);
         scissor_end(&app->fonts);
     } else if (form->kind != EVENT_KIND_PROBLEM) {
         draw_text(&app->fonts.small, STR("Dates YYYY-MM-DD, times HH:MM (optional)"), body.x, y,
@@ -4154,7 +4155,7 @@ static void draw_panel_form(App *app, Rectangle body) {
  * wide as its label, because "Opportunity" needs more room than an even share leaves it.
  */
 static void draw_panel_form_kinds(App *app, Rectangle body, bool editing) {
-    static char const *const names[EVENT_KIND_COUNT] = { "Event", "Task", "Problem",
+    static char const *const FORM_KIND_NAMES[EVENT_KIND_COUNT] = { "Event", "Task", "Problem",
                                                          "Opportunity" };
     static_assert(EVENT_KIND_EVENT == 0, "Event and task are the first kinds.");
     static_assert(EVENT_KIND_TASK == 1, "Event and task are the first kinds.");
@@ -4170,7 +4171,7 @@ static void draw_panel_form_kinds(App *app, Rectangle body, bool editing) {
     float widths[EVENT_KIND_COUNT] = { 0 };
     float total_width = (float)((count - 1) * KIND_TOGGLE_GAP_PIXELS);
     for (int32_t kind = 0; kind < count; kind++) {
-        widths[kind] = measure_text(&app->fonts.ui, str_from_cstr(names[kind])).x
+        widths[kind] = measure_text(&app->fonts.ui, str_from_cstr(FORM_KIND_NAMES[kind])).x
                        + KIND_TOGGLE_PADDING_PIXELS;
         total_width += widths[kind];
     }
@@ -4180,7 +4181,7 @@ static void draw_panel_form_kinds(App *app, Rectangle body, bool editing) {
     }
     for (int32_t kind = 0; kind < count; kind++) {
         bool active = form->kind == kind;
-        GuiToggle((Rectangle){ x, body.y - 4, widths[kind], 28 }, names[kind], &active);
+        GuiToggle((Rectangle){ x, body.y - 4, widths[kind], 28 }, FORM_KIND_NAMES[kind], &active);
         // A click on the active toggle turns it off in raygui; one kind is always chosen, so
         // only turning another one on counts.
         if (active && form->kind != kind) {
@@ -4311,7 +4312,7 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     }
     draw_text(&fonts->ui, STR("Repeat"), body.x, y - FORM_LABEL_HEIGHT_PIXELS,
               style_color(TEXT_COLOR_NORMAL));
-    GuiComboBox((Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS }, repeat_option_labels,
+    GuiComboBox((Rectangle){ body.x, y, date_width, FIELD_HEIGHT_PIXELS }, REPEAT_OPTION_LABELS,
                 &form->repeat_option);
     if (form_field_visible(form, FORM_FIELD_REPEAT_DAYS)) {
         draw_panel_form_field(fonts, form, FORM_FIELD_REPEAT_DAYS, STR("Days"),
@@ -4595,7 +4596,7 @@ static void draw_panel_form_target_tasks_status(App const *app, Rectangle body, 
     }
     Color status_color = style_color(TEXT_COLOR_NORMAL);
     if (missed) {
-        status_color = error_color;
+        status_color = ERROR_COLOR;
     }
     draw_text(&app->fonts.ui, str_from_cstr(text), body.x, y - FORM_LABEL_HEIGHT_PIXELS,
               status_color);
@@ -4687,12 +4688,12 @@ static bool draw_panel_form_targets_row(App const *app, Link_Target const *targe
     bool const missed = target->kind == EVENT_KIND_OPPORTUNITY &&
                         opportunity_is_missed(target->end_date, target->end_minute, done,
                                               app_now(app));
-    Color color = opportunity_color;
+    Color color = OPPORTUNITY_COLOR;
     if (missed) {
-        color = opportunity_missed_color;
+        color = OPPORTUNITY_MISSED_COLOR;
     }
     if (target->kind == EVENT_KIND_PROBLEM) {
-        color = problem_color;
+        color = PROBLEM_COLOR;
     }
     float const box_size = 18;
     draw_check_mark((Rectangle){ row.x + 6, row.y + (row.height - box_size) / 2, box_size,
@@ -4754,7 +4755,7 @@ static void draw_panel_form_field(Fonts const *fonts, Form *form, int32_t field,
     bool editing = form->field_active == field;
     // raygui returns true when edit mode should toggle: a click on the box, or Enter or a
     // click elsewhere while editing.
-    if (GuiTextBox(box, form->text[field], form_field_sizes[field], editing)) {
+    if (GuiTextBox(box, form->text[field], FORM_FIELD_SIZES[field], editing)) {
         if (editing) {
             form->field_active = FORM_FIELD_NONE;
         } else {
@@ -4846,12 +4847,33 @@ static void draw_panel_form_picker(App *app, Rectangle body) {
     DrawRectangleRec(popup, style_color(BASE_COLOR_NORMAL));
     DrawRectangleLinesEx(popup, 1, style_color(BORDER_COLOR_FOCUSED));
 
-    // The header: previous month, the month's name and year, next month.
+    draw_panel_form_picker_header(app, popup, pressed);
+    bool chosen = false;
+    draw_panel_form_picker_cells(fonts, form, popup, app->today, pressed, &chosen);
+    // A day chosen closes the picker. So does a press anywhere outside it, the field's own
+    // button included, which the controls under it never see because they are locked.
+    if (chosen || (pressed && !CheckCollisionPointRec(mouse, popup))) {
+        form->picker_open = false;
+    }
+}
+
+/**
+ * The picker's header: previous month, the month's name and year, next month. A press on an
+ * arrow changes the month shown, until the end of the calendar's range.
+ */
+static void draw_panel_form_picker_header(App *app, Rectangle popup, bool pressed) {
+    Form *form = &app->form;
+    Fonts const *fonts = &app->fonts;
+    assert(form->picker_open);
+    assert(popup.width > 0.0f);
+
+    Vector2 const mouse = GetMousePosition();
     float const pad = (float)PICKER_PADDING_PIXELS;
     float const arrow_width = 32;
-    Rectangle const previous = { x + pad, y + pad, arrow_width, PICKER_HEADER_HEIGHT_PIXELS - pad };
-    Rectangle const next = { x + width - pad - arrow_width, y + pad, arrow_width,
-                             PICKER_HEADER_HEIGHT_PIXELS - pad };
+    float const arrow_height = PICKER_HEADER_HEIGHT_PIXELS - pad;
+    Rectangle const previous = { popup.x + pad, popup.y + pad, arrow_width, arrow_height };
+    Rectangle const next = { popup.x + popup.width - pad - arrow_width, popup.y + pad,
+                             arrow_width, arrow_height };
     // Months stop one year short of the calendar's ends, as form_picker_open keeps them.
     bool const previous_ok = form->picker_month.year > DATE_YEAR_MIN + 1 ||
                              form->picker_month.month > 1;
@@ -4889,14 +4911,6 @@ static void draw_panel_form_picker(App *app, Rectangle body) {
                        (Rectangle){ previous.x + arrow_width, previous.y,
                                     next.x - previous.x - arrow_width, previous.height },
                        style_color(TEXT_COLOR_NORMAL));
-
-    bool chosen = false;
-    draw_panel_form_picker_cells(fonts, form, popup, app->today, pressed, &chosen);
-    // A day chosen closes the picker. So does a press anywhere outside it, the field's own
-    // button included, which the controls under it never see because they are locked.
-    if (chosen || (pressed && !CheckCollisionPointRec(mouse, popup))) {
-        form->picker_open = false;
-    }
 }
 
 /**
@@ -5010,11 +5024,11 @@ static void form_open_edit(Form *form, Event const *event) {
     }
 
     for (int32_t option = 0; option < REPEAT_OPTION_COUNT; option++) {
-        if (repeat_option_units[option] == event->repeat_unit) {
+        if (REPEAT_OPTION_UNITS[option] == event->repeat_unit) {
             form->repeat_option = option;
         }
     }
-    assert(repeat_option_units[form->repeat_option] == event->repeat_unit);
+    assert(REPEAT_OPTION_UNITS[form->repeat_option] == event->repeat_unit);
     if (event->repeat_unit == REPEAT_DAY) {
         snprintf(form->text[FORM_FIELD_REPEAT_DAYS], REPEAT_DAYS_TEXT_SIZE, "%" PRId32,
                  event->repeat_interval);
@@ -5164,7 +5178,7 @@ static Str form_parse_body(Form const *form, Event *event) {
     assert(form->kind < EVENT_KIND_COUNT);
     int32_t const repeat_option = form_repeat_option(form);
     event->kind = form->kind;
-    event->repeat_unit = repeat_option_units[repeat_option];
+    event->repeat_unit = REPEAT_OPTION_UNITS[repeat_option];
     event->repeat_interval = 1;
     if (repeat_option == REPEAT_OPTION_DAYS) {
         if (!form_parse_repeat_days(str_from_cstr(form->text[FORM_FIELD_REPEAT_DAYS]),
@@ -5449,19 +5463,19 @@ static Color event_color(Event const *event, Date_Time now) {
     assert(event->id > 0);
 
     if (event_kind_is_target(event->kind) && event->tasks_done) {
-        return target_done_color;
+        return TARGET_DONE_COLOR;
     }
     if (event->kind == EVENT_KIND_PROBLEM) {
-        return problem_color;
+        return PROBLEM_COLOR;
     }
     if (event->kind == EVENT_KIND_OPPORTUNITY) {
         if (event_is_missed(event, now)) {
-            return opportunity_missed_color;
+            return OPPORTUNITY_MISSED_COLOR;
         }
-        return opportunity_color;
+        return OPPORTUNITY_COLOR;
     }
     assert(!event->tasks_done);
-    return event_colors[event->id % EVENT_COLOR_COUNT];
+    return EVENT_COLORS[event->id % EVENT_COLOR_COUNT];
 }
 
 /**
@@ -5645,12 +5659,12 @@ static void format_date_time_short(Date date, int32_t minute_of_day, char *buffe
 }
 
 /**
- * Loads theme_colors into raygui. DEFAULT's base properties reach every control, so that
+ * Loads THEME_COLORS into raygui. DEFAULT's base properties reach every control, so that
  * buttons, text boxes and toggles match the surfaces the apps draw themselves.
  */
 static void theme_apply(void) {
     for (int32_t i = 0; i < THEME_COLOR_COUNT; i++) {
-        Theme_Color const *color = &theme_colors[i];
+        Theme_Color const *color = &THEME_COLORS[i];
         // A color property: raygui's base properties start with the colors, and
         // BACKGROUND_COLOR is the last of DEFAULT's extended ones.
         assert(color->property >= BORDER_COLOR_NORMAL);

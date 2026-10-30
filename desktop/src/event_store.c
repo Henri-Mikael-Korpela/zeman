@@ -17,7 +17,7 @@ enum {
 // Dates are ISO text ("YYYY-MM-DD") so that they compare correctly as strings and stay
 // readable with any SQLite tool. A NULL time means the event has no time of day on that end.
 // created_at is local time, because the whole calendar works in local time.
-static char const schema_sql[] =
+static char const SCHEMA_SQL[] =
     "CREATE TABLE IF NOT EXISTS events ("
     "    id INTEGER PRIMARY KEY,"
     "    title TEXT NOT NULL CHECK (length(title) > 0),"
@@ -34,7 +34,7 @@ static char const schema_sql[] =
 
 // Schema versions, kept in PRAGMA user_version. The table above is version 0, and migration i
 // moves a database from version i to i + 1, so that databases from earlier builds still open.
-static char const *const migrations_sql[] = {
+static char const *const MIGRATIONS_SQL[] = {
     // Repeating events. A NULL repeat_unit means that the event happens once.
     "ALTER TABLE events ADD COLUMN repeat_unit TEXT"
     "    CHECK (repeat_unit IN ('day', 'week', 'month', 'year'));"
@@ -157,15 +157,15 @@ static char const *const migrations_sql[] = {
     "ALTER TABLE events ADD COLUMN deadline_time TEXT"
     "    CHECK (deadline_time IS NULL OR deadline_date IS NOT NULL);",
 };
-enum { SCHEMA_VERSION = sizeof(migrations_sql) / sizeof(migrations_sql[0]) };
+enum { SCHEMA_VERSION = sizeof(MIGRATIONS_SQL) / sizeof(MIGRATIONS_SQL[0]) };
 
 // Text stored in repeat_unit, indexed by Repeat_Unit. NULL is stored for REPEAT_NONE.
-static char const *const repeat_unit_names[REPEAT_UNIT_COUNT] = {
+static char const *const REPEAT_UNIT_NAMES[REPEAT_UNIT_COUNT] = {
     NULL, "day", "week", "month", "year",
 };
 
 // Text stored in kind, indexed by Event_Kind.
-static char const *const event_kind_names[EVENT_KIND_COUNT] = { "event", "task", "problem",
+static char const *const EVENT_KIND_NAMES[EVENT_KIND_COUNT] = { "event", "task", "problem",
                                                                  "opportunity" };
 
 typedef enum Statement {
@@ -191,7 +191,7 @@ static_assert((int)STATEMENT_COUNT == (int)EVENT_STORE_STATEMENT_COUNT,
               "Event_Store holds every statement.");
 
 // Insert and update share parameters 1 to 13, so that both bind with event_store_bind_fields.
-static char const *const statements_sql[STATEMENT_COUNT] = {
+static char const *const STATEMENTS_SQL[STATEMENT_COUNT] = {
     [STATEMENT_INSERT] =
         "INSERT INTO events"
         " (title, start_date, start_time, end_date, end_time, repeat_unit, repeat_interval,"
@@ -384,7 +384,7 @@ bool event_store_open(Event_Store *store, char const *path, bool create) {
     if (result != SQLITE_OK) {
         return event_store_fail(store, "Cannot open database");
     }
-    if (sqlite3_exec(store->database, schema_sql, NULL, NULL, NULL) != SQLITE_OK) {
+    if (sqlite3_exec(store->database, SCHEMA_SQL, NULL, NULL, NULL) != SQLITE_OK) {
         return event_store_fail(store, "Cannot create schema");
     }
     // Migrations run with foreign keys off, as SQLite requires for rebuilding a table, and are
@@ -402,7 +402,7 @@ bool event_store_open(Event_Store *store, char const *path, bool create) {
     }
     // Persistent: these statements live for the whole session.
     for (int32_t i = 0; i < STATEMENT_COUNT; i++) {
-        result = sqlite3_prepare_v3(store->database, statements_sql[i], -1,
+        result = sqlite3_prepare_v3(store->database, STATEMENTS_SQL[i], -1,
                                     SQLITE_PREPARE_PERSISTENT, &store->statements[i], NULL);
         if (result != SQLITE_OK) {
             return event_store_fail(store, "Cannot prepare statement");
@@ -985,7 +985,7 @@ static int event_store_bind_fields(sqlite3_stmt *statement, Event const *event) 
         result = bind_time(statement, 5, event->end_minute);
     }
     if (result == SQLITE_OK) {
-        char const *unit = repeat_unit_names[event->repeat_unit];
+        char const *unit = REPEAT_UNIT_NAMES[event->repeat_unit];
         if (unit == NULL) {
             result = sqlite3_bind_null(statement, 6);
         } else {
@@ -1004,7 +1004,7 @@ static int event_store_bind_fields(sqlite3_stmt *statement, Event const *event) 
         }
     }
     if (result == SQLITE_OK) {
-        result = sqlite3_bind_text(statement, 9, event_kind_names[event->kind], -1,
+        result = sqlite3_bind_text(statement, 9, EVENT_KIND_NAMES[event->kind], -1,
                                    SQLITE_STATIC);
     }
     if (result == SQLITE_OK) {
@@ -1230,7 +1230,7 @@ static bool column_parse_repeat(sqlite3_stmt *statement, Event *event) {
         event->repeat_unit = REPEAT_NONE;
     }
     for (int32_t i = REPEAT_NONE + 1; unit != NULL && i < REPEAT_UNIT_COUNT; i++) {
-        if (strcmp(unit, repeat_unit_names[i]) == 0) {
+        if (strcmp(unit, REPEAT_UNIT_NAMES[i]) == 0) {
             event->repeat_unit = i;
         }
     }
@@ -1267,7 +1267,7 @@ static bool column_parse_kind(sqlite3_stmt *statement, int column, int32_t *kind
         return false;
     }
     for (int32_t i = 0; i < EVENT_KIND_COUNT; i++) {
-        if (strcmp(text, event_kind_names[i]) == 0) {
+        if (strcmp(text, EVENT_KIND_NAMES[i]) == 0) {
             *kind = i;
             return true;
         }
@@ -1339,7 +1339,7 @@ static bool event_store_migrate_step(Event_Store *store, int32_t version) {
 
     bool ok = sqlite3_exec(store->database, "BEGIN;", NULL, NULL, NULL) == SQLITE_OK;
     if (ok) {
-        ok = sqlite3_exec(store->database, migrations_sql[version], NULL, NULL, NULL) ==
+        ok = sqlite3_exec(store->database, MIGRATIONS_SQL[version], NULL, NULL, NULL) ==
              SQLITE_OK;
     }
     if (ok) {
