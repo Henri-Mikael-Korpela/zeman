@@ -24,6 +24,8 @@ This repository contains the source code for both the desktop and Android apps, 
 - `android/` The Android app. It shows and edits the desktop app's calendar over the network; it keeps no data of its own.
 - `shared/` Code both apps compile: the user interface, dates, events, and the network protocol and client.
 - `assets/` Contains App icons.
+- `tests/` Tests of shared code that need no window or database (`str_test`, `wire_test`).
+- `tools/` Small programs that help with developing the project and are not shipped with the apps; see [Code Digger](#code-digger).
 
 Each of `desktop/`, `android/` and `shared/` has `src/` for its .c files and `include/zeman/` for its headers, which every file includes as `<zeman/app.h>`, `<zeman/server.h>` and so on, so that project headers are told apart from raylib's and the system's. The desktop build (`desktop/CMakeLists.txt`) and the Android build (`android/build.ps1`) each put their own `include` and `shared/include` on the compiler's include path; a new header goes in one of those folders.
 
@@ -73,6 +75,30 @@ This writes `desktop/release/zeman.exe` and `desktop/release/fonts/`. Unlike the
 `zeman.exe --port PORT` serves phones on another port than 47800, for example when something else uses it; the QR code and the address shown carry the port. `zeman.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
 
 The navigation on the left switches between **Calendar**, **Problems** and **Connected Devices**. Problems shows every problem in four columns, from the least to the most complete: No planned tasks, Planned, Partly completed and Completed, each with how many problems it holds. Tasks shows every task in four columns: Overdue, Today, Upcoming and Completed. A repeating task is shown once, at the occurrence that covers today or the next one, so a missed repeat gives way to the next. Click a task's checkbox to mark it completed, or anywhere else on it to open its day in the calendar. Connected Devices shows the QR code that phones scan to connect, the address to type instead, and the phones connected now.
+
+### Code Digger
+
+`tools/code_digger.c` is a small command-line tool that reads the project's C code and counts the calls of C standard library functions, so that you can see which ones the code leans on. It counts a name from the C11 standard library (`assert` and `va_start` included) when it is followed by an opening parenthesis; calls of raylib, SQLite and the project's own functions are not counted. Comments, string and character literals and `#include` lines are skipped, and so is a call through a struct member, such as `ops.remove(`. It reads the `.c` and `.h` files of the project, except those in `external/`, `.git`, build folders, `release/` and the downloaded `android/tools`.
+
+It is built on request, with the same compiler and CMake as the desktop app, and is not part of the normal build:
+
+```sh
+cmake --build desktop/build/debug-win32 --target code_digger
+desktop/build/debug-win32/code_digger.exe .
+```
+
+The argument is the project's folder and may be left out when running from it. Use whichever build folder you have configured instead of `debug-win32`; it must exist already, from the build steps above. The output has one line per function, the most called first and by name among equals, as `name (count)`, followed by how many functions were called and in how many files, for example:
+
+```
+assert (707)
+snprintf (174)
+strcmp (25)
+...
+
+33 standard library functions called, in 50 files.
+```
+
+A file that cannot be read, or is larger than 4 MB, is left out and the last line says how many. The tool exits with 1 and a message when a folder cannot be read.
 
 ## Android app
 

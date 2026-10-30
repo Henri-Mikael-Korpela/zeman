@@ -166,3 +166,17 @@ if(MSVC)
 else()
     target_compile_options(wire_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 endif()
+
+# Code Digger, a tool that counts the calls of C standard library functions in the project's code:
+#   cmake --build <build directory> --target code_digger
+# and then code_digger in the build directory, with the project's folder as its argument.
+add_executable(code_digger EXCLUDE_FROM_ALL
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/code_digger.c"
+    "${SHARED_DIR}/str.c"
+)
+target_include_directories(code_digger PRIVATE "${SHARED_INCLUDE_DIR}")
+if(MSVC)
+    target_compile_options(code_digger PRIVATE /W4 /WX /UNDEBUG)
+else()
+    target_compile_options(code_digger PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
