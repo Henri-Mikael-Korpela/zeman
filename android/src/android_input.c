@@ -7,6 +7,7 @@
 
 #include <jni.h>
 #include <android/native_activity.h>
+#include <android/window.h>
 #include <android_native_app_glue.h>
 
 // Defined by raylib's Android platform code.
@@ -86,6 +87,61 @@ char const *android_input_data_directory(void) {
     struct android_app *app = GetAndroidApp();
     assert(app != NULL);
     return app->activity->internalDataPath;
+}
+
+void android_input_system_bars_show(void) {
+    struct android_app *app = GetAndroidApp();
+    assert(app != NULL);
+    // raylib sets AWINDOW_FLAG_FULLSCREEN, which hides the status bar.
+    ANativeActivity_setWindowFlags(app->activity, 0, AWINDOW_FLAG_FULLSCREEN);
+}
+
+void android_input_system_bars_height(int32_t *top, int32_t *bottom) {
+    *top = 0;
+    *bottom = 0;
+    struct android_app *app = GetAndroidApp();
+    assert(app != NULL);
+    JavaVM *vm = app->activity->vm;
+    JNIEnv *env = NULL;
+    if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK || env == NULL) {
+        return;
+    }
+    jobject manager = NULL;
+    jobject decor_view = NULL;
+    // The manager is not needed; only the same window lookup.
+    if (!android_keyboard_find(env, app->activity->clazz, &manager, &decor_view)) {
+        goto detach;
+    }
+    jclass view_class = (*env)->FindClass(env, "android/view/View");
+    if (jni_failed(env, view_class)) {
+        goto detach;
+    }
+    jmethodID get_insets = (*env)->GetMethodID(env, view_class, "getRootWindowInsets",
+                                               "()Landroid/view/WindowInsets;");
+    if (jni_failed(env, get_insets)) {
+        goto detach;
+    }
+    jobject insets = (*env)->CallObjectMethod(env, decor_view, get_insets);
+    jclass insets_class = (*env)->FindClass(env, "android/view/WindowInsets");
+    if (jni_failed(env, insets) || jni_failed(env, insets_class)) {
+        goto detach;
+    }
+    // The stable insets leave out the on-screen keyboard, which would otherwise move the layout.
+    jmethodID get_top = (*env)->GetMethodID(env, insets_class, "getStableInsetTop", "()I");
+    jmethodID get_bottom = (*env)->GetMethodID(env, insets_class, "getStableInsetBottom", "()I");
+    if (jni_failed(env, get_top) || jni_failed(env, get_bottom)) {
+        goto detach;
+    }
+    *top = (*env)->CallIntMethod(env, insets, get_top);
+    *bottom = (*env)->CallIntMethod(env, insets, get_bottom);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        *top = 0;
+        *bottom = 0;
+    }
+// The one cleanup label: every path must detach the thread it attached.
+detach:
+    (*vm)->DetachCurrentThread(vm);
 }
 
 /**

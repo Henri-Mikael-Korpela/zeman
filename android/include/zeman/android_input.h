@@ -60,5 +60,16 @@ void android_input_keyboard_set_visible(Android_Input *input, bool visible);
  * Where the app may keep its own files, such as the desktop's address.
  */
 char const *android_input_data_directory(void);
+/**
+ * Lets the system's status bar (time, battery) and navigation bar (the three buttons or the
+ * gesture strip) keep their own space instead of being drawn over: raylib asks for a full screen
+ * window. Call after InitWindow.
+ */
+void android_input_system_bars_show(void);
+/**
+ * The height in pixels that the status bar takes at the top and the navigation bar at the bottom,
+ * or 0 for a bar that is not there. Not yet known right after start: ask again each frame.
+ */
+void android_input_system_bars_height(int32_t *top, int32_t *bottom);
 
 #endif

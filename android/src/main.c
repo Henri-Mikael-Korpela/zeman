@@ -98,13 +98,19 @@ typedef struct Phone {
     App *app;
     Drawer drawer;
     float scale;
+    // Heights of the status bar and the navigation bar, in screen pixels, and the frames since
+    // they were last asked for.
+    int32_t bars_top;
+    int32_t bars_bottom;
+    int32_t bars_age;
     View view;
-    bool scanning;                    // The QR scan covers the connection settings
+    bool scanning;                   // The QR scan covers the connection settings
     char address[ADDRESS_TEXT_SIZE];  // The desktop in use, as saved, or empty
 } Phone;
 
 static void phone_frame(Phone *phone);
 static void phone_frame_scan(Phone *phone);
+static void phone_bars_update(Phone *phone);
 static void phone_view_set(Phone *phone, View view);
 static void phone_desktop_set(Phone *phone, char const *address);
 static void phone_status(Phone const *phone, char *text, size_t text_size);
@@ -119,16 +125,16 @@ static Rectangle drawer_item(int32_t index, float x);
 static void drawer_draw(Drawer const *drawer, App const *app, View current, char const *status,
                         float width, float height);
 static void gutter_draw(float height);
-static void screen_begin(float scale);
+static void screen_begin(float scale, int32_t top);
 static void screen_end(void);
 static void connect_screen_open(Connect_Screen *screen, char const *address);
 static void connect_screen_close(Connect_Screen *screen);
 static Connect_Result connect_screen_frame(Connect_Screen *screen, App const *app, float scale,
-                                           char const *status, bool input);
+                                           char const *status, bool input, int32_t top);
 static Connect_Result connect_screen_draw_choices(Connect_Screen *screen, float width, float *y);
 static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float width, float y);
-static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *address,
-                                        size_t address_size);
+static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, int32_t top,
+                                        int32_t bottom, char *address, size_t address_size);
 static bool scan_screen_read(Scan_Screen *scan, char *address, size_t address_size);
 
 /**
@@ -138,9 +144,10 @@ static bool scan_screen_read(Scan_Screen *scan, char *address, size_t address_si
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    // Full screen, at the display's own resolution.
+    // At the display's own resolution; the system bars keep their space, see phone_bars_update.
     InitWindow(0, 0, "Zeman");
     SetTargetFPS(60);
+    android_input_system_bars_show();
     static Phone phone;
     android_input_install(&phone.input);
 
@@ -180,14 +187,19 @@ int main(int argc, char **argv) {
  */
 static void phone_frame(Phone *phone) {
     android_input_frame_begin(&phone->input);
+    phone_bars_update(phone);
     if (phone->scanning) {
         phone_frame_scan(phone);
         return;
     }
     float const scale = phone->scale;
+    float const top = (float)phone->bars_top;
+    float const usable = (float)(GetScreenHeight() - phone->bars_top - phone->bars_bottom);
+    SetMouseOffset(0, -phone->bars_top);
     SetMouseScale(1.0f / scale, 1.0f / scale);
     View chosen = drawer_update(&phone->drawer, phone->view);
     SetMouseScale(1.0f, 1.0f);
+    SetMouseOffset(0, 0);
     bool const input = drawer_is_closed(&phone->drawer);
     // Back closes the drawer first; then, on the settings, it returns to a chosen desktop.
     bool desktop_chosen = phone->address[0] != '\0';
@@ -208,16 +220,17 @@ static void phone_frame(Phone *phone) {
     if (phone->view == VIEW_CALENDAR) {
         float const gutter = GUTTER_WIDTH_PIXELS * scale;
         app_set_input_enabled(phone->app, input);
-        app_frame(phone->app, (Rectangle){ gutter, 0, (float)GetScreenWidth() - gutter,
-                                           (float)GetScreenHeight() });
+        app_frame(phone->app, (Rectangle){ gutter, top, (float)GetScreenWidth() - gutter,
+                                           usable });
         typing = input && app_text_input_active(phone->app);
     } else {
-        result = connect_screen_frame(&phone->connect, phone->app, scale, status, input);
+        result = connect_screen_frame(&phone->connect, phone->app, scale, status, input,
+                                      phone->bars_top);
         typing = phone->connect.editing;
     }
     float const width = (float)GetScreenWidth() / scale;
-    float const height = (float)GetScreenHeight() / scale;
-    BeginMode2D((Camera2D){ .offset = { 0, 0 }, .target = { 0, 0 }, .rotation = 0,
+    float const height = usable / scale;
+    BeginMode2D((Camera2D){ .offset = { 0, top }, .target = { 0, 0 }, .rotation = 0,
                             .zoom = scale });
     gutter_draw(height);
     drawer_draw(&phone->drawer, phone->app, phone->view, status, width, height);
@@ -243,7 +256,8 @@ static void phone_frame_scan(Phone *phone) {
     assert(phone->connect.open);
 
     char chosen[ADDRESS_TEXT_SIZE] = "";
-    Connect_Result result = scan_screen_frame(&phone->scan, phone->scale, chosen, sizeof(chosen));
+    Connect_Result result = scan_screen_frame(&phone->scan, phone->scale, phone->bars_top,
+                                              phone->bars_bottom, chosen, sizeof(chosen));
     if (result == CONNECT_CANCELLED) {
         phone->scanning = false;
     } else if (result == CONNECT_CHOSEN) {
@@ -251,6 +265,20 @@ static void phone_frame_scan(Phone *phone) {
         phone_desktop_set(phone, chosen);
     }
     android_input_keyboard_set_visible(&phone->input, false);
+}
+
+/**
+ * Asks for the sizes of the system bars about twice a second: they are not known at the first
+ * frames, and a JNI round trip every frame is not needed for something that hardly changes.
+ */
+static void phone_bars_update(Phone *phone) {
+    enum { BARS_FRAMES_BETWEEN_ASKS = 30 };
+    if (phone->bars_age > 0 && phone->bars_age < BARS_FRAMES_BETWEEN_ASKS) {
+        phone->bars_age++;
+        return;
+    }
+    phone->bars_age = 1;
+    android_input_system_bars_height(&phone->bars_top, &phone->bars_bottom);
 }
 
 /**
@@ -553,11 +581,12 @@ static void gutter_draw(float height) {
  * The scan screen uses the calendar's layout pixels: drawing and touches are scaled the same
  * way, as app_frame does for the calendar.
  */
-static void screen_begin(float scale) {
+static void screen_begin(float scale, int32_t top) {
+    SetMouseOffset(0, -top);
     SetMouseScale(1.0f / scale, 1.0f / scale);
     BeginDrawing();
     ClearBackground(GetColor((unsigned int)GuiGetStyle(DEFAULT, BACKGROUND_COLOR)));
-    BeginMode2D((Camera2D){ .offset = { 0, 0 }, .target = { 0, 0 }, .rotation = 0,
+    BeginMode2D((Camera2D){ .offset = { 0, (float)top }, .target = { 0, 0 }, .rotation = 0,
                             .zoom = scale });
 }
 
@@ -565,6 +594,7 @@ static void screen_end(void) {
     EndMode2D();
     EndDrawing();
     SetMouseScale(1.0f, 1.0f);
+    SetMouseOffset(0, 0);
 }
 
 static void connect_screen_open(Connect_Screen *screen, char const *address) {
@@ -593,19 +623,20 @@ static void connect_screen_close(Connect_Screen *screen) {
  * and EndDrawing. Without input, as while the drawer is out, the controls ignore touches.
  */
 static Connect_Result connect_screen_frame(Connect_Screen *screen, App const *app, float scale,
-                                           char const *status, bool input) {
+                                           char const *status, bool input, int32_t top) {
     assert(screen->open);
     assert(scale > 0.0f);
 
     discovery_poll(&screen->discovery);
-    // Layout pixels start right of the strip: drawing and touches move and scale the same way.
+    // Layout pixels start right of the strip and below the status bar: drawing and touches move
+    // and scale the same way.
     float const offset = GUTTER_WIDTH_PIXELS * scale;
-    SetMouseOffset(-(int)offset, 0);
+    SetMouseOffset(-(int)offset, -top);
     SetMouseScale(1.0f / scale, 1.0f / scale);
     if (!input) {
         GuiLock();
     }
-    BeginMode2D((Camera2D){ .offset = { offset, 0 }, .target = { 0, 0 }, .rotation = 0,
+    BeginMode2D((Camera2D){ .offset = { offset, (float)top }, .target = { 0, 0 }, .rotation = 0,
                             .zoom = scale });
     float const width = ((float)GetScreenWidth() - offset) / scale;
     float const x = MARGIN_PIXELS;
@@ -706,8 +737,8 @@ static Connect_Result connect_screen_draw_address(Connect_Screen *screen, float 
  * Asks for the camera if needed, then shows the camera and reads codes until one is the
  * desktop's. Returns CONNECT_CHOSEN with address filled in, or CONNECT_CANCELLED.
  */
-static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *address,
-                                        size_t address_size) {
+static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, int32_t top,
+                                        int32_t bottom, char *address, size_t address_size) {
     QR_Scanner *scanner = &scan->scanner;
     if (IsKeyPressed(KEY_BACK)) {
         qr_scanner_stop(scanner);
@@ -728,9 +759,9 @@ static Connect_Result scan_screen_frame(Scan_Screen *scan, float scale, char *ad
         return CONNECT_CHOSEN;
     }
 
-    screen_begin(scale);
+    screen_begin(scale, top);
     float const width = (float)GetScreenWidth() / scale;
-    float const height = (float)GetScreenHeight() / scale;
+    float const height = (float)(GetScreenHeight() - top - bottom) / scale;
     float const x = MARGIN_PIXELS;
     float const content_width = width - 2 * MARGIN_PIXELS;
     float y = 32;
