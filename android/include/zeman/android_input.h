@@ -25,6 +25,9 @@ typedef struct Android_Input {
     int32_t queue[ANDROID_INPUT_QUEUE_SIZE];
     int32_t queue_start;
     int32_t queue_count;
+    // Backspace presses not yet shown to raygui, and whether this frame has one.
+    int32_t backspace_waiting;
+    bool backspace_now;
     bool keyboard_visible;
 } Android_Input;
 
@@ -38,6 +41,17 @@ void android_input_install(Android_Input *input);
  * Android app.
  */
 int android_input_char_pressed(void);
+/**
+ * Call once at the start of each frame: makes one waiting Backspace press visible to
+ * android_input_key_pressed for this frame. The on-screen keyboard sends a key's press and
+ * release together, so raylib's own key state is already released by the time a frame reads it.
+ */
+void android_input_frame_begin(Android_Input *input);
+/**
+ * raygui calls this in place of IsKeyPressed (see raygui_impl.c): raylib's answer, or true for
+ * Backspace when the keyboard sent one this frame.
+ */
+bool android_input_key_pressed(int key);
 /**
  * Shows or hides the on-screen keyboard; does nothing when it is already so.
  */

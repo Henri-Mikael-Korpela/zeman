@@ -3,6 +3,8 @@
 #include <assert.h>
 #include <stddef.h>
 
+#include <raylib.h>
+
 #include <jni.h>
 #include <android/native_activity.h>
 #include <android_native_app_glue.h>
@@ -43,6 +45,25 @@ int android_input_char_pressed(void) {
     input->queue_start = (input->queue_start + 1) % ANDROID_INPUT_QUEUE_SIZE;
     input->queue_count--;
     return character;
+}
+
+void android_input_frame_begin(Android_Input *input) {
+    input->backspace_now = input->backspace_waiting > 0;
+    if (input->backspace_now) {
+        input->backspace_waiting--;
+    }
+}
+
+bool android_input_key_pressed(int key) {
+    if (IsKeyPressed(key)) {
+        return true;
+    }
+    struct android_app *app = GetAndroidApp();
+    Android_Input const *input = NULL;
+    if (app != NULL) {
+        input = app->userData;
+    }
+    return key == KEY_BACKSPACE && input != NULL && input->backspace_now;
 }
 
 void android_input_keyboard_set_visible(Android_Input *input, bool visible) {
@@ -86,6 +107,10 @@ static int32_t android_input_callback(struct android_app *app, AInputEvent *even
             }
             for (int32_t i = 0; i < count && i < ANDROID_INPUT_QUEUE_SIZE; i++) {
                 android_input_push(input, character);
+                if (AKeyEvent_getKeyCode(event) == AKEYCODE_DEL &&
+                    input->backspace_waiting < ANDROID_INPUT_QUEUE_SIZE) {
+                    input->backspace_waiting++;
+                }
             }
         }
     }

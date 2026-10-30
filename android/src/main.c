@@ -179,6 +179,7 @@ int main(int argc, char **argv) {
  * views. The drawer reads the pointer first, so that the view ignores it while the drawer is out.
  */
 static void phone_frame(Phone *phone) {
+    android_input_frame_begin(&phone->input);
     if (phone->scanning) {
         phone_frame_scan(phone);
         return;

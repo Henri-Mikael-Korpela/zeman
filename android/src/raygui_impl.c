@@ -9,6 +9,8 @@
 // raylib on Android never produces typed characters, so raygui's text boxes read them from
 // android_input instead. Defined after raylib.h, so that only raygui's calls are redirected.
 #define GetCharPressed android_input_char_pressed
+// Its on-screen keyboard also releases Backspace before a frame can see it pressed.
+#define IsKeyPressed android_input_key_pressed
 
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
