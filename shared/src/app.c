@@ -208,10 +208,7 @@ static int32_t const FORM_FIELD_SIZES[FORM_FIELD_COUNT] = {
 // Choices in the form's repeat selector, in the order shown, and the unit each one means.
 typedef enum Repeat_Option {
     REPEAT_OPTION_NONE,
-    REPEAT_OPTION_WEEK,
     REPEAT_OPTION_DAYS,
-    REPEAT_OPTION_MONTH,
-    REPEAT_OPTION_YEAR,
     REPEAT_OPTION_COUNT,
 } Repeat_Option;
 
@@ -220,7 +217,7 @@ static char const REPEAT_OPTION_LABELS[] =
     "Does not repeat;Every week;Every X days;Every month;Every year";
 
 static int32_t const REPEAT_OPTION_UNITS[REPEAT_OPTION_COUNT] = {
-    REPEAT_NONE, REPEAT_WEEK, REPEAT_DAY, REPEAT_MONTH, REPEAT_YEAR,
+    REPEAT_NONE, REPEAT_WEEK,
 };
 
 static_assert(REPEAT_INTERVAL_MAX < 1000, "REPEAT_DAYS_TEXT_SIZE holds three digits.");
