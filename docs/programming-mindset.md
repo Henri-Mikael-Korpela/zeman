@@ -13,3 +13,5 @@
 - Batch work. Amortize costs by processing many items at once rather than one at a time.
 - Avoid dynamic allocation after initialization. Allocate memory statically or once at startup, with fixed upper bounds, and never call `malloc` or `free` in the main loop.
   - This eliminates use-after-free and avoids fragmentation.
+- Prefer custom memory allocators instead of general-purpose allocation.
+- Instead of opening and closing files, prefer memory mapping whenever it is more memory efficient and faster to execute.
