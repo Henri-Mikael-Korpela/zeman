@@ -251,12 +251,20 @@ static char const *const statements_sql[STATEMENT_COUNT] = {
         "   AND t.id = ?2 AND t.kind = 'task';",
     // Links to an entry that is no longer a task are left out, as if they were not there; the
     // app removes them when it saves the entry (see Backend_Ops.set_task_targets).
+    // The columns of STATEMENT_SELECT_RANGE for the task, then whether an occurrence is checked
+    // off, and the occurrence to act on: the earliest checked off, else the first (see
+    // Linked_Task).
     [STATEMENT_TARGET_TASKS] =
-        "SELECT t.id, t.title,"
-        "       EXISTS (SELECT 1 FROM task_completions c WHERE c.event_id = t.id)"
-        " FROM task_links l JOIN events t ON t.id = l.task_id"
-        " WHERE l.target_id = ?1 AND t.kind = 'task'"
-        " ORDER BY t.start_date, t.id LIMIT ?2;",
+        "SELECT e.id, e.title, e.start_date, e.start_time, e.end_date, e.end_time,"
+        "       e.created_at, e.repeat_unit, e.repeat_interval, e.repeat_end_date, e.kind,"
+        "       lo.id, lo.address, lo.city, e.description, 0, e.deadline_date, e.deadline_time,"
+        "       EXISTS (SELECT 1 FROM task_completions c WHERE c.event_id = e.id),"
+        "       COALESCE((SELECT min(c.occurrence_date) FROM task_completions c"
+        "                 WHERE c.event_id = e.id), e.start_date)"
+        " FROM task_links l JOIN events e ON e.id = l.task_id"
+        " LEFT JOIN locations lo ON lo.id = e.location_id"
+        " WHERE l.target_id = ?1 AND e.kind = 'task'"
+        " ORDER BY e.start_date, e.id LIMIT ?2;",
     // Every target is scanned, which is fine for the thousands of entries a personal calendar
     // holds. Linked targets come first, so that the LIMIT never cuts one off. ?3 is 1 for
     // problems only. The deadline comes last, so that an opportunity can show as missed.
@@ -307,6 +315,12 @@ enum {
     COLUMN_TASKS_DONE,
     COLUMN_DEADLINE_DATE,
     COLUMN_DEADLINE_TIME,
+};
+
+// Columns of STATEMENT_TARGET_TASKS after those of STATEMENT_SELECT_RANGE.
+enum {
+    TARGET_TASK_COLUMN_DONE = COLUMN_DEADLINE_TIME + 1,
+    TARGET_TASK_COLUMN_OCCURRENCE,
 };
 
 // Columns of STATEMENT_TASK_TARGETS.
@@ -888,20 +902,19 @@ static int bind_id_and_limit(sqlite3_stmt *statement, int64_t id, int32_t row_co
     return result;
 }
 
-/**
- * Longer titles from outside this program are cut to fit, as in event_store_load_range_row.
- */
 static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Task *task) {
-    char const *title = (char const *)sqlite3_column_text(statement, 1);
-    if (title == NULL || title[0] == '\0') {
+    *task = (Linked_Task){ 0 };
+    if (!event_store_load_range_row(statement, &task->task)) {
         return false;
     }
-    *task = (Linked_Task){
-        .task_id = sqlite3_column_int64(statement, 0),
-        .done = sqlite3_column_int(statement, 2) != 0,
-    };
-    snprintf(task->title, sizeof(task->title), "%s", title);
-    return task->task_id > 0;
+    task->done = sqlite3_column_int(statement, TARGET_TASK_COLUMN_DONE) != 0;
+    Date occurrence = { 0, 0, 0 };
+    if (!column_parse_date(statement, TARGET_TASK_COLUMN_OCCURRENCE, &occurrence)) {
+        return false;
+    }
+    task->occurrence_start_day = date_to_day_number(occurrence);
+    return task->task.kind == EVENT_KIND_TASK &&
+           task->occurrence_start_day >= date_to_day_number(task->task.start_date);
 }
 
 static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Target *target) {

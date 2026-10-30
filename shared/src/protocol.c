@@ -102,9 +102,9 @@ void writer_completion(Writer *writer, Task_Completion const *completion) {
 }
 
 void writer_linked_task(Writer *writer, Linked_Task const *task) {
-    writer_i64(writer, task->task_id);
+    writer_event(writer, &task->task);
+    writer_i32(writer, task->occurrence_start_day);
     writer_u8(writer, (uint8_t)task->done);
-    writer_text(writer, str_from_cstr(task->title));
 }
 
 /**
@@ -271,14 +271,19 @@ Task_Completion reader_completion(Reader *reader) {
 
 Linked_Task reader_linked_task(Reader *reader) {
     Linked_Task task = { 0 };
-    task.task_id = reader_i64(reader);
+    task.task = reader_event(reader);
+    task.occurrence_start_day = reader_i32(reader);
     uint8_t done = reader_u8(reader);
-    reader_text(reader, task.title, sizeof(task.title));
     task.done = done == 1;
-    if (task.task_id <= 0 || done > 1 || task.title[0] == '\0') {
+    if (reader->failed || task.task.kind != EVENT_KIND_TASK || done > 1) {
         reader->failed = true;
+        return (Linked_Task){ 0 };
     }
-    if (reader->failed) {
+    // As for a task occurrence: the day becomes a date, which must be a valid one.
+    int32_t const first_day = date_to_day_number(task.task.start_date);
+    int32_t const last_valid_day = date_to_day_number((Date){ DATE_YEAR_MAX, 12, 31 });
+    if (task.occurrence_start_day < first_day || task.occurrence_start_day > last_valid_day) {
+        reader->failed = true;
         return (Linked_Task){ 0 };
     }
     return task;

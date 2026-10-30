@@ -104,9 +104,12 @@ enum {
 // opportunity. A task counts as done once any of its occurrences is checked off, because doing
 // it once is what the target needs, and a repeating task's later occurrences are reminders.
 typedef struct Linked_Task {
-    int64_t task_id;
+    Event task;  // Always of kind EVENT_KIND_TASK
+    // The occurrence that checking or unchecking the task acts on: the earliest checked-off one
+    // while done, else the first. A task that repeats can have several checked off, so it can
+    // stay done after one is unchecked.
+    int32_t occurrence_start_day;
     bool done;  // An occurrence of the task is checked off
-    char title[EVENT_TITLE_SIZE];
 } Linked_Task;
 
 // A link target as a task's form offers it for linking, with how far its linked tasks are done.

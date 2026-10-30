@@ -163,6 +163,34 @@ static void test_task_occurrence_round_trip(void) {
     assert(read.task.id == 0);
 }
 
+static void test_linked_task_round_trip(void) {
+    static uint8_t bytes[1024];
+    Linked_Task linked = {
+        .task = test_task_make((Date){ 2026, 10, 20 }, REPEAT_NONE, 1),
+        .occurrence_start_day = test_day(2026, 10, 20),
+        .done = true,
+    };
+    Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+    writer_linked_task(&writer, &linked);
+    assert(!writer.overflow);
+
+    Reader reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+    Linked_Task read = reader_linked_task(&reader);
+    assert(reader_done(&reader));
+    assert(read.task.id == linked.task.id);
+    assert(read.occurrence_start_day == linked.occurrence_start_day);
+    assert(read.done);
+
+    // An occurrence before the task starts is refused.
+    linked.occurrence_start_day--;
+    writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+    writer_linked_task(&writer, &linked);
+    reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+    read = reader_linked_task(&reader);
+    assert(reader.failed);
+    assert(read.task.id == 0);
+}
+
 static Event test_event_round_trip(Event const *event, bool *accepted) {
     static uint8_t bytes[1024];
     Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
@@ -254,6 +282,7 @@ int main(void) {
     test_occurrence_due();
     test_task_occurrence_round_trip();
     test_deadline();
+    test_linked_task_round_trip();
     test_paste();
     printf("wire_test: all passed\n");
     return 0;

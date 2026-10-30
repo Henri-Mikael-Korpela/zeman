@@ -347,7 +347,7 @@ typedef struct Form {
     Linked_Task tasks[LINK_COUNT_MAX];
     Link_Target targets[LINK_COUNT_MAX];
     int64_t editing_id;    // Event being edited, or 0 for a new event
-    Scroll targets_scroll;
+    Scroll targets_scroll;  // Of the list of targets, or of a target's tasks
     int32_t field_active;  // Form_Field being edited, or FORM_FIELD_NONE
     int32_t task_count;
     int32_t target_count;
@@ -668,7 +668,13 @@ static void draw_panel_form_buttons(App *app, Rectangle body, float y);
 static float draw_panel_form_rows_end(float y);
 static float draw_panel_form_fields(App *app, Rectangle body, float y);
 static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, float end_y);
-static void draw_panel_form_target_tasks(App const *app, Rectangle body, float y, float end_y);
+static void draw_panel_form_target_tasks(App *app, Rectangle body, float y, float end_y);
+static float form_target_tasks_height(Fonts const *fonts, Form const *form, float card_width);
+static void draw_panel_form_target_tasks_list(App *app, Rectangle list);
+static void draw_panel_form_target_task_card(App *app, Linked_Task const *task, Rectangle card,
+                                             bool *toggled, bool *opened);
+static void app_form_task_set_done(App *app, Linked_Task const *task);
+static void app_form_goto_task(App *app, Event const *task);
 static void draw_panel_form_target_tasks_status(App const *app, Rectangle body, float y);
 static void draw_panel_form_targets(App *app, Rectangle body, float y, float end_y);
 static bool draw_panel_form_targets_row(App const *app, Link_Target const *target,
@@ -4316,11 +4322,12 @@ static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, fl
 }
 
 /**
- * The status on the label line above y, then one line per linked task, with whether it is
- * done, down to end_y. Tasks that do not fit are counted on the last line.
+ * The status on the label line above y, then the linked tasks as cards like the calendar's,
+ * down to end_y, scrolling when they do not fit. A task's check box marks it done, and the arrow
+ * at the right of its card goes to the day it starts on.
  */
-static void draw_panel_form_target_tasks(App const *app, Rectangle body, float y, float end_y) {
-    Form const *form = &app->form;
+static void draw_panel_form_target_tasks(App *app, Rectangle body, float y, float end_y) {
+    Form *form = &app->form;
     Fonts const *fonts = &app->fonts;
     assert(form->task_count <= LINK_COUNT_MAX);
     assert(y < end_y);
@@ -4336,42 +4343,175 @@ static void draw_panel_form_target_tasks(App const *app, Rectangle body, float y
         return;
     }
 
-    float const line = TEXT_LINE_HEIGHT_PIXELS_SMALL;
-    int32_t const line_count = (int32_t)((end_y - y) / line);
-    // A phone too short for a task and the count of the rest shows only the status.
-    if (line_count < 2) {
+    // A window too short for any card shows only the status.
+    Rectangle list = { body.x, y + 4, body.width, end_y - y - 4 };
+    if (list.height < 1.0f) {
         return;
     }
-    bool const all_fit = form->task_count <= line_count && !form->links_truncated;
-    int32_t shown = line_count - 1;
-    if (all_fit) {
-        shown = form->task_count;
+    float content_height = form_target_tasks_height(fonts, form, list.width);
+    if (content_height > list.height) {
+        // The cards narrow to make room for the scroll bar, which can make them taller.
+        list.width -= SCROLLBAR_GAP_PIXELS;
+        content_height = form_target_tasks_height(fonts, form, list.width);
     }
-    for (int32_t i = 0; i < shown; i++) {
+    scroll_update(&form->targets_scroll, list, content_height, true);
+    draw_panel_form_target_tasks_list(app, list);
+    draw_scrollbar(list, content_height, form->targets_scroll.offset_pixels);
+}
+
+/**
+ * Height of the linked tasks' cards stacked with their gaps, and a line after them that says
+ * when more tasks are linked than were loaded.
+ */
+static float form_target_tasks_height(Fonts const *fonts, Form const *form, float card_width) {
+    assert(card_width > 0.0f);
+    assert(form->task_count > 0);
+    assert(form->task_count <= LINK_COUNT_MAX);
+
+    float height = 0.0f;
+    for (int32_t i = 0; i < form->task_count; i++) {
+        if (i > 0) {
+            height += EVENT_CARD_GAP_PIXELS;
+        }
+        height += event_card_height(fonts, &form->tasks[i].task, false, card_width);
+    }
+    if (form->links_truncated) {
+        height += EVENT_CARD_GAP_PIXELS + TEXT_LINE_HEIGHT_PIXELS_SMALL;
+    }
+    return height;
+}
+
+/**
+ * Draws the cards moved up by the scroll and clipped to the list. Controls are locked while the
+ * list is dragged, and while the pointer is outside the list, as in draw_panel_events_list. What
+ * a card's controls ask for is done after the cards, because it reloads or closes the form.
+ */
+static void draw_panel_form_target_tasks_list(App *app, Rectangle list) {
+    Form *form = &app->form;
+    assert(list.height > 0.0f);
+
+    Scroll const *scroll = &form->targets_scroll;
+    bool const locked = scroll->dragging || !CheckCollisionPointRec(GetMousePosition(), list);
+    bool const locked_before = GuiIsLocked();
+    if (locked) {
+        GuiLock();
+    }
+    app->fonts.clip = list;
+    app->fonts.clipping = true;
+    scissor_begin(&app->fonts, list.x, list.y, list.width, list.height);
+
+    int32_t toggled_index = -1;
+    int32_t opened_index = -1;
+    float y = list.y - scroll->offset_pixels;
+    for (int32_t i = 0; i < form->task_count; i++) {
         Linked_Task const *task = &form->tasks[i];
-        float const line_y = y + 4 + (float)i * line;
-        // In the task's own color, as on the calendar, so that it is easy to find there.
-        Color color = event_color(&(Event){ .id = task->task_id, .kind = EVENT_KIND_TASK },
-                                  app_now(app));
-        draw_check_mark((Rectangle){ body.x, line_y + 3, 12, 12 }, task->done, color);
-        scissor_begin(fonts, body.x + 20, line_y, body.width - 20, line);
-        Color title_color = normal;
-        if (task->done) {
-            title_color = dim;
+        float const card_height = event_card_height(&app->fonts, &task->task, false, list.width);
+        Rectangle const card = { list.x, y, list.width, card_height };
+        y += card_height + EVENT_CARD_GAP_PIXELS;
+        // Cards scrolled wholly out of the list can be neither seen nor clicked.
+        if (!CheckCollisionRecs(card, list)) {
+            continue;
         }
-        draw_text(&fonts->small, str_from_cstr(task->title), body.x + 20, line_y, title_color);
-        scissor_end(fonts);
-    }
-    if (!all_fit) {
-        char const *others = "";
-        if (form->links_truncated) {
-            others = ", and others not loaded";
+        bool toggled = false;
+        bool opened = false;
+        draw_panel_form_target_task_card(app, task, card, &toggled, &opened);
+        if (toggled) {
+            toggled_index = i;
         }
-        char text[TEXT_LINE_SIZE] = "";
-        snprintf(text, sizeof(text), "+%" PRId32 " more%s", form->task_count - shown, others);
-        draw_text(&fonts->small, str_from_cstr(text), body.x + 20, y + 4 + (float)shown * line,
-                  dim);
+        if (opened) {
+            opened_index = i;
+        }
     }
+    if (form->links_truncated) {
+        draw_text(&app->fonts.small, STR("More tasks are linked than are shown."), list.x, y,
+                  style_color(TEXT_COLOR_DISABLED));
+    }
+
+    app->fonts.clipping = false;
+    EndScissorMode();
+    if (locked && !locked_before) {
+        GuiUnlock();
+    }
+    if (opened_index >= 0) {
+        app_form_goto_task(app, &form->tasks[opened_index].task);
+    } else if (toggled_index >= 0) {
+        app_form_task_set_done(app, &form->tasks[toggled_index]);
+    }
+}
+
+/**
+ * One task as the calendar's card shows it: a stripe in its color, a check box, its title and
+ * the lines below it, with an arrow at the right. A change of the check box sets *toggled, a
+ * click on the arrow sets *opened.
+ */
+static void draw_panel_form_target_task_card(App *app, Linked_Task const *task, Rectangle card,
+                                             bool *toggled, bool *opened) {
+    Rectangle const checkbox = { card.x + 16, card.y + 8, 16, 16 };
+    Rectangle const arrow = { card.x + card.width - 40, card.y + 6, 32, 24 };
+    Vector2 const mouse = GetMousePosition();
+    bool const hovered = CheckCollisionPointRec(mouse, card);
+
+    draw_panel_event_card_frame(app, &task->task, card, hovered, false, false);
+    draw_panel_event_card_title(app, &task->task, card, task->done);
+    draw_panel_event_card_details(&app->fonts, &task->task, app_now(app), card);
+    bool checked = task->done;
+    GuiCheckBox(checkbox, NULL, &checked);
+    *toggled = checked != task->done;
+
+    *opened = GuiButton(arrow, "");
+    if (CheckCollisionPointRec(mouse, arrow)) {
+        app->cursor = APP_CURSOR_HAND;
+    }
+    // An arrow pointing left, drawn because the font may lack a glyph for one.
+    Color const color = style_color(TEXT_COLOR_NORMAL);
+    Vector2 const middle = { arrow.x + arrow.width / 2, arrow.y + arrow.height / 2 };
+    DrawLineEx((Vector2){ middle.x - 8, middle.y }, (Vector2){ middle.x + 8, middle.y }, 2.0f,
+               color);
+    DrawLineEx((Vector2){ middle.x - 8, middle.y }, (Vector2){ middle.x - 2, middle.y - 6 },
+               2.0f, color);
+    DrawLineEx((Vector2){ middle.x - 8, middle.y }, (Vector2){ middle.x - 2, middle.y + 6 },
+               2.0f, color);
+}
+
+/**
+ * Checks off a task of the open target, or unchecks it, and shows the result: the form's list
+ * is loaded again, and so are the calendar's events, whose target may now be done.
+ */
+static void app_form_task_set_done(App *app, Linked_Task const *task) {
+    Form *form = &app->form;
+    assert(form->open);
+    assert(task->task.id > 0);
+
+    bool const done = !task->done;
+    Date const occurrence_start = date_from_day_number(task->occurrence_start_day);
+    if (!backend_set_task_done(app->backend, task->task.id, occurrence_start, done)) {
+        backend_error_copy(app->backend, form->error, sizeof(form->error));
+        return;
+    }
+    form->error[0] = '\0';
+    app->events_stale = true;
+    char const *outcome = "Not done:";
+    if (done) {
+        outcome = "Done:";
+    }
+    snprintf(app->status, sizeof(app->status), "%s \"%s\".", outcome, task->task.title);
+    app_form_load_links(app);
+}
+
+/**
+ * Closes the form and shows the day the task starts on, with the task focused in the list. What
+ * was typed in the form and not saved is lost, as when it is closed any other way.
+ */
+static void app_form_goto_task(App *app, Event const *task) {
+    assert(task->kind == EVENT_KIND_TASK);
+
+    // Copied first, because task points into the form, whose list is loaded again when it opens.
+    Event const copy = *task;
+    form_close(&app->form);
+    app->event_delete_id = 0;
+    app_select(app, copy.start_date);
+    app->event_focused_id = copy.id;
+    app->panel_reveal_focused = true;
 }
 
 /**

@@ -23,8 +23,9 @@ enum {
     // Raised whenever a message changes shape, so that old apps say so instead of misreading.
     // 2 added the links between problems and the tasks that solve them, 3 whether a problem is
     // done to each event, 4 opportunities as link targets beside problems, and 5 the list of
-    // every task for the Tasks view, and 6 the deadline of a task.
-    PROTOCOL_VERSION = 6,
+    // every task for the Tasks view, 6 the deadline of a task, and 7 the whole task with each
+    // task linked to a target.
+    PROTOCOL_VERSION = 7,
     PROTOCOL_PORT_DEFAULT = 47800,
     // UDP port where the desktop app answers phones looking for it on the local network.
     PROTOCOL_DISCOVERY_PORT = 47801,
