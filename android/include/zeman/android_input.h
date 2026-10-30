@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <pthread.h>
+
 #include <android/input.h>
 
 struct android_app;
@@ -11,9 +13,10 @@ struct android_app;
 // Typing on Android, which raylib leaves out: raylib turns the on-screen keyboard's key events
 // into key presses, but never into characters, and never shows the keyboard.
 //
-// Characters are worked out from each key event's key code and shift state, as on a US
-// keyboard, so letters, digits and common punctuation work; letters outside ASCII, which
-// keyboards send another way, do not.
+// The on-screen keyboard's text comes from MainActivity.java as Unicode code points, so any
+// character the keyboard types arrives, such as a-umlaut on a Finnish keyboard. Keys of a
+// hardware keyboard are worked out from each key event's key code and shift state, as on a US
+// keyboard, so only ASCII comes that way.
 
 enum {
     // Characters typed within one frame, far more than anyone types that fast.
@@ -29,6 +32,8 @@ typedef struct Android_Input {
     int32_t backspace_waiting;
     bool backspace_now;
     bool keyboard_visible;
+    // The keyboard's text arrives on the UI thread, the rest on the app's thread.
+    pthread_mutex_t lock;
 } Android_Input;
 
 /**

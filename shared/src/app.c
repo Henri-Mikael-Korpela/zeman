@@ -153,8 +153,10 @@ enum {
     // Text is never drawn this far from the layout's corner. Small enough that, times the
     // largest phone scale, rounding stays within int32_t and float keeps whole pixels exact.
     TEXT_POSITION_LIMIT_PIXELS = 100000,
-    // Printable ASCII and Latin-1, so that titles with letters such as a-umlaut display.
-    FONT_CODEPOINT_COUNT = (126 - 32 + 1) + (255 - 160 + 1),
+    // Printable ASCII, Latin-1 and Latin Extended-A, so that titles with letters such as
+    // a-umlaut or s-caron display, and the common typographic punctuation and the euro sign.
+    FONT_CODEPOINT_COUNT = (126 - 32 + 1) + (255 - 160 + 1) + (383 - 256 + 1) +
+                           (8212 - 8211 + 1) + (8223 - 8216 + 1) + 1 + 1,
     // raylib draws and measures C strings, so a Str is copied into a buffer of this size for the
     // call. Longer than any text on screen, the longest being a settings line with a file path of
     // up to 1023 bytes, so that nothing is cut off in practice; if it were, the text would be
@@ -934,6 +936,17 @@ static void fonts_load(Fonts *fonts, char const *directory, float scale) {
     for (int32_t codepoint = 160; codepoint <= 255; codepoint++) {
         codepoints[count++] = codepoint;
     }
+    for (int32_t codepoint = 256; codepoint <= 383; codepoint++) {
+        codepoints[count++] = codepoint;
+    }
+    for (int32_t codepoint = 8211; codepoint <= 8212; codepoint++) {  // En and em dash
+        codepoints[count++] = codepoint;
+    }
+    for (int32_t codepoint = 8216; codepoint <= 8223; codepoint++) {  // Curly quotes
+        codepoints[count++] = codepoint;
+    }
+    codepoints[count++] = 8230;  // Ellipsis
+    codepoints[count++] = 8364;  // Euro sign
     assert(count == FONT_CODEPOINT_COUNT);
 
     fonts->loaded = true;

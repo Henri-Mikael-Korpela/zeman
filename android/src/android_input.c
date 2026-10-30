@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <stddef.h>
+#include <pthread.h>
 
 #include <raylib.h>
 
@@ -15,6 +16,7 @@ struct android_app *GetAndroidApp(void);
 
 static int32_t android_input_callback(struct android_app *app, AInputEvent *event);
 static void android_input_push(Android_Input *input, int32_t character);
+static Android_Input *android_input_get(void);
 static int32_t android_key_character(int32_t key_code, int32_t meta_state);
 static void android_keyboard_jni(struct android_app *app, bool visible);
 static bool android_keyboard_find(JNIEnv *env, jobject activity, jobject *manager,
@@ -28,42 +30,42 @@ void android_input_install(Android_Input *input) {
     // The app structure carries the state to the callback and to android_input_char_pressed;
     // raylib leaves userData unused.
     assert(app->userData == NULL);
-    *input = (Android_Input){ .raylib_callback = app->onInputEvent };
+    *input = (Android_Input){ .raylib_callback = app->onInputEvent,
+                             .lock = PTHREAD_MUTEX_INITIALIZER };
     app->userData = input;
     app->onInputEvent = android_input_callback;
 }
 
 int android_input_char_pressed(void) {
-    struct android_app *app = GetAndroidApp();
-    Android_Input *input = NULL;
-    if (app != NULL) {
-        input = app->userData;
-    }
-    if (input == NULL || input->queue_count == 0) {
+    Android_Input *input = android_input_get();
+    if (input == NULL) {
         return 0;
     }
-    int32_t character = input->queue[input->queue_start];
-    input->queue_start = (input->queue_start + 1) % ANDROID_INPUT_QUEUE_SIZE;
-    input->queue_count--;
+    pthread_mutex_lock(&input->lock);
+    int32_t character = 0;
+    if (input->queue_count > 0) {
+        character = input->queue[input->queue_start];
+        input->queue_start = (input->queue_start + 1) % ANDROID_INPUT_QUEUE_SIZE;
+        input->queue_count--;
+    }
+    pthread_mutex_unlock(&input->lock);
     return character;
 }
 
 void android_input_frame_begin(Android_Input *input) {
+    pthread_mutex_lock(&input->lock);
     input->backspace_now = input->backspace_waiting > 0;
     if (input->backspace_now) {
         input->backspace_waiting--;
     }
+    pthread_mutex_unlock(&input->lock);
 }
 
 bool android_input_key_pressed(int key) {
     if (IsKeyPressed(key)) {
         return true;
     }
-    struct android_app *app = GetAndroidApp();
-    Android_Input const *input = NULL;
-    if (app != NULL) {
-        input = app->userData;
-    }
+    Android_Input const *input = android_input_get();
     return key == KEY_BACKSPACE && input != NULL && input->backspace_now;
 }
 
@@ -74,12 +76,6 @@ void android_input_keyboard_set_visible(Android_Input *input, bool visible) {
     input->keyboard_visible = visible;
     struct android_app *app = GetAndroidApp();
     assert(app != NULL);
-    // The native call works on some devices only; the Java call works on the rest.
-    if (visible) {
-        ANativeActivity_showSoftInput(app->activity, ANATIVEACTIVITY_SHOW_SOFT_INPUT_FORCED);
-    } else {
-        ANativeActivity_hideSoftInput(app->activity, 0);
-    }
     android_keyboard_jni(app, visible);
 }
 
@@ -162,17 +158,22 @@ static int32_t android_input_callback(struct android_app *app, AInputEvent *even
                 count = AKeyEvent_getRepeatCount(event);
             }
             for (int32_t i = 0; i < count && i < ANDROID_INPUT_QUEUE_SIZE; i++) {
+                pthread_mutex_lock(&input->lock);
                 android_input_push(input, character);
                 if (AKeyEvent_getKeyCode(event) == AKEYCODE_DEL &&
                     input->backspace_waiting < ANDROID_INPUT_QUEUE_SIZE) {
                     input->backspace_waiting++;
                 }
+                pthread_mutex_unlock(&input->lock);
             }
         }
     }
     return input->raylib_callback(app, event);
 }
 
+/**
+ * Call with the lock held.
+ */
 static void android_input_push(Android_Input *input, int32_t character) {
     if (character == 0 || input->queue_count == ANDROID_INPUT_QUEUE_SIZE) {
         return;
@@ -246,9 +247,20 @@ static int32_t android_key_character(int32_t key_code, int32_t meta_state) {
 }
 
 /**
- * InputMethodManager.showSoftInput or hideSoftInputFromWindow on the activity's window, through
- * JNI, because NativeActivity has no Java code of its own to do it. A failure only means the
- * keyboard did not change, so it is not reported.
+ * The state installed by android_input_install, or NULL before that.
+ */
+static Android_Input *android_input_get(void) {
+    struct android_app *app = GetAndroidApp();
+    if (app == NULL) {
+        return NULL;
+    }
+    return app->userData;
+}
+
+/**
+ * Calls MainActivity.setKeyboardVisible through JNI: the activity's Java code owns the view that
+ * the keyboard types into (see MainActivity.java). A failure only means the keyboard did not
+ * change, so it is not reported.
  */
 static void android_keyboard_jni(struct android_app *app, bool visible) {
     JavaVM *vm = app->activity->vm;
@@ -256,46 +268,75 @@ static void android_keyboard_jni(struct android_app *app, bool visible) {
     if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK || env == NULL) {
         return;
     }
-    jobject manager = NULL;
-    jobject decor_view = NULL;
-    if (!android_keyboard_find(env, app->activity->clazz, &manager, &decor_view)) {
+    jclass activity_class = (*env)->GetObjectClass(env, app->activity->clazz);
+    if (jni_failed(env, activity_class)) {
         goto detach;
     }
-    jclass manager_class = (*env)->FindClass(env, "android/view/inputmethod/InputMethodManager");
-    if (jni_failed(env, manager_class)) {
+    jmethodID set_visible = (*env)->GetMethodID(env, activity_class, "setKeyboardVisible", "(Z)V");
+    if (jni_failed(env, set_visible)) {
         goto detach;
     }
-    if (visible) {
-        jmethodID show = (*env)->GetMethodID(env, manager_class, "showSoftInput",
-                                             "(Landroid/view/View;I)Z");
-        if (jni_failed(env, show)) {
-            goto detach;
-        }
-        (*env)->CallBooleanMethod(env, manager, show, decor_view, 0);
-    } else {
-        jclass view_class = (*env)->FindClass(env, "android/view/View");
-        if (jni_failed(env, view_class)) {
-            goto detach;
-        }
-        jmethodID get_token = (*env)->GetMethodID(env, view_class, "getWindowToken",
-                                                  "()Landroid/os/IBinder;");
-        if (jni_failed(env, get_token)) {
-            goto detach;
-        }
-        jobject token = (*env)->CallObjectMethod(env, decor_view, get_token);
-        jmethodID hide = (*env)->GetMethodID(env, manager_class, "hideSoftInputFromWindow",
-                                             "(Landroid/os/IBinder;I)Z");
-        if (jni_failed(env, token) || jni_failed(env, hide)) {
-            goto detach;
-        }
-        (*env)->CallBooleanMethod(env, manager, hide, token, 0);
-    }
+    (*env)->CallVoidMethod(env, app->activity->clazz, set_visible, (jboolean)visible);
     if ((*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
     }
 // The one cleanup label: every path must detach the thread it attached.
 detach:
     (*vm)->DetachCurrentThread(vm);
+}
+
+/**
+ * Called by MainActivity's input connection on the UI thread with what the keyboard typed: the
+ * UTF-16 text is queued as Unicode code points, so that letters such as a-umlaut and emoji
+ * arrive, which key events cannot carry.
+ */
+JNIEXPORT void JNICALL Java_com_zeman_mobile_MainActivity_nativeTextTyped(JNIEnv *env, jclass clazz,
+                                                                          jstring text) {
+    (void)clazz;
+    Android_Input *input = android_input_get();
+    if (input == NULL || text == NULL) {
+        return;
+    }
+    jsize const length = (*env)->GetStringLength(env, text);
+    jchar const *units = (*env)->GetStringChars(env, text, NULL);
+    if (units == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&input->lock);
+    for (jsize i = 0; i < length; i++) {
+        int32_t code_point = units[i];
+        bool const high = code_point >= 0xD800 && code_point <= 0xDBFF;
+        if (high && i + 1 < length && units[i + 1] >= 0xDC00 && units[i + 1] <= 0xDFFF) {
+            code_point = 0x10000 + ((code_point - 0xD800) << 10) + (units[i + 1] - 0xDC00);
+            i++;
+        } else if (code_point >= 0xD800 && code_point <= 0xDFFF) {
+            continue;  // A lone surrogate is no character.
+        }
+        // A new line is not typed text: the keyboard's Enter arrives as a key event.
+        if (code_point != '\n') {
+            android_input_push(input, code_point);
+        }
+    }
+    pthread_mutex_unlock(&input->lock);
+    (*env)->ReleaseStringChars(env, text, units);
+}
+
+/**
+ * Called by MainActivity's input connection when the keyboard deletes text before the cursor.
+ */
+JNIEXPORT void JNICALL Java_com_zeman_mobile_MainActivity_nativeBackspace(JNIEnv *env, jclass clazz,
+                                                                          jint count) {
+    (void)env;
+    (void)clazz;
+    Android_Input *input = android_input_get();
+    if (input == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&input->lock);
+    for (jint i = 0; i < count && input->backspace_waiting < ANDROID_INPUT_QUEUE_SIZE; i++) {
+        input->backspace_waiting++;
+    }
+    pthread_mutex_unlock(&input->lock);
 }
 
 /**

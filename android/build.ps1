@@ -239,6 +239,30 @@ function New-LauncherIcons() {
     return $resources
 }
 
+# Compiles the Java activity (MainActivity.java) and converts it to Android's dex format. Returns
+# the classes.dex file.
+function Build-Dex {
+    Write-Host 'Compiling the Java activity...'
+    $buildTools = Join-Path $SdkDir "build-tools\$BuildToolsVersion"
+    $androidJar = Join-Path $SdkDir "platforms\android-$PlatformVersion\android.jar"
+    $classDir = Join-Path $BuildDir 'java-classes'
+    $dexDir = Join-Path $BuildDir 'dex'
+    foreach ($directory in @($classDir, $dexDir)) {
+        if (Test-Path $directory) { Remove-Item -Recurse -Force $directory }
+        New-Item -ItemType Directory -Force $directory | Out-Null
+    }
+    $sources = Get-ChildItem (Join-Path $AndroidDir 'java') -Recurse -Filter '*.java' |
+        ForEach-Object { $_.FullName }
+    Invoke-Tool (Join-Path $JdkDir 'bin\javac.exe') (@(
+        '-source', '8', '-target', '8', '-Xlint:-options', '-Werror',
+        '-classpath', $androidJar, '-d', $classDir) + $sources)
+    $classes = Get-ChildItem $classDir -Recurse -Filter '*.class' | ForEach-Object { $_.FullName }
+    $env:JAVA_HOME = $JdkDir
+    Invoke-Tool (Join-Path $buildTools 'd8.bat') (@(
+        '--min-api', "$MinSdkVersion", '--lib', $androidJar, '--output', $dexDir) + $classes)
+    return (Join-Path $dexDir 'classes.dex')
+}
+
 function Build-Apk([string]$NativeLibrary) {
     Write-Host 'Packaging the APK...'
     $buildTools = Join-Path $SdkDir "build-tools\$BuildToolsVersion"
@@ -266,12 +290,14 @@ function Build-Apk([string]$NativeLibrary) {
         '--min-sdk-version', "$MinSdkVersion",
         '--target-sdk-version', $PlatformVersion
     )
-    # aapt2 packages resources only, so the native library is added to the zip here.
+    # aapt2 packages resources only, so the native library and the Java code are added to the zip here.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::Open($unaligned, 'Update')
     try {
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
             $zip, $NativeLibrary, "lib/$Abi/libmain.so") | Out-Null
+        [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $zip, (Build-Dex), 'classes.dex') | Out-Null
     } finally {
         $zip.Dispose()
     }

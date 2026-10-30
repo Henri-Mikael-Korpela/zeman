@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<!-- A NativeActivity app: all code is the C library libmain.so, so there is no Java code
-     (hasCode="false"). Portrait only, because the phone layout is built for it. Cleartext
+<!-- A NativeActivity app: the code is the C library libmain.so, plus a small Java activity that
+     passes the keyboard's text to it (MainActivity.java). Portrait only, because the phone layout is built for it. Cleartext
      traffic is allowed because the app talks plain TCP to the desktop on the local network. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.zeman.mobile"
@@ -17,14 +17,14 @@
     <application
         android:label="Zeman"
         android:icon="@mipmap/ic_launcher"
-        android:hasCode="false"
+        android:hasCode="true"
         android:usesCleartextTraffic="true"
         android:allowBackup="false"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <!-- A dark system theme, so that the window shown before the first frame, the status
              bar and the navigation bar match the app's dark theme instead of flashing white. -->
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="com.zeman.mobile.MainActivity"
             android:exported="true"
             android:screenOrientation="portrait"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|screenLayout"
