@@ -416,6 +416,9 @@ typedef struct Timeline_Hit {
     int64_t event_id;    // 0 when the pointer is over no block
     int32_t day_number;  // Day of the column the block is in
     int32_t part;        // Block_Part
+    // Over the check box of a task's block, which marks the task done instead of starting a
+    // drag. Never while zoomed, where the blocks are not drawn as they are laid out.
+    bool on_task_checkbox;
 } Timeline_Hit;
 
 // The bar of a day cell under the pointer, found while the cell is drawn.
@@ -1888,6 +1891,13 @@ static void draw_timeline(App *app, Layout const *layout, int32_t first_day) {
     // After the columns, whose press selects the day and so clears the focus.
     if (app->timeline_hit.event_id != 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         app_focus_item(app, app->timeline_hit.event_id);
+        // A block holds one day's occurrence of a task, which starts on that day.
+        if (app->timeline_hit.on_task_checkbox) {
+            Event const *task = app_event_find(app, app->timeline_hit.event_id);
+            assert(task != NULL);
+            int32_t const start_day = app->timeline_hit.day_number;
+            app_task_set_done(app, task, start_day, !app_task_done(app, task->id, start_day));
+        }
     }
     timeline_cursor_update(app);
     draw_timeline_hours(app, layout, top);
@@ -2668,6 +2678,7 @@ static Timeline_Hit timeline_hit_test(App const *app, Layout const *layout, floa
             }
             hit.event_id = event->id;
             hit.day_number = first_day + column;
+            hit.on_task_checkbox = false;
             continue;
         }
         if (!CheckCollisionPointRec(pointer, block)) {
@@ -2675,6 +2686,11 @@ static Timeline_Hit timeline_hit_test(App const *app, Layout const *layout, floa
         }
         hit.event_id = event->id;
         hit.day_number = first_day + column;
+        // The same area as on a day cell's bar, where draw_event_label puts the check box.
+        Rectangle const checkbox_area = { block.x, block.y, 22,
+                                          fminf(block.height, (float)EVENT_BAR_HEIGHT_PIXELS) };
+        hit.on_task_checkbox = event->kind == EVENT_KIND_TASK &&
+                               CheckCollisionPointRec(pointer, checkbox_area);
         if (pointer.y < block.y + grab) {
             hit.part = BLOCK_PART_TOP;
         } else if (pointer.y >= block.y + block.height - grab) {
@@ -2695,7 +2711,9 @@ static void timeline_drag_update(App *app, Layout const *layout, float top) {
     Timeline_Drag *drag = &app->timeline_drag;
     Timeline_Hit const *hit = &app->timeline_hit;
     Vector2 const pointer = GetMousePosition();
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && hit->event_id != 0 && !app->form.open) {
+    // A press on a task's check box is a click, not the start of a drag.
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && hit->event_id != 0 && !app->form.open &&
+        !hit->on_task_checkbox) {
         assert(hit->part != BLOCK_PART_NONE);
         *drag = (Timeline_Drag){
             .event_id = hit->event_id,
