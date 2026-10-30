@@ -418,6 +418,13 @@ typedef struct Timeline_Hit {
     int32_t part;        // Block_Part
 } Timeline_Hit;
 
+// The bar of a day cell under the pointer, found while the cell is drawn.
+typedef struct Bar_Hit {
+    int64_t event_id;        // 0 when the pointer is over no bar
+    int32_t start_day;       // Start of the occurrence the bar shows
+    bool on_task_checkbox;   // Over the check box of a task's bar, which marks it done
+} Bar_Hit;
+
 // An item dragged on the timeline by an edge, to change that time, or by the rest, to move it.
 // Saved on release; until then only a preview shows where it goes.
 typedef struct Timeline_Drag {
@@ -637,10 +644,11 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
 static void draw_grid_cell_day_number(App const *app, Rectangle cell, Date date, bool in_month);
 static void draw_grid_cell_creation_markers(App const *app, Rectangle cell, int32_t day_number,
                                             Event const *focused);
-static int64_t draw_grid_cell_events(App const *app, Rectangle cell, int32_t day_number,
+static Bar_Hit draw_grid_cell_events(App const *app, Rectangle cell, int32_t day_number,
                                      int32_t column);
 static bool draw_grid_cell_event_bar(App const *app, Event const *event, Rectangle bar_slot,
-                                     int32_t day_number, int32_t start_day, int32_t column);
+                                     int32_t day_number, int32_t start_day, int32_t column,
+                                     bool *on_task_checkbox);
 static void draw_event_label(App const *app, Event const *event, Str label, Rectangle area,
                              bool done);
 static void draw_bar_outline(Rectangle bar, bool starts_here, bool ends_here, Color color);
@@ -3232,15 +3240,22 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
 
     draw_grid_cell_day_number(app, cell, date, in_month);
     draw_grid_cell_creation_markers(app, cell, day_number, focused);
-    int64_t const item_id = draw_grid_cell_events(app, cell, day_number, column);
-    if (item_id != 0) {
+    Bar_Hit const hit = draw_grid_cell_events(app, cell, day_number, column);
+    if (hit.event_id != 0) {
         app->cursor = APP_CURSOR_HAND;
     }
     // A press selects the day, and the item under it too, whose card the panel then rings.
     if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         app_select(app, date);
-        if (item_id != 0) {
-            app_focus_item(app, item_id);
+        if (hit.event_id != 0) {
+            app_focus_item(app, hit.event_id);
+        }
+        // A press on a task's check box also marks the occurrence on this bar done, or not.
+        if (hit.on_task_checkbox) {
+            Event const *task = app_event_find(app, hit.event_id);
+            assert(task != NULL);
+            app_task_set_done(app, task, hit.start_day,
+                              !app_task_done(app, task->id, hit.start_day));
         }
     }
 }
@@ -3325,18 +3340,18 @@ static void draw_grid_cell_creation_markers(App const *app, Rectangle cell, int3
 }
 
 /**
- * Returns the id of the item whose bar the pointer is over, or 0.
+ * Returns the bar the pointer is over, with a zero event_id when there is none.
  */
-static int64_t draw_grid_cell_events(App const *app, Rectangle cell, int32_t day_number,
+static Bar_Hit draw_grid_cell_events(App const *app, Rectangle cell, int32_t day_number,
                                      int32_t column) {
     float const slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
     float top = cell.y + CELL_TOP_LINE_PIXELS;
     int32_t slot_count =
         (int32_t)((cell.y + cell.height - CELL_BOTTOM_MARGIN_PIXELS - top) / slot_height);
     if (slot_count <= 0) {
-        return 0;
+        return (Bar_Hit){ 0 };
     }
-    int64_t hovered_id = 0;
+    Bar_Hit hit = { 0 };
 
     int32_t overlap_count = 0;
     for (int32_t i = 0; i < app->event_count; i++) {
@@ -3368,8 +3383,10 @@ static int64_t draw_grid_cell_events(App const *app, Rectangle cell, int32_t day
             if (event_occurrence_on_day(event, day_number, &start_day)) {
                 Rectangle slot = { cell.x, top + (float)bar_index * slot_height, cell.width,
                                    EVENT_BAR_HEIGHT_PIXELS };
-                if (draw_grid_cell_event_bar(app, event, slot, day_number, start_day, column)) {
-                    hovered_id = event->id;
+                bool on_task_checkbox = false;
+                if (draw_grid_cell_event_bar(app, event, slot, day_number, start_day, column,
+                                             &on_task_checkbox)) {
+                    hit = (Bar_Hit){ event->id, start_day, on_task_checkbox };
                 }
                 bar_index++;
             }
@@ -3381,17 +3398,20 @@ static int64_t draw_grid_cell_events(App const *app, Rectangle cell, int32_t day
         draw_text(&app->fonts.small, str_from_cstr(more), cell.x + 6,
                   top + (float)bar_count * slot_height + 2, style_color(TEXT_COLOR_NORMAL));
     }
-    return hovered_id;
+    return hit;
 }
 
 /**
  * start_day is the start of the occurrence that covers day_number. Returns whether the pointer
- * is over the bar.
+ * is over the bar, and sets *on_task_checkbox when it is over the check box of a task, which is
+ * drawn only where the bar is labelled. The hit area is wider than the box, to be easy to press.
  */
 static bool draw_grid_cell_event_bar(App const *app, Event const *event, Rectangle bar_slot,
-                                     int32_t day_number, int32_t start_day, int32_t column) {
+                                     int32_t day_number, int32_t start_day, int32_t column,
+                                     bool *on_task_checkbox) {
     assert(start_day <= day_number);
 
+    *on_task_checkbox = false;
     bool const task = event->kind == EVENT_KIND_TASK;
     bool const done = task && app_task_done(app, event->id, start_day);
     Color const color = event_color(event, app_now(app));
@@ -3423,6 +3443,10 @@ static bool draw_grid_cell_event_bar(App const *app, Event const *event, Rectang
     // Label the first day and the start of each week, where the eye starts reading a row.
     if (!starts_here && column != 0) {
         return hovered;
+    }
+    if (task) {
+        Rectangle const checkbox_area = { bar.x, bar.y, 22, bar.height };
+        *on_task_checkbox = CheckCollisionPointRec(GetMousePosition(), checkbox_area);
     }
     char label[TEXT_LINE_SIZE] = "";
     // The time only where the occurrence starts; later days' bars continue it.
