@@ -825,7 +825,17 @@ void app_frame(App *app, Rectangle area) {
     // 1 and only the offset matters.
     BeginMode2D((Camera2D){ .offset = { area.x, area.y }, .target = { 0, 0 }, .rotation = 0,
                             .zoom = scale });
+    int32_t const range_before = app->range;
+    Date const selected_before = app->selected;
     draw_header(app, &layout);
+    // The header's toggle, or its arrows, may have changed the range or the selection after the
+    // layout and the visible dates were worked out. Drawing the grid with the old ones for one
+    // frame shows a month's cells in a week's layout, or the reverse, as a flash.
+    if (app->range != range_before || !date_equal(app->selected, selected_before)) {
+        app_sync(app);
+        layout = layout_compute(area.width / scale, area.height / scale, app->form.open,
+                                app->range, app_untimed_count_max(app));
+    }
     if (layout.grid_visible) {
         draw_weekdays(&app->fonts, &layout, app->visible_first);
         draw_grid(app, &layout);
