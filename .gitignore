@@ -2,6 +2,8 @@ build/
 # The packaged release folder (desktop/release/), from `cmake --install` with the mingw-package
 # preset: a build artifact meant to be copied out and distributed, not committed.
 release/
+# The zip made by distribute-desktrop-release-win32.ps1.
+dist/
 external/
 # Android: downloaded JDK, SDK and NDK; build output; the signing key made on first build.
 android/tools/
