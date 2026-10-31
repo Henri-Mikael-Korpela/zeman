@@ -2,66 +2,81 @@
 
 ![Zeman Desktop screenshot](zeman-desktop-screenshot.png)
 
+## Contents
+
+- [Introduction](#introduction)
+- [Features](#features)
+- [Getting started](#getting-started)
+  - [Supported systems](#supported-systems)
+  - [Desktop app (Windows)](#desktop-app-windows)
+  - [Android app](#android-app)
+- [Documentation](#documentation)
+
 ## Introduction
 
 **Zeman** (Hebrew for "period" (of time)) is a practical offline calendar and task manager for Windows and Android. Instead of syncing your events, tasks and problems to a cloud service, it keeps them on your own Windows computer and serves them to your desktop and Android devices over the local network.
 
 ## Features
 
-- Add events, opportunities, problems, tasks to your calendar.
-- Link tasks to problems they solve, and see which problems are solved or still need work.
-- View calendar items by month, week or day.
-- Create repeating events and tasks.
-- See added problems and their flow.
+- **Calendar:** add events, opportunities, problems and tasks, and view them by month, week or day, with ISO 8601 week numbers.
+- **Repeating items:** events and tasks repeat every week, every X days, every month or every year, optionally until a date.
+- **Tasks:** check tasks off (each occurrence of a repeating task separately), give them a deadline, and see them in four columns: Overdue, Today, Upcoming and Completed.
+- **Problems:** link tasks to the problems they solve, and see which problems are solved or still need work, in four columns from No planned tasks to Completed.
+- **Fast time editing:** draw a new event on the hours, or drag an item's edges or body to change its time; a five-minute zoom makes small steps easy.
+- **Locations and descriptions:** events and tasks can have a shared location and a short description.
+- **Android companion:** the phone shows and edits the desktop's calendar, and changes appear on both within about a second. Connect by scanning a QR code, by picking the desktop the phone finds on the network, or by typing its address.
+- **Private by design:** your data lives in one SQLite file on your computer, and devices talk directly over your local network; nothing goes through the internet or a cloud service.
+- **Portable:** build a self-contained release folder that runs on any Windows 10 or 11 computer, with no installer.
 
-## Project contents
+## Getting started
 
-This repository contains the source code for both the desktop and Android apps, which are written in C using Raylib and RayGUI. User data is stored in SQLite database.
+### Supported systems
 
-### Structure
+| | Building | Running |
+| --- | --- | --- |
+| Desktop app | Windows 10 or 11 | Windows 10 or 11 |
+| Android app | Windows 10 or 11 | 64-bit ARM phones with Android 7.0 or newer |
 
-- `desktop/` The desktop app (Windows).
-- `android/` The Android app. It shows and edits the desktop app's calendar over the network; it keeps no data of its own.
-- `shared/` Code both apps compile: the user interface, dates, events, and the network protocol and client.
-- `assets/` Contains App icons.
-- `tests/` Tests of shared code that need no window or database (`str_test`, `wire_test`).
-- `tools/` Small programs that help with developing the project and are not shipped with the apps; see [Code Digger](#code-digger).
+Both builds are written for Windows: the desktop build uses MinGW-w64 and CMake, and the Android build is a PowerShell script that uses the Windows build of the Android NDK. Building on Linux or macOS is not supported, and the desktop app does not run there. The Android app only needs a Windows computer to build it; the phone runs the finished APK.
 
-Each of `desktop/`, `android/` and `shared/` has `src/` for its .c files and `include/zeman/` for its headers, which every file includes as `<zeman/app.h>`, `<zeman/server.h>` and so on, so that project headers are told apart from raylib's and the system's. The desktop build (`desktop/CMakeLists.txt`) and the Android build (`android/build.ps1`) each put their own `include` and `shared/include` on the compiler's include path; a new header goes in one of those folders.
+Both builds start with the same one-time step, which they run themselves: CMake downloads raylib, raygui, SQLite, the font and the QR code libraries into `external/`. After that they work offline. See [Dependencies](docs/architecture.md#dependencies-and-their-management) for the list.
 
-### Dependencies and their management
+### Desktop app (Windows)
 
-`cmake/dependencies.cmake` downloads
-- raylib 5.5,
-- raygui 4.0,
-- SQLite 3.51.0,
-- the [Rubik](https://fonts.google.com/specimen/Rubik) font (with its SIL Open Font License), 
-- Nayuki's [QR code generator](https://github.com/nayuki/QR-Code-generator) 1.8.0 and the
-- [quirc](https://github.com/dlbeer/quirc) 1.2 QR decoder into `external/`, once; after that both builds are offline.
+**Prerequisites**
 
-## Desktop app
+- A C compiler: MinGW-w64 GCC (tested with GCC 16), on your `PATH`.
+- CMake 3.21 or newer (tested with 4.4), on your `PATH`.
 
-### Prerequisites
+**Build and run**
 
-- C compiler (tested with MinGW-w64 GCC 16)
-- CMake 3.21 or newer (tested on version 4.4)
+The quickest way, from the repository root in PowerShell:
 
-### Building
+```powershell
+.\run.ps1
+```
+
+It configures and builds the Release preset, and starts the app. Or do the steps yourself, in any shell:
 
 ```sh
 cd desktop
 cmake --preset mingw-release
 cmake --build --preset mingw-release
+build\release-win32\zeman.exe
 ```
 
-The executable is written to `desktop/build/release-win32/zeman.exe`, with the fonts it needs in `desktop/build/release-win32/fonts`. This Release build has optimizations on (CMake's default Release flags, `-O3` with MinGW) but keeps assertions compiled in, as TIGER_STYLE asks; it opens no console window. Use the `mingw-debug` preset for a debug build in `desktop/build/debug-win32/`, built unoptimized and with a console window attached, so that `printf`/`TraceLog` output and asserts are easy to see while developing. Both of these keep the database (`zeman.db`) at the repository root (see Usage below), so `desktop/build/` can be deleted at any time without losing events. Without presets, pass the generator explicitly, otherwise CMake on Windows falls back to NMake:
+The executable is `desktop/build/release-win32/zeman.exe`, with the fonts it needs next to it in `fonts/`. The Release build has optimizations on but keeps assertions compiled in, and opens no console window. The first start creates the database, `zeman.db`, in the repository root; `desktop/build/` can be deleted at any time without losing your data.
+
+For development, use the `mingw-debug` preset instead (`cmake --preset mingw-debug`, `cmake --build --preset mingw-debug`). It builds unoptimized, in `desktop/build/debug-win32/`, with a console window attached, so that `printf` and `TraceLog` output and failed assertions are easy to see.
+
+Without presets, pass the generator explicitly, because CMake on Windows otherwise falls back to NMake:
 
 ```sh
 cmake -S desktop -B desktop/build/release-win32 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build desktop/build/release-win32
 ```
 
-#### Building a release folder to distribute
+**Build a release folder to distribute**
 
 ```sh
 cd desktop
@@ -70,129 +85,52 @@ cmake --build --preset mingw-package
 cmake --install build/package-win32
 ```
 
-This writes `desktop/release/zeman.exe` and `desktop/release/fonts/`. Unlike the `mingw-release` preset above, this one turns on `ZEMAN_DATABASE_NEXT_TO_EXECUTABLE`, so `zeman.exe` creates and keeps `zeman.db` next to itself instead of at the repository root. That is what makes `desktop/release/` self-contained: copy the whole folder to any other Windows 10 or 11 computer (by USB drive, zip file, or network share) and double-click `zeman.exe` there — no installer, no separate runtime to install, and no repository needed on that computer. The executable is statically linked against raylib, raygui and SQLite, and its only external dependencies are Windows system DLLs and the Universal CRT, which both Windows 10 and 11 already ship; nothing else needs to be copied alongside it, and `desktop/release/` can be zipped up as-is. Rebuilding the release folder (for a new version) overwrites `zeman.exe` but leaves an existing `zeman.db` there untouched, since `cmake --install` only ever adds the files listed in `desktop/CMakeLists.txt`'s `install()` rules.
+This writes `desktop/release/zeman.exe` and `desktop/release/fonts/`. Here `zeman.db` is created next to `zeman.exe` instead of in the repository root, so the folder is self-contained: copy it to any other Windows 10 or 11 computer (USB drive, zip file, network share) and double-click `zeman.exe`. There is no installer, no runtime to install and no repository needed there. Rebuilding the folder for a new version overwrites `zeman.exe` but leaves an existing `zeman.db` untouched.
 
-`zeman.exe --port PORT` serves phones on another port than 47800, for example when something else uses it; the QR code and the address shown carry the port. `zeman.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, exactly as the phone does; it is a way to try the network side on one computer.
+**Options**
 
-The navigation on the left switches between **Calendar**, **Problems** and **Connected Devices**. Problems shows every problem in four columns, from the least to the most complete: No planned tasks, Planned, Partly completed and Completed, each with how many problems it holds. Tasks shows every task in four columns: Overdue, Today, Upcoming and Completed. A repeating task is shown once, at the occurrence that covers today or the next one, so a missed repeat gives way to the next. Click a task's checkbox to mark it completed, or anywhere else on it to open its day in the calendar. Connected Devices shows the QR code that phones scan to connect, the address to type instead, and the phones connected now.
+- `zeman.exe --port PORT` serves phones on another port than 47800.
+- `zeman.exe --connect ADDRESS[:PORT]` runs the desktop app as a client of another desktop app, the way the phone does.
 
-### Code Digger
+The first time the app serves the network, Windows asks whether to allow it through the firewall: allow it on private networks, or phones cannot connect.
 
-`tools/code_digger.c` is a small command-line tool that analyses the project's C code. By default it counts the calls of C standard library functions, so that you can see which ones the code leans on. It counts a name from the C11 standard library (`assert` and `va_start` included) when it is followed by an opening parenthesis; calls of raylib, SQLite and the project's own functions are not counted. Comments, string and character literals and `#include` lines are skipped, and so is a call through a struct member, such as `ops.remove(`. It reads the `.c` and `.h` files of the project, except those in `external/`, `.git`, build folders, `release/` and the downloaded `android/tools`.
+### Android app
 
-It is built on request, with the same compiler and CMake as the desktop app, and is not part of the normal build:
+The Android app is built on Windows, then installed on the phone.
 
-```sh
-cmake --build desktop/build/debug-win32 --target code_digger
-desktop/build/debug-win32/code_digger.exe .
-```
+**Prerequisites**
 
-The argument is the project's folder and may be left out when running from it. Use whichever build folder you have configured instead of `debug-win32`; it must exist already, from the build steps above. The output has one line per function, the most called first and by name among equals, as `name (count)`, followed by how many functions were called and in how many files, for example:
+- Windows 10 or 11 with PowerShell, which comes with Windows.
+- CMake 3.21 or newer on your `PATH` (the same as for the desktop app). It is the only tool you install yourself.
+- About 1.5 GB of free disk space and an internet connection for the first build. A JDK, the Android SDK and the NDK are downloaded into `android/tools/`, and nothing is installed system-wide.
 
-```
-assert (707)
-snprintf (174)
-strcmp (25)
-...
+**Build**
 
-33 standard library functions called, in 50 files.
-```
-
-#### Dead code: `--dead-code`
-
-```sh
-desktop/build/debug-win32/code_digger.exe --dead-code .
-```
-
-With `--dead-code` it lists what nothing uses, under a heading for each kind with the number found: **Unused functions**, **Unused constants** (constants, constant tables and enumeration constants), **Unused macros**, **Unused variables** (those at the top level of a file) and **Unused local variables**. Each line is `file:line  name`, in file order, and a local variable also says which function it is in:
-
-```
-Unused functions (3):
-  shared/include/zeman/bound.h:28  int32_clamp
-  shared/include/zeman/bound.h:41  float_max
-  shared/include/zeman/bound.h:51  float_clamp
-
-6 unused names in 50 files.
-```
-
-A name counts as used when it is mentioned anywhere other than where it is defined or declared, in a body or initializer that is itself needed, so a function that is only called by another unused function is reported too, and so are two functions that only call each other. What is needed is whatever is mentioned outside every function, constant, enumeration and macro (such as in a type or a `static_assert`), `main`, and everything those use in turn. A local variable is reported when its function never mentions its name again.
-
-The tool reads the text, with a simple parser, not the compiler's view of it, so treat the list as leads to check, not as proof:
-
-- A name used only through a macro, or only by code the tool does not read (`external/`, a platform's own code), is reported although it is needed.
-- A macro that only renames a name, such as `#define GetCharPressed android_input_char_pressed`, and a macro with no body, such as an include guard, are never reported, and what the first one names counts as used.
-- Two names alike in different files, such as `view_names`, are one name to the tool, so one use hides an unused twin.
-- Scopes are not told apart: a local variable mentioned again in a nested block counts as used.
-- Types, structure fields and function parameters are not checked.
-
-The compiler's `-Wunused-variable` and `-Wunused-function` already cover the code that is built; this adds constants, enumeration constants, macros, chains of unused functions, and the code that only the other platform builds.
-
-A file that cannot be read, or is larger than 4 MB, is left out and the last line says how many. The tool exits with 1 and a message when a folder cannot be read.
-
-## Android app
-
-### Building
-
-From the `android` folder, on Windows:
+From the `android` folder, in Command Prompt or PowerShell:
 
 ```bat
 build.bat
 ```
 
-The first run downloads a JDK, the Android SDK and the NDK into `android/tools` (about 1.5 GB) and asks you to accept the Android SDK licenses (`build.bat -AcceptLicenses` accepts them without asking). Nothing is installed system-wide; CMake, which the desktop build needs anyway, is the only outside tool. Later builds take seconds.
+The first run asks you to accept the Android SDK licenses; `build.bat -AcceptLicenses` accepts them without asking. Later builds take seconds. The result is `android/build/zeman.apk`.
 
-The result is `android/build/zeman.apk`, for 64-bit ARM phones running Android 7.0 or newer. Copy it to the phone and open it there; Android asks to allow installing apps from that source. The APK is signed with a key made on the first build and kept in `android/keystore/` (not committed); keep it, because Android installs an update only when it is signed with the same key.
+The APK is signed with a key that the first build makes and keeps in `android/keystore/` (not committed). Keep that key: Android installs an update only over an app signed with the same key.
 
-### Connecting
+**Install on the phone**
 
-The phone and the desktop talk directly, within the same local network; nothing goes through the internet.
+1. Copy `zeman.apk` to the phone (USB cable, cloud drive, or any file transfer you use).
+2. Open the file on the phone. Android asks to allow installing apps from that source (for example from your file manager or browser); allow it.
+3. Open **Zeman**. Allow the camera when asked, which is only needed to scan the desktop's QR code.
 
-1. Start the desktop app and open **Connected Devices** in its navigation. The first time, Windows asks whether to allow it through the firewall: allow it on private networks.
-2. Open the app on the phone, on the same Wi-Fi network, and press **Scan QR code** (recommended). Allow the camera when Android asks, and point it at the code on the desktop's screen.
+**Connect to the desktop**
 
-Instead of scanning, type the address shown under the code (also in the desktop's status bar) into the phone. When the phone finds a desktop app on the network by itself, it also offers it with a **Use it** button.
+1. Start the desktop app, open **Connected Devices** in its navigation, and keep the phone on the same Wi-Fi network.
+2. In the phone app, press **Scan QR code** and point the camera at the code on the desktop's screen. Or type the address shown under the code.
 
-The phone remembers the desktop and connects to it at the next start; to change or reconnect to it, open the navigation from the left edge of the screen (tap the arrow on the edge, or drag it out) and choose **Connection settings**, which offer the QR code, a desktop found on the network and the typed address. Changes made on either side appear on the other within about a second.
+See [Connecting a phone](docs/instruction-manual.md#connecting-a-phone) in the manual for more.
 
-The desktop app accepts connections only from local network addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x and 169.254.x.x) and has no password, so anyone on the same local network can use it while it runs.
+## Documentation
 
-On the phone, swipe sideways over the calendar to move to the previous or next month, week or day; Back closes the form. Typing on the phone supports letters, digits and common punctuation, not letters such as a-umlaut.
-
-## Usage
-
-Click or tap an item in the calendar, a bar in a day or a block on the hours, to select it: its day opens in the panel, which scrolls to its card and rings it. On the desktop the pointer turns into a hand over items you can click. A click on the check box at the left of a task's bar, as in a day cell or the untimed rows of a week or day, also marks that occurrence done, or not done; the same goes for a task's block on the hours.
-
-In the week and day views on the desktop, an item on the hours can be changed by dragging: its top or bottom edge (the pointer turns into an up-and-down arrow there) changes its start or end time, and anywhere else on it moves the whole item to another time, or in the week view to another day, keeping its length. The changes snap to quarter hours, or to five minutes with zoom on (press Z); a preview shows the new times while dragging, and the release saves them. A repeating item changes as a whole, as when editing it. Escape cancels a drag. Dragging is off while a form is open, so that the form cannot save old times back over it. Select a day to see its events and tasks in the panel on the right, and use **New event** or **New task** to add one. When a day has more items than fit, scroll the panel with the mouse wheel, or drag it with a finger or the mouse; the bar at its right shows where you are. A task works like an event (dates, optional times, repeats, editing and deleting) and can also be checked off: tick its checkbox on its card. For a repeating task, each occurrence is checked off separately. In the calendar, tasks are outlined bars with a checkbox; done tasks are faded and struck through. The Event/Task toggle in the form switches an item between the two. Start and end dates are `YYYY-MM-DD`, typed in, or chosen from a small calendar that the arrow button at the right of each date field opens (arrows for other months; Escape or a click elsewhere closes it); times are `HH:MM` and optional (leave both empty for an all-day event).
-
-An event can repeat every week, every X days, every month or every year. Monthly and yearly events keep the same date, so an event on the 31st skips months without one, and an event on 29 February appears only in leap years. Each repetition must end before the next one starts. A repeating event can have an optional **Repeat until** date: it is inclusive, so an occurrence that starts on that date still happens, in full, and none start after it. Leave it empty to repeat forever.
-
-A task that does not repeat can have an optional **Deadline**: a date, and optionally a time, in the form's last row, where a repeating task has its Repeat until. It cannot be before the task's start date, and the card shows it as "due" after the dates.
-
-An event or task can have a location: fill in its address, its city, or both. Locations are shared, so every item saved with the same address and city links to the same location, and the card shows it below the dates.
-
-Events and tasks also have an optional one-line description (up to 199 characters). Cards show it under the dates and location, wrapped over up to three lines.
-
-Use **New problem** to record a problem: something that went wrong, with a name and an optional description. A problem is always recorded on the day it is created, whichever day is selected, and keeps that day when edited; it has no times, location or repeat. Problems show in dark red, marked with "!", and an event or task cannot be turned into a problem or back.
-
-Tasks can solve problems. A task's form lists every problem below its fields, under **Problems this task solves**, with how many are checked; check the ones that completing the task solves, and save. The list scrolls when it does not fit. Opening a problem then lists its tasks and its status: **No planned tasks**, **Planned** (tasks linked, none done), **Partly completed** or **Completed**. A task counts as completed once any of its occurrences is checked off. The tasks are shown as cards like the day's list, with their dates, location and description; the check box on a card marks the task done or not done from the problem, and the arrow at the right of the card closes the form and shows the day the task starts on. A completed problem turns green, with a check mark, in the calendar and in the day's list.
-
-To edit an event, click its card: the form opens with its details, and **Save** updates it. A repeating event is edited as a whole, so the form shows the dates of its first occurrence. Editing keeps the original creation time.
-
-To delete an event, press **Delete** on its card and confirm; deleting a repeating event removes all of its repeats. Escape cancels the confirmation.
-
-Each event records when it was created:
-
-- A colored dot in a day cell marks the day an event was created.
-- The dot of the selected event or task is ringed, and its card shows when it was created and how long ago, such as `Created 18 Oct 2026, 20:47 (yesterday)`: minutes and hours for the first hours, then "today", "yesterday", days, "last week", weeks, "last month", months, "last year" and years.
-
-The month view numbers each week in a narrow column on the left, and the week view's title ends with the week's number, as in "19 - 25 October 2026, week 43". Weeks start on Monday and are numbered as ISO 8601 does, where week 1 is the week with the year's first Thursday, so the last days of December can be in week 1 and the first days of January in week 52 or 53.
-
-The **Month**, **Week** and **Day** buttons at the top choose how many days the calendar shows (on a phone, in a row under the header). The arrow buttons, Page Up/Page Down, the mouse wheel over the calendar and sideways swipes on a phone move by that range.
-
-In the week and day views, a white line across today's hours marks the time now and moves on every minute; other days have none.
-
-In the week and day views on the desktop, drag over a day's hours to draw a block. Before you press, a short line under the pointer shows where the block will start, with its time. The block snaps to quarter hours, and on release the form for a new event opens with that day and the block's start and end times (switch it to **Task** in the form if it is one). Until you save, the new item shows on the timeline as a see-through ghost block, labelled "New event" until it has a title; it follows the times, date and repeat you type in the form, and disappears if you cancel. Press Z to toggle drawing in five-minute steps instead: while zoom is on, a round magnifier follows the pointer, with the start line in it, showing every five minutes and the time the edge will get, and the block moves at a quarter of the pointer's speed so that each step is easy to hit. The magnifier also shows the day's existing items at their exact times, and with zoom on you can click, move and drag the edges of items as usual: what the pointer would grab (an edge, or the whole item) is highlighted in the magnifier, and the grab follows the exact times shown there. A block that reaches midnight ends at 23:59. Escape cancels a block while drawing. The mouse wheel scrolls the hours; on a phone, dragging still scrolls them.
-
-Keys: arrows move by a day or a week, Page Up/Page Down move to the previous or next month, week or day, M, W and D switch between month, week and day, Z toggles the five-minute zoom on the hours, Home jumps to today, Tab moves between form fields, and Escape cancels the form. In a form field being typed into, Ctrl+V pastes at the cursor (line breaks become spaces), and Ctrl+C and Ctrl+X copy or cut the whole field, because the text boxes have no selection.
-
-Events are stored in `zeman.db`, an SQLite database in the repository root (`zeman.db`, next to this README), whichever build directory the executable is in. CMake gives the executable that absolute path, so deleting a build directory does not delete the events; moving the repository means building again. The file is not committed, so back it up like any other file you want to keep. Databases from earlier versions are upgraded automatically when opened. A `desktop/release/` build (see "Building a release folder to distribute" above) is the exception: there, `zeman.db` sits next to `zeman.exe` instead, so the whole folder can be copied elsewhere as one self-contained unit.
+- [Instruction manual](docs/instruction-manual.md): how to use Zeman, on the desktop and on the phone.
+- [Architecture](docs/architecture.md): the directory structure, the dependencies, how the data is stored, and the Code Digger development tool.
+- [Programming mindset](docs/programming-mindset.md) and [C programming style guide](docs/c-programming-style-guide.md): how the project is developed.
