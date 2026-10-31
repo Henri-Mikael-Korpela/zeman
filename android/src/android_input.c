@@ -15,6 +15,8 @@
 struct android_app *GetAndroidApp(void);
 
 static int32_t android_input_callback(struct android_app *app, AInputEvent *event);
+static void android_input_command(struct android_app *app, int32_t command);
+static void android_input_wake(Android_Input *input);
 static void android_input_push(Android_Input *input, int32_t character);
 static Android_Input *android_input_get(void);
 static int32_t android_key_character(int32_t key_code, int32_t meta_state);
@@ -30,10 +32,54 @@ void android_input_install(Android_Input *input) {
     // The app structure carries the state to the callback and to android_input_char_pressed;
     // raylib leaves userData unused.
     assert(app->userData == NULL);
+    assert(app->onAppCmd != NULL);
+    // The window and the focus are there already: InitWindow waits for them.
     *input = (Android_Input){ .raylib_callback = app->onInputEvent,
-                             .lock = PTHREAD_MUTEX_INITIALIZER };
+                             .raylib_command = app->onAppCmd,
+                             .lock = PTHREAD_MUTEX_INITIALIZER,
+                             .window_present = app->window != NULL,
+                             .focused = true,
+                             .activity = true };
     app->userData = input;
     app->onInputEvent = android_input_callback;
+    app->onAppCmd = android_input_command;
+}
+
+bool android_input_visible(Android_Input const *input) {
+    return input->window_present && input->focused;
+}
+
+bool android_input_destroy_requested(void) {
+    struct android_app *app = GetAndroidApp();
+    assert(app != NULL);
+    return app->destroyRequested != 0;
+}
+
+bool android_input_activity_take(Android_Input *input) {
+    pthread_mutex_lock(&input->lock);
+    bool activity = input->activity;
+    input->activity = false;
+    pthread_mutex_unlock(&input->lock);
+    return activity;
+}
+
+void android_input_wait(Android_Input *input, int32_t timeout_milliseconds) {
+    (void)input;
+    struct android_app *app = GetAndroidApp();
+    assert(app != NULL);
+    int events = 0;
+    struct android_poll_source *source = NULL;
+    // The first poll waits; the rest only take what has arrived by then, so that events that
+    // came together are read together, as raylib reads them while drawing.
+    int32_t timeout = timeout_milliseconds;
+    int result = 0;
+    while ((result = ALooper_pollOnce(timeout, NULL, &events, (void **)&source)) >= 0) {
+        timeout = 0;
+        if (source != NULL) {
+            source->process(app, source);
+        }
+        source = NULL;
+    }
 }
 
 int android_input_char_pressed(void) {
@@ -147,6 +193,9 @@ detach:
 static int32_t android_input_callback(struct android_app *app, AInputEvent *event) {
     Android_Input *input = app->userData;
     assert(input != NULL);
+    pthread_mutex_lock(&input->lock);
+    input->activity = true;
+    pthread_mutex_unlock(&input->lock);
     if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_KEY) {
         int32_t action = AKeyEvent_getAction(event);
         if (action == AKEY_EVENT_ACTION_DOWN || action == AKEY_EVENT_ACTION_MULTIPLE) {
@@ -169,6 +218,49 @@ static int32_t android_input_callback(struct android_app *app, AInputEvent *even
         }
     }
     return input->raylib_callback(app, event);
+}
+
+/**
+ * Runs raylib's handling of a change of the app's window or focus, which creates and destroys its
+ * graphics, then notes what it means for drawing.
+ */
+static void android_input_command(struct android_app *app, int32_t command) {
+    Android_Input *input = app->userData;
+    assert(input != NULL);
+    input->raylib_command(app, command);
+    switch (command) {
+    case APP_CMD_INIT_WINDOW:
+        input->window_present = true;
+        break;
+    case APP_CMD_TERM_WINDOW:
+        input->window_present = false;
+        break;
+    case APP_CMD_GAINED_FOCUS:
+        input->focused = true;
+        break;
+    case APP_CMD_LOST_FOCUS:
+        input->focused = false;
+        break;
+    default:
+        break;
+    }
+    pthread_mutex_lock(&input->lock);
+    input->activity = true;
+    pthread_mutex_unlock(&input->lock);
+}
+
+/**
+ * For the UI thread, after it queued text: marks activity and wakes the app's thread from its
+ * wait, so that the text shows at once.
+ */
+static void android_input_wake(Android_Input *input) {
+    pthread_mutex_lock(&input->lock);
+    input->activity = true;
+    pthread_mutex_unlock(&input->lock);
+    struct android_app *app = GetAndroidApp();
+    if (app != NULL && app->looper != NULL) {
+        ALooper_wake(app->looper);
+    }
 }
 
 /**
@@ -319,6 +411,7 @@ JNIEXPORT void JNICALL Java_com_zeman_mobile_MainActivity_nativeTextTyped(JNIEnv
     }
     pthread_mutex_unlock(&input->lock);
     (*env)->ReleaseStringChars(env, text, units);
+    android_input_wake(input);
 }
 
 /**
@@ -337,6 +430,7 @@ JNIEXPORT void JNICALL Java_com_zeman_mobile_MainActivity_nativeBackspace(JNIEnv
         input->backspace_waiting++;
     }
     pthread_mutex_unlock(&input->lock);
+    android_input_wake(input);
 }
 
 /**

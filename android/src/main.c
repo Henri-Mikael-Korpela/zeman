@@ -37,7 +37,19 @@ enum {
     // A press that moves this far drags the drawer instead of tapping, because a finger wobbles
     // by a few pixels during a tap.
     DRAWER_DRAG_THRESHOLD_PIXELS = 8,
+    // Frames still drawn after the last touch or key, so that what it started settles: a release
+    // is seen by the frame after it, and the app reacts to it in the next.
+    REDRAW_FRAMES_AFTER_INPUT = 3,
+    // While nothing changes, the app waits this long between looks at the desktop and at the
+    // network. A touch or a key ends the wait at once.
+    IDLE_WAIT_MILLISECONDS = 100,
 };
+
+// The time on screen and the "created ... ago" texts move on, so a frame is drawn this often
+// even when nothing else changed.
+static double const REDRAW_INTERVAL_SECONDS = 1.0;
+// How often the sizes of the system bars are asked again; they are not known at the start.
+static double const BARS_ASK_INTERVAL_SECONDS = 0.5;
 
 // Share of the way the drawer moves each frame, so that it opens or closes in five frames: a
 // twelfth of a second at 60 frames per second, quick but still seen to slide.
@@ -88,6 +100,15 @@ typedef struct Drawer {
     bool open;             // Where the drawer slides to when not dragged
 } Drawer;
 
+// What the last drawn frame showed, to tell when a new frame is needed.
+typedef struct Redraw {
+    double drawn_at_seconds;  // GetTime when the last frame was drawn
+    uint64_t revision;        // Backend revision when the last frame was drawn
+    int32_t frames_pending;   // Frames still to draw for the last input
+    bool connected;           // Connected to the desktop when the last frame was drawn
+    bool desktop_found;       // The connection settings showed a found desktop
+} Redraw;
+
 // Everything the phone app runs. The client and scanner hold large buffers, so this lives in
 // static storage rather than on the stack.
 typedef struct Phone {
@@ -95,14 +116,16 @@ typedef struct Phone {
     Connect_Screen connect;
     Scan_Screen scan;
     Android_Input input;
+    Backend backend;
+    Redraw redraw;
     App *app;
     Drawer drawer;
     float scale;
-    // Heights of the status bar and the navigation bar, in screen pixels, and the frames since
-    // they were last asked for.
+    // Heights of the status bar and the navigation bar, in screen pixels, and when they are
+    // next asked for.
     int32_t bars_top;
     int32_t bars_bottom;
-    int32_t bars_age;
+    double bars_next_ask_seconds;
     View view;
     bool scanning;                   // The QR scan covers the connection settings
     char address[ADDRESS_TEXT_SIZE];  // The desktop in use, as saved, or empty
@@ -110,7 +133,9 @@ typedef struct Phone {
 
 static void phone_frame(Phone *phone);
 static void phone_frame_scan(Phone *phone);
-static void phone_bars_update(Phone *phone);
+static bool phone_bars_update(Phone *phone);
+static bool phone_redraw_needed(Phone *phone);
+static void phone_redraw_record(Phone *phone);
 static void phone_view_set(Phone *phone, View view);
 static void phone_desktop_set(Phone *phone, char const *address);
 static void phone_status(Phone const *phone, char *text, size_t text_size);
@@ -121,6 +146,7 @@ static void settings_save(char const *address);
 static View drawer_update(Drawer *drawer, View current);
 static View drawer_update_tap(Drawer *drawer, View current, Vector2 pointer);
 static bool drawer_is_closed(Drawer const *drawer);
+static bool drawer_is_moving(Drawer const *drawer);
 static Rectangle drawer_item(int32_t index, float x);
 static void drawer_draw(Drawer const *drawer, App const *app, View current, char const *status,
                         float width, float height);
@@ -157,9 +183,9 @@ int main(int argc, char **argv) {
     }
     phone.scale = (float)shorter_side / LAYOUT_WIDTH_PIXELS;
     client_init(&phone.client);
-    Backend backend = client_backend(&phone.client);
+    phone.backend = client_backend(&phone.client);
     App_Config config = { .font_directory = "", .scale = phone.scale, .touch = true };
-    phone.app = app_create(&backend, &config);
+    phone.app = app_create(&phone.backend, &config);
     phone.view = VIEW_CALENDAR;
     if (settings_load(phone.address, sizeof(phone.address))) {
         desktop_choose(&phone.client, phone.app, phone.address);
@@ -168,9 +194,22 @@ int main(int argc, char **argv) {
         phone_view_set(&phone, VIEW_CONNECTION);
     }
 
-    // The one intentionally unbounded loop: it runs until Android closes the app.
-    while (!WindowShouldClose()) {
-        phone_frame(&phone);
+    phone.redraw.frames_pending = REDRAW_FRAMES_AFTER_INPUT;
+    // The one intentionally unbounded loop: it runs until Android closes the app. A frame is
+    // drawn only when something changed, and not at all while the app is out of sight; the
+    // rest of the time the loop waits for Android to send a touch, a key or a change.
+    while (!WindowShouldClose() && !android_input_destroy_requested()) {
+        if (!android_input_visible(&phone.input)) {
+            // In the background: no drawing, no camera, no searching. Android wakes the loop when
+            // the app is shown again.
+            qr_scanner_stop(&phone.scan.scanner);
+            android_input_wait(&phone.input, -1);
+        } else if (phone_redraw_needed(&phone)) {
+            phone_redraw_record(&phone);
+            phone_frame(&phone);
+        } else {
+            android_input_wait(&phone.input, IDLE_WAIT_MILLISECONDS);
+        }
     }
 
     qr_scanner_stop(&phone.scan.scanner);
@@ -187,7 +226,6 @@ int main(int argc, char **argv) {
  */
 static void phone_frame(Phone *phone) {
     android_input_frame_begin(&phone->input);
-    phone_bars_update(phone);
     if (phone->scanning) {
         phone_frame_scan(phone);
         return;
@@ -269,16 +307,78 @@ static void phone_frame_scan(Phone *phone) {
 
 /**
  * Asks for the sizes of the system bars about twice a second: they are not known at the first
- * frames, and a JNI round trip every frame is not needed for something that hardly changes.
+ * frames, and a JNI round trip on every pass is not needed for something that hardly changes.
+ * Returns whether they changed.
  */
-static void phone_bars_update(Phone *phone) {
-    enum { BARS_FRAMES_BETWEEN_ASKS = 30 };
-    if (phone->bars_age > 0 && phone->bars_age < BARS_FRAMES_BETWEEN_ASKS) {
-        phone->bars_age++;
-        return;
+static bool phone_bars_update(Phone *phone) {
+    double const now = GetTime();
+    if (now < phone->bars_next_ask_seconds) {
+        return false;
     }
-    phone->bars_age = 1;
-    android_input_system_bars_height(&phone->bars_top, &phone->bars_bottom);
+    phone->bars_next_ask_seconds = now + BARS_ASK_INTERVAL_SECONDS;
+    int32_t top = 0;
+    int32_t bottom = 0;
+    android_input_system_bars_height(&top, &bottom);
+    bool const changed = top != phone->bars_top || bottom != phone->bars_bottom;
+    phone->bars_top = top;
+    phone->bars_bottom = bottom;
+    return changed;
+}
+
+/**
+ * Whether something changed since the last frame was drawn: a touch, a key or text, the drawer
+ * or a finger still moving, data from the desktop, the connection, a desktop found on the
+ * network, or the time. Until then the screen keeps showing the last frame.
+ */
+static bool phone_redraw_needed(Phone *phone) {
+    Redraw *redraw = &phone->redraw;
+    assert(redraw->frames_pending >= 0);
+    assert(redraw->frames_pending <= REDRAW_FRAMES_AFTER_INPUT);
+
+    bool const bars_changed = phone_bars_update(phone);
+    if (android_input_activity_take(&phone->input) || bars_changed ||
+        IsMouseButtonDown(MOUSE_BUTTON_LEFT) || drawer_is_moving(&phone->drawer)) {
+        redraw->frames_pending = REDRAW_FRAMES_AFTER_INPUT;
+    }
+    // The camera preview changes every frame, and a text box's cursor blinks by the frame.
+    if (phone->scanning || phone->input.keyboard_visible) {
+        return true;
+    }
+    if (redraw->frames_pending > 0) {
+        return true;
+    }
+    if (GetTime() - redraw->drawn_at_seconds >= REDRAW_INTERVAL_SECONDS) {
+        return true;
+    }
+    // The client asks the desktop for its revision at most every so often, so asking on every
+    // idle pass costs no more network than drawing every frame did.
+    if (backend_revision(&phone->backend) != redraw->revision) {
+        return true;
+    }
+    if (client_is_connected(&phone->client) != redraw->connected) {
+        return true;
+    }
+    if (phone->view == VIEW_CONNECTION && phone->connect.open) {
+        // The search for a desktop runs while the settings are drawn, and must go on when not.
+        bool const found = discovery_poll(&phone->connect.discovery);
+        return found != redraw->desktop_found;
+    }
+    return false;
+}
+
+/**
+ * Notes what the frame about to be drawn shows.
+ */
+static void phone_redraw_record(Phone *phone) {
+    Redraw *redraw = &phone->redraw;
+    // Taken before drawing, so that a change during the frame is drawn by the next one.
+    redraw->revision = backend_revision(&phone->backend);
+    redraw->drawn_at_seconds = GetTime();
+    redraw->connected = client_is_connected(&phone->client);
+    redraw->desktop_found = phone->connect.open && phone->connect.discovery.found;
+    if (redraw->frames_pending > 0) {
+        redraw->frames_pending--;
+    }
 }
 
 /**
@@ -505,6 +605,20 @@ static bool drawer_is_closed(Drawer const *drawer) {
         return false;
     }
     return drawer->open_fraction == 0.0f;
+}
+
+/**
+ * Whether the drawer slides or a finger holds it, which needs a frame after frame.
+ */
+static bool drawer_is_moving(Drawer const *drawer) {
+    if (drawer->pressed) {
+        return true;
+    }
+    float target = 0.0f;
+    if (drawer->open) {
+        target = 1.0f;
+    }
+    return drawer->open_fraction != target;
 }
 
 /**
