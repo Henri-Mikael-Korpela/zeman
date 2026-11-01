@@ -228,6 +228,14 @@ static_assert(TIMELINE_ITEM_MINUTES_MIN * TIMELINE_HOUR_HEIGHT_PIXELS / 60 >=
 static_assert(TIMELINE_ITEM_MINUTES_DEFAULT >= TIMELINE_ITEM_MINUTES_MIN,
               "The default length is not cut short.");
 static_assert(TIMELINE_SCROLL_HOUR_START < MINUTES_PER_DAY / 60, "The start hour is in a day.");
+// A press held this long on a day of the month view opens the form on release, rather than
+// selecting the day: longer than an unhurried click, and short enough not to feel like waiting.
+static double const MONTH_MARK_HOLD_SECONDS = 0.4;
+
+// How opaque the ghost of an unsaved item is in the month view: the bar still reads as the bar
+// it will become, yet the day and its other bars show through.
+static float const GHOST_ALPHA = 0.7f;
+
 static_assert(MINUTES_PER_DAY % TIMELINE_MARK_STEP_MINUTES == 0, "Steps fill a day.");
 static_assert(TIMELINE_MARK_STEP_MINUTES % TIMELINE_MARK_ZOOM_STEP_MINUTES == 0,
               "Zoomed steps land on every unzoomed one.");
@@ -449,6 +457,15 @@ typedef struct Timeline_Mark {
     bool zoomed;          // Zoom was on at the press: five-minute steps under a magnifier
 } Timeline_Mark;
 
+// Days the user marks in the month view with the mouse to make an event or task over them. It
+// holds the day number rather than a cell, so that the wheel can change the month under it.
+typedef struct Month_Mark {
+    double press_seconds;  // GetTime at the press, which tells a held press from a click
+    int32_t day_number;    // Day the press began on
+    bool pressed;          // The press began on a day and is held
+    bool drawing;          // It was held long enough, or reached another day; else it is a click
+} Month_Mark;
+
 typedef struct App {
     Event events[EVENT_COUNT_MAX];  // Events of the visible six weeks, ordered by start
     Task_Completion completions[COMPLETION_COUNT_MAX];  // Done task occurrences near the view
@@ -475,6 +492,7 @@ typedef struct App {
     // hours in sight stay put, as on a paper planner.
     Scroll timeline_scroll;
     Timeline_Mark timeline_mark;
+    Month_Mark month_mark;
     // Set during app_frame for what the pointer is over or dragging; see app_cursor.
     int32_t cursor;
     bool events_stale;              // Reload events[] even though the month is unchanged
@@ -574,6 +592,14 @@ static void draw_weekdays(Fonts const *fonts, Layout const *layout, Date first);
 static void draw_grid(App *app, Layout const *layout);
 static void draw_week_numbers(App const *app, Layout const *layout);
 static void draw_grid_selection(App const *app, Layout const *layout, int32_t first_day);
+static bool month_mark_can_start(App const *app, int64_t event_id_under_press);
+static void month_mark_update(App *app, Layout const *layout, int32_t first_day);
+static void month_mark_finish(App *app, int32_t pointer_day);
+static int32_t month_mark_day_at(Layout const *layout, Vector2 pointer, int32_t first_day);
+static void draw_month_mark(App const *app, Layout const *layout, int32_t first_day);
+static void draw_month_ghost(App const *app, Layout const *layout, int32_t first_day);
+static void draw_month_ghost_cell(App const *app, Event const *event, Rectangle cell,
+                                  int32_t day_number, int32_t start_day, int32_t column);
 static void draw_timeline(App *app, Layout const *layout, int32_t first_day);
 static void draw_timeline_hours(App const *app, Layout const *layout, float top);
 static void timeline_mark_update(App *app, Layout const *layout, float top, int32_t first_day);
@@ -591,6 +617,7 @@ static void draw_timeline_ghost(App const *app, Layout const *layout, float top,
 static void draw_timeline_now(App const *app, Layout const *layout, float top,
                               int32_t first_day);
 static void draw_timeline_ghost_block(App const *app, Event const *event, Rectangle day);
+static bool form_ghost_event(Form const *form, Event *event);
 static void draw_timeline_mark_zoom(App const *app, Layout const *layout, float top,
                                     int32_t first_day);
 static void draw_timeline_mark_hover(App const *app, Layout const *layout, float top);
@@ -1014,6 +1041,7 @@ static void app_handle_keys(App *app, Layout const *layout) {
         // A block being drawn, or an item being dragged, is dropped; the release then does
         // nothing.
         app->timeline_mark = (Timeline_Mark){ .pressed = false };
+        app->month_mark = (Month_Mark){ .pressed = false };
         app->timeline_drag = (Timeline_Drag){ .event_id = 0 };
         return;
     }
@@ -1821,6 +1849,9 @@ static void draw_grid(App *app, Layout const *layout) {
         draw_timeline(app, layout, first_day);
     }
     draw_week_numbers(app, layout);
+    month_mark_update(app, layout, first_day);
+    draw_month_mark(app, layout, first_day);
+    draw_month_ghost(app, layout, first_day);
     // Last, so that neither the cells nor the timeline cover it.
     draw_grid_selection(app, layout, first_day);
 }
@@ -1872,6 +1903,235 @@ static void draw_grid_selection(App const *app, Layout const *layout, int32_t fi
     assert(inner.width > 0.0f);
     assert(inner.height > 0.0f);
     DrawRectangleLinesEx(inner, 2, style_color(BORDER_COLOR_PRESSED));
+}
+
+/**
+ * A press may start marking days only in the month view with a mouse: a week or day draws on its
+ * hours instead, and on a touch screen a drag is a swipe. Not over an item, which the press
+ * selects, nor while a form is open, which a new form would replace, losing what was typed in it.
+ */
+static bool month_mark_can_start(App const *app, int64_t event_id_under_press) {
+    if (app->range != RANGE_MONTH || app->touch) {
+        return false;
+    }
+    if (event_id_under_press != 0) {
+        return false;
+    }
+    return !app->form.open;
+}
+
+/**
+ * Follows a press on a day while the button is held. The release opens the form over the days
+ * from the press to the pointer, or only selects the day if it was a click: a short press that
+ * stayed on its day.
+ */
+static void month_mark_update(App *app, Layout const *layout, int32_t first_day) {
+    Month_Mark *mark = &app->month_mark;
+    if (!mark->pressed) {
+        return;
+    }
+    // The range changed under the press, by a key: the days marked are no longer in sight.
+    if (app->range != RANGE_MONTH) {
+        *mark = (Month_Mark){ .pressed = false };
+        return;
+    }
+    int32_t const pointer_day = month_mark_day_at(layout, GetMousePosition(), first_day);
+    if (pointer_day != mark->day_number) {
+        mark->drawing = true;
+    }
+    if (GetTime() - mark->press_seconds >= MONTH_MARK_HOLD_SECONDS) {
+        mark->drawing = true;
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        if (!mark->drawing) {
+            app_select(app, date_from_day_number(mark->day_number));
+        } else if (!app->form.open) {
+            month_mark_finish(app, pointer_day);
+        }
+        *mark = (Month_Mark){ .pressed = false };
+        return;
+    }
+    // A release this frame never seen, as when the window lost the pointer, ends the press.
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        *mark = (Month_Mark){ .pressed = false };
+    }
+}
+
+/**
+ * Opens the form for a new event over the marked days, whichever way the pointer went. The form's
+ * Event and Task toggle then makes it a task instead, as for any new item.
+ */
+static void month_mark_finish(App *app, int32_t pointer_day) {
+    Month_Mark const *mark = &app->month_mark;
+    assert(mark->pressed);
+    assert(mark->drawing);
+    assert(!app->form.open);
+
+    Date start = date_from_day_number(mark->day_number);
+    Date end = date_from_day_number(pointer_day);
+    if (pointer_day < mark->day_number) {
+        start = date_from_day_number(pointer_day);
+        end = date_from_day_number(mark->day_number);
+    }
+    // The first day, unless it is in another month than the one shown: selecting it would then
+    // take away the month the user just scrolled to.
+    Date selection = end;
+    if (start.year == app->events_month.year && start.month == app->events_month.month) {
+        selection = start;
+    }
+    app_select(app, selection);
+    app_form_open(app, start, EVENT_KIND_EVENT);
+    Form *form = &app->form;
+    date_format_iso(end, form->text[FORM_FIELD_END_DATE], DATE_ISO_SIZE);
+    assert(form->field_active == FORM_FIELD_TITLE);
+}
+
+/**
+ * The day under the pointer, or the nearest one when the pointer has left the grid, so that a
+ * drag that overshoots the edge of the calendar does not lose its days.
+ */
+static int32_t month_mark_day_at(Layout const *layout, Vector2 pointer, int32_t first_day) {
+    assert(layout->cell_width > 0.0f);
+    assert(layout->cell_height > 0.0f);
+
+    float const column_max = (float)(layout->columns - 1);
+    float const row_max = (float)(layout->rows - 1);
+    float const column = (pointer.x - layout->grid.x) / layout->cell_width;
+    float const row = (pointer.y - layout->grid.y) / layout->cell_height;
+    int32_t const column_index = (int32_t)fminf(fmaxf(column, 0.0f), column_max);
+    int32_t const row_index = (int32_t)fminf(fmaxf(row, 0.0f), row_max);
+    return first_day + row_index * layout->columns + column_index;
+}
+
+/**
+ * The accent over each marked day in sight. Marked days outside the six weeks shown are not
+ * drawn; the release still includes them.
+ */
+static void draw_month_mark(App const *app, Layout const *layout, int32_t first_day) {
+    Month_Mark const *mark = &app->month_mark;
+    if (!mark->drawing) {
+        return;
+    }
+    assert(mark->pressed);
+    int32_t const pointer_day = month_mark_day_at(layout, GetMousePosition(), first_day);
+    int32_t day_first = mark->day_number;
+    int32_t day_last = pointer_day;
+    if (pointer_day < mark->day_number) {
+        day_first = pointer_day;
+        day_last = mark->day_number;
+    }
+    Color const accent = style_color(BORDER_COLOR_PRESSED);
+    int32_t const cell_count = layout->rows * layout->columns;
+    for (int32_t cell_index = 0; cell_index < cell_count; cell_index++) {
+        int32_t const day_number = first_day + cell_index;
+        if (day_number >= day_first && day_number <= day_last) {
+            Rectangle const cell = grid_cell_rectangle(layout, cell_index);
+            DrawRectangleRec(cell, Fade(accent, 0.35f));
+            DrawRectangleLinesEx(cell, 2, accent);
+        }
+    }
+}
+
+/**
+ * While the form for a new event or task is open, the item as it would be saved: a bar in each
+ * day cell it occurs on, drawn as a saved item's bar is but see-through, so that the user sees
+ * it placed but not yet saved. Read from the form each frame, as draw_timeline_ghost does. An
+ * opportunity is left out, as only an event or task is placed by marking days.
+ */
+static void draw_month_ghost(App const *app, Layout const *layout, int32_t first_day) {
+    if (app->range != RANGE_MONTH) {
+        return;
+    }
+    Event event = { .id = 0 };
+    if (!form_ghost_event(&app->form, &event)) {
+        return;
+    }
+    if (event.kind != EVENT_KIND_EVENT && event.kind != EVENT_KIND_TASK) {
+        return;
+    }
+    int32_t const cell_count = layout->rows * layout->columns;
+    for (int32_t cell_index = 0; cell_index < cell_count; cell_index++) {
+        int32_t const day_number = first_day + cell_index;
+        int32_t start_day = 0;
+        if (event_occurrence_on_day(&event, day_number, &start_day)) {
+            draw_month_ghost_cell(app, &event, grid_cell_rectangle(layout, cell_index), day_number,
+                                  start_day, cell_index % layout->columns);
+        }
+    }
+}
+
+/**
+ * The ghost's bar in a cell, in the slot a saved item would take: draw_grid_cell_events puts
+ * multi-day bars first and then one-day bars, and a new item is last in its group, so the slot
+ * follows the bars of its own kind, or all of them for a one-day item. Its color is the accent,
+ * because a saved item's color comes from its id, which it does not have yet.
+ */
+static void draw_month_ghost_cell(App const *app, Event const *event, Rectangle cell,
+                                  int32_t day_number, int32_t start_day, int32_t column) {
+    assert(event->id == 0);
+    assert(start_day <= day_number);
+
+    float const slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
+    float const top = cell.y + CELL_TOP_LINE_PIXELS;
+    int32_t const slot_count =
+        (int32_t)((cell.y + cell.height - CELL_BOTTOM_MARGIN_PIXELS - top) / slot_height);
+    if (slot_count <= 0) {
+        return;
+    }
+    bool const multi_day = event_duration_days(event) > 0;
+    int32_t slot = 0;
+    for (int32_t i = 0; i < app->event_count; i++) {
+        Event const *other = &app->events[i];
+        bool const counted = multi_day == (event_duration_days(other) > 0) || !multi_day;
+        if (counted && event_in_day_cell(other, app->range) &&
+            event_occurs_on_day(other, day_number)) {
+            slot++;
+        }
+    }
+    // Over the last slot rather than past the cell when the day is full.
+    if (slot > slot_count - 1) {
+        slot = slot_count - 1;
+    }
+
+    bool const starts_here = day_number == start_day;
+    bool const ends_here = day_number == start_day + event_duration_days(event);
+    float left = cell.x;
+    if (starts_here) {
+        left += 4.0f;
+    }
+    float right = cell.x + cell.width;
+    if (ends_here) {
+        right -= 4.0f;
+    }
+    Rectangle const bar = { left, top + (float)slot * slot_height, right - left,
+                            (float)EVENT_BAR_HEIGHT_PIXELS };
+    Color const accent = style_color(BORDER_COLOR_PRESSED);
+    bool const task = event->kind == EVENT_KIND_TASK;
+    if (task) {
+        DrawRectangleRec(bar, Fade(accent, task_fill_alpha(false) * GHOST_ALPHA));
+        draw_bar_outline(bar, starts_here, ends_here,
+                         Fade(accent, task_outline_alpha(false) * GHOST_ALPHA));
+    } else {
+        DrawRectangleRec(bar, Fade(accent, GHOST_ALPHA));
+    }
+    // Labelled where a saved bar is: the first day and the start of each week.
+    if (!starts_here && column != 0) {
+        return;
+    }
+    char label[TEXT_LINE_SIZE] = "";
+    event_format_label(event, starts_here, app_now(app), label, sizeof(label));
+    float text_x = bar.x + 4;
+    scissor_begin(&app->fonts, bar.x, bar.y, bar.width, bar.height);
+    if (task) {
+        Rectangle const box = { bar.x + 4, bar.y + 4, 11, 11 };
+        draw_check_mark(box, false, Fade(accent, GHOST_ALPHA));
+        text_x = box.x + box.width + 4;
+    }
+    Text_Style const *style = &app->fonts.small;
+    draw_text(style, str_from_cstr(label), text_x,
+              bar.y + ((float)EVENT_BAR_HEIGHT_PIXELS - style->size_pixels) / 2,
+              Fade(style_color(TEXT_COLOR_NORMAL), GHOST_ALPHA));
+    scissor_end(&app->fonts);
 }
 
 /**
@@ -2210,27 +2470,13 @@ static void draw_timeline_now(App const *app, Layout const *layout, float top,
  */
 static void draw_timeline_ghost(App const *app, Layout const *layout, float top,
                                 int32_t first_day) {
-    Form const *form = &app->form;
-    if (!form->open || form->editing_id != 0 || form->kind == EVENT_KIND_PROBLEM) {
-        return;
-    }
     Event event = { .id = 0 };
-    if (form_parse_body(form, &event).length > 0) {
+    if (!form_ghost_event(&app->form, &event)) {
         return;
     }
     if (!event_is_timed(&event)) {
-        return; // A ghost in the day cells is not drawn: there the form's dates already show.
+        return; // A ghost in a week's or day's cells is not drawn: the form's dates already show.
     }
-    Str const title = text_skip_spaces(str_from_cstr(form->text[FORM_FIELD_TITLE]));
-    // Until the user types a title, the ghost says what it will be.
-    Str ghost_title = title;
-    if (title.length == 0) {
-        ghost_title = STR("New event");
-        if (event.kind == EVENT_KIND_TASK) {
-            ghost_title = STR("New task");
-        }
-    }
-    (void)str_copy_truncated(ghost_title, event.title, sizeof(event.title));
     for (int32_t column = 0; column < layout->columns; column++) {
         if (event_occurs_on_day(&event, first_day + column)) {
             Rectangle const day = { layout->grid.x + (float)column * layout->cell_width, top,
@@ -2238,6 +2484,32 @@ static void draw_timeline_ghost(App const *app, Layout const *layout, float top,
             draw_timeline_ghost_block(app, &event, day);
         }
     }
+}
+
+/**
+ * Fills *event with the new item the open form would save, for drawing as a ghost. False when
+ * there is none: no form, an edit, a problem, or fields that cannot be read yet.
+ */
+static bool form_ghost_event(Form const *form, Event *event) {
+    assert(event->id == 0);
+
+    if (!form->open || form->editing_id != 0 || form->kind == EVENT_KIND_PROBLEM) {
+        return false;
+    }
+    if (form_parse_body(form, event).length > 0) {
+        return false;
+    }
+    Str const title = text_skip_spaces(str_from_cstr(form->text[FORM_FIELD_TITLE]));
+    // Until the user types a title, the ghost says what it will be.
+    Str ghost_title = title;
+    if (title.length == 0) {
+        ghost_title = STR("New event");
+        if (event->kind == EVENT_KIND_TASK) {
+            ghost_title = STR("New task");
+        }
+    }
+    (void)str_copy_truncated(ghost_title, event->title, sizeof(event->title));
+    return true;
 }
 
 /**
@@ -3282,6 +3554,14 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
     Bar_Hit const hit = draw_grid_cell_events(app, cell, day_number, column);
     if (hit.event_id != 0) {
         app->cursor = APP_CURSOR_HAND;
+    }
+    // A press may begin marking days instead. It selects nothing yet, because selecting a dimmed
+    // day would change the month under the pointer; the release selects it if it was a click.
+    if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        month_mark_can_start(app, hit.event_id)) {
+        app->month_mark = (Month_Mark){ .press_seconds = GetTime(), .day_number = day_number,
+                                        .pressed = true };
+        return;
     }
     // A press selects the day, and the item under it too, whose card the panel then rings.
     if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {

@@ -58,6 +58,8 @@ The desktop app accepts connections only from local network addresses (10.x.x.x,
 
 Click or tap an item in the calendar, a bar in a day or a block on the hours, to select it: its day opens in the panel, which scrolls to its card and rings it. On the desktop the pointer turns into a hand over items you can click. Select a day to see its events and tasks in the panel on the right, and use **New event**, **New task**, **New problem** or **New opportunity** to add one. When a day has more items than fit, scroll the panel with the mouse wheel, or drag it with a finger or the mouse; the bar at its right shows where you are.
 
+In the month view on the desktop you can also add an item by marking days with the mouse. Press on a day, away from its items, and hold; drag to the last day, and release. The form for a new event opens with those days as its start and end dates (switch it to **Task** in the form if it is one). To reach a day in another month, turn the mouse wheel over the calendar while holding the button. Holding the press for a moment and releasing it on the same day opens the form for that day alone, while a quick click still only selects the day. Escape cancels while marking. Until you save, the new item shows on its days as a see-through ghost of its bar, labelled "New event" or "New task" until it has a title; it follows the dates, times and repeat you type in the form, and disappears if you cancel.
+
 Start and end dates are `YYYY-MM-DD`, typed in, or chosen from a small calendar that the arrow button at the right of each date field opens (arrows for other months; Escape or a click elsewhere closes it). Times are `HH:MM` and optional: leave both empty for an all-day event.
 
 ### Repeating events
