@@ -446,6 +446,14 @@ typedef struct Timeline_Drag {
     bool moved;          // Moved far enough to drag; a press that does not is a click
 } Timeline_Drag;
 
+// A task without a time dragged from one day cell to another in the week view. Saved on
+// release; until then only a ghost bar shows where it goes.
+typedef struct Task_Drag {
+    int64_t event_id;   // 0 when nothing is dragged
+    int32_t press_day;  // Day of the cell the press was in
+    bool moved;         // The pointer reached another day; a press that stays is a click
+} Task_Drag;
+
 // A block the user draws on the timeline with the mouse to make an event or task at its times.
 // It belongs to the day the press began on, whichever way the pointer goes after.
 typedef struct Timeline_Mark {
@@ -474,6 +482,7 @@ typedef struct App {
     Form form;
     Timeline_Hit timeline_hit;
     Timeline_Drag timeline_drag;
+    Task_Drag task_drag;
     uint64_t events_revision;       // Backend revision that events[] was loaded at
     int64_t event_focused_id;       // Selected item on the panel, ringed in the grid, or 0
     int64_t event_delete_id;        // Event waiting for the user to confirm deleting, or 0
@@ -598,8 +607,13 @@ static void month_mark_finish(App *app, int32_t pointer_day);
 static int32_t month_mark_day_at(Layout const *layout, Vector2 pointer, int32_t first_day);
 static void draw_month_mark(App const *app, Layout const *layout, int32_t first_day);
 static void draw_month_ghost(App const *app, Layout const *layout, int32_t first_day);
-static void draw_month_ghost_cell(App const *app, Event const *event, Rectangle cell,
-                                  int32_t day_number, int32_t start_day, int32_t column);
+static void draw_grid_ghost(App const *app, Layout const *layout, int32_t first_day,
+                            Event const *event);
+static void draw_grid_ghost_cell(App const *app, Event const *event, Rectangle cell,
+                                 int32_t day_number, int32_t start_day, int32_t column);
+static void task_drag_start(App *app, Bar_Hit hit, int32_t day_number);
+static void task_drag_update(App *app, Layout const *layout, int32_t first_day);
+static void task_drag_finish(App *app, int32_t pointer_day);
 static void draw_timeline(App *app, Layout const *layout, int32_t first_day);
 static void draw_timeline_hours(App const *app, Layout const *layout, float top);
 static void timeline_mark_update(App *app, Layout const *layout, float top, int32_t first_day);
@@ -1043,6 +1057,7 @@ static void app_handle_keys(App *app, Layout const *layout) {
         app->timeline_mark = (Timeline_Mark){ .pressed = false };
         app->month_mark = (Month_Mark){ .pressed = false };
         app->timeline_drag = (Timeline_Drag){ .event_id = 0 };
+        app->task_drag = (Task_Drag){ .event_id = 0 };
         return;
     }
     if (app->form.field_active != FORM_FIELD_NONE) {
@@ -1852,6 +1867,7 @@ static void draw_grid(App *app, Layout const *layout) {
     month_mark_update(app, layout, first_day);
     draw_month_mark(app, layout, first_day);
     draw_month_ghost(app, layout, first_day);
+    task_drag_update(app, layout, first_day);
     // Last, so that neither the cells nor the timeline cover it.
     draw_grid_selection(app, layout, first_day);
 }
@@ -1903,6 +1919,108 @@ static void draw_grid_selection(App const *app, Layout const *layout, int32_t fi
     assert(inner.width > 0.0f);
     assert(inner.height > 0.0f);
     DrawRectangleLinesEx(inner, 2, style_color(BORDER_COLOR_PRESSED));
+}
+
+/**
+ * A press on a task without a time, in a day cell of the week view, may start moving it to
+ * another day. The week view only, where the days are the cells of one row and the hours already
+ * carry the timed items; the desktop only, as a finger's drag is a swipe. Not while a form is
+ * open, which may hold the task's old dates and would save them back over the move, nor on the
+ * check box, which marks the task done instead.
+ */
+static void task_drag_start(App *app, Bar_Hit hit, int32_t day_number) {
+    assert(hit.event_id != 0);
+
+    if (app->range != RANGE_WEEK || app->touch || app->form.open || hit.on_task_checkbox) {
+        return;
+    }
+    Event const *task = app_event_find(app, hit.event_id);
+    assert(task != NULL);
+    if (task->kind != EVENT_KIND_TASK || event_is_timed(task)) {
+        return;
+    }
+    app->task_drag = (Task_Drag){ .event_id = task->id, .press_day = day_number };
+}
+
+/**
+ * Follows a task dragged by the pointer while the button is held, shows a ghost bar on the day it
+ * would move to, and saves it at the release.
+ */
+static void task_drag_update(App *app, Layout const *layout, int32_t first_day) {
+    Task_Drag *drag = &app->task_drag;
+    if (drag->event_id == 0) {
+        return;
+    }
+    // The range changed under the press, by a key: the days are no longer the ones pressed.
+    if (app->range != RANGE_WEEK || app->form.open) {
+        *drag = (Task_Drag){ .event_id = 0 };
+        return;
+    }
+    int32_t const pointer_day = first_day + timeline_column_nearest(layout, GetMousePosition().x);
+    if (pointer_day != drag->press_day) {
+        drag->moved = true;
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        if (drag->moved) {
+            task_drag_finish(app, pointer_day);
+        }
+        *drag = (Task_Drag){ .event_id = 0 };
+        return;
+    }
+    // A release this frame never seen, as when the window lost the pointer, ends the drag.
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        *drag = (Task_Drag){ .event_id = 0 };
+        return;
+    }
+    if (!drag->moved) {
+        return;
+    }
+    app->cursor = APP_CURSOR_MOVE;
+    Event const *task = app_event_find(app, drag->event_id);
+    if (task == NULL) {
+        return;
+    }
+    // The ghost is the task as it would be after the move, on the days it would then cover.
+    Event moved = *task;
+    int32_t const day_delta = pointer_day - drag->press_day;
+    moved.start_date = date_add_days(task->start_date, day_delta);
+    moved.end_date = date_add_days(task->end_date, day_delta);
+    draw_grid_ghost(app, layout, first_day, &moved);
+}
+
+/**
+ * Saves the task on the pointer's day, after the checks the form makes, and selects that day. A
+ * repeating task moves as a whole, as editing it does. Does nothing if the pointer came back to
+ * the day it started on.
+ */
+static void task_drag_finish(App *app, int32_t pointer_day) {
+    Task_Drag const *drag = &app->task_drag;
+    assert(drag->event_id != 0);
+    assert(drag->moved);
+
+    // Gone when a reload meanwhile no longer has it, as after a phone deleted it.
+    Event const *task = app_event_find(app, drag->event_id);
+    int32_t const day_delta = pointer_day - drag->press_day;
+    if (task == NULL || day_delta == 0) {
+        return;
+    }
+    Event moved = *task;
+    moved.start_date = date_add_days(task->start_date, day_delta);
+    moved.end_date = date_add_days(task->end_date, day_delta);
+    Str const mistake = form_parse_order(&moved);
+    if (mistake.length > 0) {
+        snprintf(app->status, sizeof(app->status), "Not moved: %.*s", STR_ARGUMENTS(mistake));
+        return;
+    }
+    if (!backend_update(app->backend, &moved)) {
+        Str const reason = backend_error(app->backend);
+        snprintf(app->status, sizeof(app->status), "Not moved: %.*s", STR_ARGUMENTS(reason));
+        return;
+    }
+    app->events_stale = true;
+    app_select(app, date_from_day_number(pointer_day));
+    app->event_focused_id = moved.id;
+    snprintf(app->status, sizeof(app->status), "Updated \"%s\".", moved.title);
 }
 
 /**
@@ -2049,26 +2167,34 @@ static void draw_month_ghost(App const *app, Layout const *layout, int32_t first
     if (event.kind != EVENT_KIND_EVENT && event.kind != EVENT_KIND_TASK) {
         return;
     }
+    draw_grid_ghost(app, layout, first_day, &event);
+}
+
+/**
+ * The ghost bar of event on every day cell in sight it occurs on.
+ */
+static void draw_grid_ghost(App const *app, Layout const *layout, int32_t first_day,
+                            Event const *event) {
     int32_t const cell_count = layout->rows * layout->columns;
     for (int32_t cell_index = 0; cell_index < cell_count; cell_index++) {
         int32_t const day_number = first_day + cell_index;
         int32_t start_day = 0;
-        if (event_occurrence_on_day(&event, day_number, &start_day)) {
-            draw_month_ghost_cell(app, &event, grid_cell_rectangle(layout, cell_index), day_number,
-                                  start_day, cell_index % layout->columns);
+        if (event_occurrence_on_day(event, day_number, &start_day)) {
+            draw_grid_ghost_cell(app, event, grid_cell_rectangle(layout, cell_index), day_number,
+                                 start_day, cell_index % layout->columns);
         }
     }
 }
 
 /**
- * The ghost's bar in a cell, in the slot a saved item would take: draw_grid_cell_events puts
- * multi-day bars first and then one-day bars, and a new item is last in its group, so the slot
- * follows the bars of its own kind, or all of them for a one-day item. Its color is the accent,
+ * The ghost's bar in a cell, for a new item or a dragged one, in the slot a saved item would
+ * take: draw_grid_cell_events puts multi-day bars first and then one-day bars, and a new item is
+ * last in its group, so the slot follows the bars of its own kind, or all of them for a one-day
+ * item. A dragged item's own bar is not counted, as it moves away. Its color is the accent,
  * because a saved item's color comes from its id, which it does not have yet.
  */
-static void draw_month_ghost_cell(App const *app, Event const *event, Rectangle cell,
-                                  int32_t day_number, int32_t start_day, int32_t column) {
-    assert(event->id == 0);
+static void draw_grid_ghost_cell(App const *app, Event const *event, Rectangle cell,
+                                 int32_t day_number, int32_t start_day, int32_t column) {
     assert(start_day <= day_number);
 
     float const slot_height = (float)(EVENT_BAR_HEIGHT_PIXELS + EVENT_BAR_GAP_PIXELS);
@@ -2083,7 +2209,7 @@ static void draw_month_ghost_cell(App const *app, Event const *event, Rectangle 
     for (int32_t i = 0; i < app->event_count; i++) {
         Event const *other = &app->events[i];
         bool const counted = multi_day == (event_duration_days(other) > 0) || !multi_day;
-        if (counted && event_in_day_cell(other, app->range) &&
+        if (counted && other->id != event->id && event_in_day_cell(other, app->range) &&
             event_occurs_on_day(other, day_number)) {
             slot++;
         }
@@ -3568,6 +3694,7 @@ static void draw_grid_cell(App *app, Rectangle cell, int32_t day_number, int32_t
         app_select(app, date);
         if (hit.event_id != 0) {
             app_focus_item(app, hit.event_id);
+            task_drag_start(app, hit, day_number);
         }
         // A press on a task's check box also marks the occurrence on this bar done, or not.
         if (hit.on_task_checkbox) {
