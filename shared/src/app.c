@@ -207,10 +207,15 @@ static int32_t const FORM_FIELD_SIZES[FORM_FIELD_COUNT] = {
     DATE_ISO_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
 };
 
-// Choices in the form's repeat selector, in the order shown, and the unit each one means.
+// Choices in the form's repeat selector, in the order shown, and the unit each one means. Every
+// key must stay, even those the code never names: the combo box picks them by index, and
+// REPEAT_OPTION_COUNT is how many items it offers, so the labels, units and keys must line up.
 typedef enum Repeat_Option {
     REPEAT_OPTION_NONE,
+    REPEAT_OPTION_WEEK,
     REPEAT_OPTION_DAYS,
+    REPEAT_OPTION_MONTH,
+    REPEAT_OPTION_YEAR,
     REPEAT_OPTION_COUNT,
 } Repeat_Option;
 
@@ -219,8 +224,11 @@ static char const REPEAT_OPTION_LABELS[] =
     "Does not repeat;Every week;Every X days;Every month;Every year";
 
 static int32_t const REPEAT_OPTION_UNITS[REPEAT_OPTION_COUNT] = {
-    REPEAT_NONE, REPEAT_WEEK,
+    REPEAT_NONE, REPEAT_WEEK, REPEAT_DAY, REPEAT_MONTH, REPEAT_YEAR,
 };
+
+// One label per option: five items, four semicolons.
+static_assert(REPEAT_OPTION_COUNT == 5, "REPEAT_OPTION_LABELS has an item for each option.");
 
 static_assert(REPEAT_INTERVAL_MAX < 1000, "REPEAT_DAYS_TEXT_SIZE holds three digits.");
 static_assert(TIMELINE_ITEM_MINUTES_MIN * TIMELINE_HOUR_HEIGHT_PIXELS / 60 >=
