@@ -454,12 +454,12 @@ typedef struct Timeline_Drag {
     bool moved;          // Moved far enough to drag; a press that does not is a click
 } Timeline_Drag;
 
-// A task without a time dragged from one day cell to another in the week view. Saved on
-// release; until then only a ghost bar shows where it goes.
+// A task without a time dragged from its day cell to another day's cell, or down to the hours,
+// in the week or day view. Saved on release; until then only a ghost shows where it goes.
 typedef struct Task_Drag {
     int64_t event_id;   // 0 when nothing is dragged
     int32_t press_day;  // Day of the cell the press was in
-    bool moved;         // The pointer reached another day; a press that stays is a click
+    bool moved;         // The pointer reached another day or the hours; else it is a click
 } Task_Drag;
 
 // A block the user draws on the timeline with the mouse to make an event or task at its times.
@@ -621,7 +621,10 @@ static void draw_grid_ghost_cell(App const *app, Event const *event, Rectangle c
                                  int32_t day_number, int32_t start_day, int32_t column);
 static void task_drag_start(App *app, Bar_Hit hit, int32_t day_number);
 static void task_drag_update(App *app, Layout const *layout, int32_t first_day);
-static void task_drag_finish(App *app, int32_t pointer_day);
+static void task_drag_finish(App *app, Event const *task, Event const *moved, int32_t press_day);
+static int32_t task_drag_pointer_day(Layout const *layout, Vector2 pointer, int32_t first_day);
+static Event task_drag_result(App const *app, Layout const *layout, Event const *task,
+                              int32_t press_day, int32_t first_day, Vector2 pointer);
 static void draw_timeline(App *app, Layout const *layout, int32_t first_day);
 static void draw_timeline_hours(App const *app, Layout const *layout, float top);
 static void timeline_mark_update(App *app, Layout const *layout, float top, int32_t first_day);
@@ -1930,16 +1933,17 @@ static void draw_grid_selection(App const *app, Layout const *layout, int32_t fi
 }
 
 /**
- * A press on a task without a time, in a day cell of the week view, may start moving it to
- * another day. The week view only, where the days are the cells of one row and the hours already
- * carry the timed items; the desktop only, as a finger's drag is a swipe. Not while a form is
- * open, which may hold the task's old dates and would save them back over the move, nor on the
- * check box, which marks the task done instead.
+ * A press on a task without a time, in a day cell of the week or day view, may start moving it:
+ * to another day's cell, or down to the hours to give it a time. Only there, where the hours
+ * exist; the desktop only, as a finger's drag is a swipe. Not while a form is open, which may
+ * hold the task's old dates and would save them back over the move, nor on the check box, which
+ * marks the task done instead.
  */
 static void task_drag_start(App *app, Bar_Hit hit, int32_t day_number) {
     assert(hit.event_id != 0);
 
-    if (app->range != RANGE_WEEK || app->touch || app->form.open || hit.on_task_checkbox) {
+    bool const hours_shown = app->range == RANGE_WEEK || app->range == RANGE_DAY;
+    if (!hours_shown || app->touch || app->form.open || hit.on_task_checkbox) {
         return;
     }
     Event const *task = app_event_find(app, hit.event_id);
@@ -1951,26 +1955,36 @@ static void task_drag_start(App *app, Bar_Hit hit, int32_t day_number) {
 }
 
 /**
- * Follows a task dragged by the pointer while the button is held, shows a ghost bar on the day it
- * would move to, and saves it at the release.
+ * Follows a task dragged by the pointer while the button is held, shows a ghost of it where it
+ * would land, and saves it at the release.
  */
 static void task_drag_update(App *app, Layout const *layout, int32_t first_day) {
     Task_Drag *drag = &app->task_drag;
     if (drag->event_id == 0) {
         return;
     }
+    bool const hours_shown = app->range == RANGE_WEEK || app->range == RANGE_DAY;
     // The range changed under the press, by a key: the days are no longer the ones pressed.
-    if (app->range != RANGE_WEEK || app->form.open) {
+    if (!hours_shown || app->form.open) {
         *drag = (Task_Drag){ .event_id = 0 };
         return;
     }
-    int32_t const pointer_day = first_day + timeline_column_nearest(layout, GetMousePosition().x);
-    if (pointer_day != drag->press_day) {
+    // Gone when a reload meanwhile no longer has it, as after a phone deleted it.
+    Event const *task = app_event_find(app, drag->event_id);
+    if (task == NULL) {
+        *drag = (Task_Drag){ .event_id = 0 };
+        return;
+    }
+    Vector2 const pointer = GetMousePosition();
+    Event const moved = task_drag_result(app, layout, task, drag->press_day, first_day, pointer);
+    bool const changed = !date_equal(moved.start_date, task->start_date) ||
+                         moved.start_minute != task->start_minute;
+    if (changed) {
         drag->moved = true;
     }
     if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-        if (drag->moved) {
-            task_drag_finish(app, pointer_day);
+        if (changed) {
+            task_drag_finish(app, task, &moved, drag->press_day);
         }
         *drag = (Task_Drag){ .event_id = 0 };
         return;
@@ -1980,55 +1994,89 @@ static void task_drag_update(App *app, Layout const *layout, int32_t first_day) 
         *drag = (Task_Drag){ .event_id = 0 };
         return;
     }
-    if (!drag->moved) {
+    if (!drag->moved || !changed) {
         return;
     }
     app->cursor = APP_CURSOR_MOVE;
-    Event const *task = app_event_find(app, drag->event_id);
-    if (task == NULL) {
+    if (!event_is_timed(&moved)) {
+        draw_grid_ghost(app, layout, first_day, &moved);
         return;
     }
-    // The ghost is the task as it would be after the move, on the days it would then cover.
-    Event moved = *task;
-    int32_t const day_delta = pointer_day - drag->press_day;
-    moved.start_date = date_add_days(task->start_date, day_delta);
-    moved.end_date = date_add_days(task->end_date, day_delta);
-    draw_grid_ghost(app, layout, first_day, &moved);
+    // On the hours: a block at the time, on the day under the pointer, within the timeline.
+    Rectangle const timeline = layout->timeline;
+    float const top = timeline.y - app->timeline_scroll.offset_pixels;
+    int32_t const column = task_drag_pointer_day(layout, pointer, first_day) - first_day;
+    Rectangle const day = { layout->grid.x + (float)column * layout->cell_width, top,
+                            layout->cell_width, (float)TIMELINE_HEIGHT_PIXELS };
+    app->fonts.clip = timeline;
+    app->fonts.clipping = true;
+    scissor_begin(&app->fonts, timeline.x, timeline.y, timeline.width, timeline.height);
+    draw_timeline_ghost_block(app, &moved, day);
+    app->fonts.clipping = false;
+    EndScissorMode();
 }
 
 /**
- * Saves the task on the pointer's day, after the checks the form makes, and selects that day. A
- * repeating task moves as a whole, as editing it does. Does nothing if the pointer came back to
- * the day it started on.
+ * The day under the pointer: the column of the hours when it is over them, else the nearest
+ * column, so that a drag past the first or last day stays on it.
  */
-static void task_drag_finish(App *app, int32_t pointer_day) {
-    Task_Drag const *drag = &app->task_drag;
-    assert(drag->event_id != 0);
-    assert(drag->moved);
-
-    // Gone when a reload meanwhile no longer has it, as after a phone deleted it.
-    Event const *task = app_event_find(app, drag->event_id);
-    int32_t const day_delta = pointer_day - drag->press_day;
-    if (task == NULL || day_delta == 0) {
-        return;
+static int32_t task_drag_pointer_day(Layout const *layout, Vector2 pointer, int32_t first_day) {
+    int32_t column = timeline_column_at(layout, pointer);
+    if (column < 0) {
+        column = timeline_column_nearest(layout, pointer.x);
     }
+    return first_day + column;
+}
+
+/**
+ * The task as the drag would leave it: its dates shifted by the days from the day pressed to the
+ * day under the pointer, so that a repeating task moves as a whole, as editing it does. Over the
+ * hours, a task of one day also gets the time under the pointer, snapped as drawing a block is,
+ * as its start; its length is then the default one, as for any item with one time. A task of
+ * several days has no time to give, since an item is on the hours only within a day.
+ */
+static Event task_drag_result(App const *app, Layout const *layout, Event const *task,
+                              int32_t press_day, int32_t first_day, Vector2 pointer) {
+    assert(!event_is_timed(task));
+
+    int32_t const day_delta = task_drag_pointer_day(layout, pointer, first_day) - press_day;
     Event moved = *task;
     moved.start_date = date_add_days(task->start_date, day_delta);
     moved.end_date = date_add_days(task->end_date, day_delta);
-    Str const mistake = form_parse_order(&moved);
+    bool const over_hours = timeline_column_at(layout, pointer) >= 0;
+    if (over_hours && event_duration_days(task) == 0) {
+        float const top = layout->timeline.y - app->timeline_scroll.offset_pixels;
+        int32_t const step = timeline_step(app->timeline_fine);
+        int32_t const minute = minute_snap(timeline_minute_at(pointer.y, top), step);
+        // Kept in the day, with room for one step.
+        moved.start_minute = int32_min(minute, MINUTES_PER_DAY - step);
+    }
+    return moved;
+}
+
+/**
+ * Saves the task as moved, after the checks the form makes, and selects the day it now has where
+ * it was pressed. Gives the reason in the status bar if it cannot, and leaves the task as it was.
+ */
+static void task_drag_finish(App *app, Event const *task, Event const *moved, int32_t press_day) {
+    assert(task->id == moved->id);
+
+    Str const mistake = form_parse_order(moved);
     if (mistake.length > 0) {
         snprintf(app->status, sizeof(app->status), "Not moved: %.*s", STR_ARGUMENTS(mistake));
         return;
     }
-    if (!backend_update(app->backend, &moved)) {
+    if (!backend_update(app->backend, moved)) {
         Str const reason = backend_error(app->backend);
         snprintf(app->status, sizeof(app->status), "Not moved: %.*s", STR_ARGUMENTS(reason));
         return;
     }
     app->events_stale = true;
-    app_select(app, date_from_day_number(pointer_day));
-    app->event_focused_id = moved.id;
-    snprintf(app->status, sizeof(app->status), "Updated \"%s\".", moved.title);
+    int32_t const day_delta = date_to_day_number(moved->start_date) -
+                              date_to_day_number(task->start_date);
+    app_select(app, date_from_day_number(press_day + day_delta));
+    app->event_focused_id = moved->id;
+    snprintf(app->status, sizeof(app->status), "Updated \"%s\".", moved->title);
 }
 
 /**
@@ -2461,6 +2509,10 @@ static bool timeline_mark_can_start(App const *app) {
     if (app->timeline_drag.event_id != 0 || app->timeline_hit.event_id != 0) {
         return false;
     }
+    // A task being dragged to the hours is not a block being drawn.
+    if (app->task_drag.event_id != 0) {
+        return false;
+    }
     return !app->form.open;
 }
 
@@ -2651,7 +2703,6 @@ static bool form_ghost_event(Form const *form, Event *event) {
  * among them in lanes is known only once it is saved.
  */
 static void draw_timeline_ghost_block(App const *app, Event const *event, Rectangle day) {
-    assert(event->id == 0);
     assert(event_is_timed(event));
 
     // The same top and length the saved item will have, including the defaults for an item
