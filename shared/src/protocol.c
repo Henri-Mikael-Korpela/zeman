@@ -1,3 +1,4 @@
+#include <zeman/byte.h>
 #include <zeman/protocol.h>
 
 #include <assert.h>
@@ -15,12 +16,12 @@ Writer writer_make(Array_Slice buffer) {
     return (Writer){ .buffer = buffer, .length = 0, .overflow = false };
 }
 
-void writer_u8(Writer *writer, uint8_t value) {
+void writer_u8(Writer *writer, byte value) {
     writer_bytes(writer, &value, 1);
 }
 
 void writer_u32(Writer *writer, uint32_t value) {
-    uint8_t bytes[4] = { 0 };
+    byte bytes[4] = { 0 };
     protocol_length_write(bytes, value);
     writer_bytes(writer, bytes, sizeof(bytes));
 }
@@ -41,7 +42,7 @@ void writer_i64(Writer *writer, int64_t value) {
 void writer_text(Writer *writer, Str text) {
     // The prefix has two bytes, so a longer text cannot be told to the reader.
     assert(text.length <= UINT16_MAX);
-    uint8_t prefix[2] = { (uint8_t)(text.length & 0xFF), (uint8_t)(text.length >> 8) };
+    byte prefix[2] = { (byte)(text.length & 0xFF), (byte)(text.length >> 8) };
     writer_bytes(writer, prefix, sizeof(prefix));
     writer_bytes(writer, text.data, text.length);
 }
@@ -89,9 +90,9 @@ void writer_event(Writer *writer, Event const *event) {
     writer_i32(writer, event->repeat_unit);
     writer_i32(writer, event->repeat_interval);
     writer_i32(writer, event->kind);
-    writer_u8(writer, (uint8_t)event->repeat_has_end);
-    writer_u8(writer, (uint8_t)event->has_deadline);
-    writer_u8(writer, (uint8_t)event->tasks_done);
+    writer_u8(writer, (byte)event->repeat_has_end);
+    writer_u8(writer, (byte)event->has_deadline);
+    writer_u8(writer, (byte)event->tasks_done);
     writer_text(writer, str_from_cstr(event->title));
     writer_text(writer, str_from_cstr(event->description));
 }
@@ -104,7 +105,7 @@ void writer_completion(Writer *writer, Task_Completion const *completion) {
 void writer_linked_task(Writer *writer, Linked_Task const *task) {
     writer_event(writer, &task->task);
     writer_i32(writer, task->occurrence_start_day);
-    writer_u8(writer, (uint8_t)task->done);
+    writer_u8(writer, (byte)task->done);
 }
 
 /**
@@ -117,14 +118,14 @@ void writer_link_target(Writer *writer, Link_Target const *target) {
     writer_i32(writer, target->task_count);
     writer_i32(writer, target->task_done_count);
     writer_i32(writer, target->kind);
-    writer_u8(writer, (uint8_t)target->linked);
+    writer_u8(writer, (byte)target->linked);
     writer_text(writer, str_from_cstr(target->title));
 }
 
 void writer_task_occurrence(Writer *writer, Task_Occurrence const *occurrence) {
     writer_event(writer, &occurrence->task);
     writer_i32(writer, occurrence->start_day);
-    writer_u8(writer, (uint8_t)occurrence->done);
+    writer_u8(writer, (byte)occurrence->done);
 }
 
 Reader reader_make(Array_Slice buffer) {
@@ -133,14 +134,14 @@ Reader reader_make(Array_Slice buffer) {
     return (Reader){ .buffer = buffer, .position = 0, .failed = false };
 }
 
-uint8_t reader_u8(Reader *reader) {
-    uint8_t value = 0;
+byte reader_u8(Reader *reader) {
+    byte value = 0;
     reader_bytes(reader, &value, 1);
     return value;
 }
 
 uint32_t reader_u32(Reader *reader) {
-    uint8_t bytes[4] = { 0, 0, 0, 0 };
+    byte bytes[4] = { 0, 0, 0, 0 };
     reader_bytes(reader, bytes, sizeof(bytes));
     return protocol_length_read(bytes);
 }
@@ -163,7 +164,7 @@ void reader_text(Reader *reader, char *text, size_t text_size) {
     assert(text_size > 0);
 
     text[0] = '\0';
-    uint8_t prefix[2] = { 0, 0 };
+    byte prefix[2] = { 0, 0 };
     if (!reader_bytes(reader, prefix, sizeof(prefix))) {
         return;
     }
@@ -182,7 +183,7 @@ void reader_text(Reader *reader, char *text, size_t text_size) {
 }
 
 Str reader_str(Reader *reader) {
-    uint8_t prefix[2] = { 0, 0 };
+    byte prefix[2] = { 0, 0 };
     if (!reader_bytes(reader, prefix, sizeof(prefix))) {
         return str_make("", 0);
     }
@@ -273,7 +274,7 @@ Linked_Task reader_linked_task(Reader *reader) {
     Linked_Task task = { 0 };
     task.task = reader_event(reader);
     task.occurrence_start_day = reader_i32(reader);
-    uint8_t done = reader_u8(reader);
+    byte done = reader_u8(reader);
     task.done = done == 1;
     if (reader->failed || task.task.kind != EVENT_KIND_TASK || done > 1) {
         reader->failed = true;
@@ -301,7 +302,7 @@ Link_Target reader_link_target(Reader *reader) {
     target.task_count = reader_i32(reader);
     target.task_done_count = reader_i32(reader);
     target.kind = reader_i32(reader);
-    uint8_t linked = reader_u8(reader);
+    byte linked = reader_u8(reader);
     reader_text(reader, target.title, sizeof(target.title));
     target.linked = linked == 1;
     if (target.target_id <= 0 || linked > 1 || target.title[0] == '\0') {
@@ -331,7 +332,7 @@ Task_Occurrence reader_task_occurrence(Reader *reader) {
     Task_Occurrence occurrence = { 0 };
     occurrence.task = reader_event(reader);
     occurrence.start_day = reader_i32(reader);
-    uint8_t done = reader_u8(reader);
+    byte done = reader_u8(reader);
     occurrence.done = done == 1;
     if (reader->failed || occurrence.task.kind != EVENT_KIND_TASK || done > 1) {
         reader->failed = true;
@@ -353,14 +354,14 @@ bool reader_done(Reader const *reader) {
     return !reader->failed && reader->position == (size_t)reader->buffer.count;
 }
 
-void protocol_length_write(uint8_t *bytes, uint32_t length) {
-    bytes[0] = (uint8_t)(length & 0xFF);
-    bytes[1] = (uint8_t)((length >> 8) & 0xFF);
-    bytes[2] = (uint8_t)((length >> 16) & 0xFF);
-    bytes[3] = (uint8_t)((length >> 24) & 0xFF);
+void protocol_length_write(byte *bytes, uint32_t length) {
+    bytes[0] = (byte)(length & 0xFF);
+    bytes[1] = (byte)((length >> 8) & 0xFF);
+    bytes[2] = (byte)((length >> 16) & 0xFF);
+    bytes[3] = (byte)((length >> 24) & 0xFF);
 }
 
-uint32_t protocol_length_read(uint8_t const *bytes) {
+uint32_t protocol_length_read(byte const *bytes) {
     return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) | ((uint32_t)bytes[2] << 16) |
            ((uint32_t)bytes[3] << 24);
 }
@@ -371,7 +372,7 @@ static void writer_bytes(Writer *writer, void const *bytes, size_t count) {
         writer->overflow = true;
         return;
     }
-    uint8_t *items = writer->buffer.items;
+    byte *items = writer->buffer.items;
     memcpy(items + writer->length, bytes, count);
     writer->length += count;
 }
@@ -383,7 +384,7 @@ static bool reader_bytes(Reader *reader, void *bytes, size_t count) {
         memset(bytes, 0, count);
         return false;
     }
-    uint8_t const *items = reader->buffer.items;
+    byte const *items = reader->buffer.items;
     memcpy(bytes, items + reader->position, count);
     reader->position += count;
     return true;

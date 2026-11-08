@@ -1,3 +1,4 @@
+#include <zeman/byte.h>
 #include <zeman/net.h>
 
 #include <assert.h>
@@ -186,7 +187,7 @@ int32_t net_recv(Net_Socket socket, Array_Slice bytes) {
 }
 
 bool net_send_all(Net_Socket socket, Array_Slice bytes, int32_t timeout_ms) {
-    uint8_t *items = bytes.items;
+    byte *items = bytes.items;
     int64_t deadline = net_monotonic_ms() + timeout_ms;
     int32_t sent = 0;
     // Bounded by the deadline: every pass either moves bytes or waits until it.
@@ -207,7 +208,7 @@ bool net_send_all(Net_Socket socket, Array_Slice bytes, int32_t timeout_ms) {
 }
 
 bool net_recv_all(Net_Socket socket, Array_Slice bytes, int32_t timeout_ms) {
-    uint8_t *items = bytes.items;
+    byte *items = bytes.items;
     int64_t deadline = net_monotonic_ms() + timeout_ms;
     int32_t received = 0;
     // Bounded by the deadline, as in net_send_all.

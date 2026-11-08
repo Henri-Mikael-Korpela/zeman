@@ -7,6 +7,7 @@
 #include "qrcodegen.h"
 
 #include <zeman/app.h>
+#include <zeman/byte.h>
 #include <zeman/server.h>
 
 enum {
@@ -18,7 +19,7 @@ enum {
 // The Connected Devices view: a QR code the phone scans to connect, the address to type
 // instead, and the phones connected now.
 typedef struct Devices_View {
-    uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(DEVICES_VIEW_QR_VERSION_MAX)];
+    byte qr[qrcodegen_BUFFER_LEN_FOR_VERSION(DEVICES_VIEW_QR_VERSION_MAX)];
     char link[PROTOCOL_LINK_SIZE];
     bool qr_ready;  // False when the server is off, so there is nothing to connect to
 } Devices_View;

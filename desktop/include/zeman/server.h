@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <zeman/backend.h>
+#include <zeman/byte.h>
 #include <zeman/net.h>
 #include <zeman/protocol.h>
 
@@ -23,8 +24,8 @@ typedef struct Server_Client {
     int32_t response_length;  // Bytes of the response to send, 0 when none
     int32_t response_sent;
     bool active;
-    uint8_t request[PROTOCOL_LENGTH_SIZE + PROTOCOL_REQUEST_SIZE_MAX];
-    uint8_t response[PROTOCOL_LENGTH_SIZE + PROTOCOL_RESPONSE_SIZE_MAX];
+    byte request[PROTOCOL_LENGTH_SIZE + PROTOCOL_REQUEST_SIZE_MAX];
+    byte response[PROTOCOL_LENGTH_SIZE + PROTOCOL_RESPONSE_SIZE_MAX];
     char address[NET_ADDRESS_SIZE];  // The phone's address on the local network
 } Server_Client;
 

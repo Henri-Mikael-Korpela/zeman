@@ -1,3 +1,4 @@
+#include <zeman/byte.h>
 #include <zeman/devices_view.h>
 
 #include <assert.h>
@@ -25,7 +26,7 @@ void devices_view_init(Devices_View *view, Server const *server) {
     }
     protocol_link_format(view->link, sizeof(view->link), str_from_cstr(server->address),
                          server->port);
-    uint8_t scratch[qrcodegen_BUFFER_LEN_FOR_VERSION(DEVICES_VIEW_QR_VERSION_MAX)];
+    byte scratch[qrcodegen_BUFFER_LEN_FOR_VERSION(DEVICES_VIEW_QR_VERSION_MAX)];
     // Medium error correction, which survives glare and a partly hidden code on a screen.
     view->qr_ready = qrcodegen_encodeText(view->link, scratch, view->qr, qrcodegen_Ecc_MEDIUM,
                                           qrcodegen_VERSION_MIN, DEVICES_VIEW_QR_VERSION_MAX,

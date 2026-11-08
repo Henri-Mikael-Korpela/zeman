@@ -8,6 +8,7 @@ endif()
 # C11 for static_assert.
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
 
 # Downloads raylib, raygui, SQLite and Rubik into external/ at the repository root, once.
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/dependencies.cmake")
@@ -126,7 +127,7 @@ if(MSVC)
     set_target_properties(zeman PROPERTIES
         LINK_FLAGS_RELEASE "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
 else()
-    target_compile_options(zeman PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    target_compile_options(zeman PRIVATE -Wall -Wextra -Wpedantic -Werror -UNDEBUG)
     # Debug keeps the console, since raylib's own TraceLog messages (and a crash's stderr) print
     # there; a Release build hides it, as a desktop app's window is the only thing meant to show.
     set_target_properties(zeman PROPERTIES LINK_FLAGS_RELEASE "-mwindows")
@@ -149,7 +150,7 @@ target_include_directories(str_test PRIVATE "${SHARED_INCLUDE_DIR}")
 if(MSVC)
     target_compile_options(str_test PRIVATE /W4 /WX /UNDEBUG)
 else()
-    target_compile_options(str_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    target_compile_options(str_test PRIVATE -Wall -Wextra -Wpedantic -Werror -UNDEBUG)
 endif()
 
 add_executable(wire_test EXCLUDE_FROM_ALL
@@ -164,7 +165,7 @@ target_include_directories(wire_test PRIVATE "${SHARED_INCLUDE_DIR}")
 if(MSVC)
     target_compile_options(wire_test PRIVATE /W4 /WX /UNDEBUG)
 else()
-    target_compile_options(wire_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    target_compile_options(wire_test PRIVATE -Wall -Wextra -Wpedantic -Werror -UNDEBUG)
 endif()
 
 # Code Digger, a tool that counts the calls of C standard library functions in the project's code:
@@ -178,5 +179,5 @@ target_include_directories(code_digger PRIVATE "${SHARED_INCLUDE_DIR}")
 if(MSVC)
     target_compile_options(code_digger PRIVATE /W4 /WX /UNDEBUG)
 else()
-    target_compile_options(code_digger PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    target_compile_options(code_digger PRIVATE -Wall -Wextra -Wpedantic -Werror -UNDEBUG)
 endif()

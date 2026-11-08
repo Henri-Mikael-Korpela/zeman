@@ -1,3 +1,4 @@
+#include <zeman/byte.h>
 #include <zeman/text_box.h>
 
 #include <assert.h>
@@ -35,12 +36,12 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str 
     int32_t i = 0;
     while (i < read_count && pasted_length < room) {
         Str const rest = str_slice(clipboard, (size_t)i, (size_t)read_count);
-        unsigned char const byte = (unsigned char)rest.data[0];
+        byte const character = (byte)rest.data[0];
         int32_t const size = utf8_sequence_size(rest);
-        if (byte == '\n' || byte == '\t') {
+        if (character == '\n' || character == '\t') {
             pasted[pasted_length] = ' ';
             pasted_length++;
-        } else if (byte >= 0x20 && byte != 0x7F && size > 0) {
+        } else if (character >= 0x20 && character != 0x7F && size > 0) {
             if (pasted_length + size > room) {
                 break; // A character that does not fit whole is left out, and the rest with it.
             }
@@ -66,7 +67,7 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str 
 static int32_t utf8_sequence_size(Str text) {
     assert(text.length > 0);
 
-    unsigned char const first = (unsigned char)text.data[0];
+    byte const first = (byte)text.data[0];
     int32_t size = 0;
     if (first < 0x80) {
         size = 1;
@@ -84,7 +85,7 @@ static int32_t utf8_sequence_size(Str text) {
         return 0;
     }
     for (int32_t i = 1; i < size; i++) {
-        if (((unsigned char)text.data[i] & 0xC0) != 0x80) {
+        if (((byte)text.data[i] & 0xC0) != 0x80) {
             return 0;
         }
     }

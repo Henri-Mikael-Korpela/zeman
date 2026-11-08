@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include <zeman/array_slice.h>
+#include <zeman/byte.h>
 #include <zeman/event.h>
 #include <zeman/str.h>
 
@@ -96,7 +97,7 @@ typedef struct Reader {
  * A writer into buffer, a slice of bytes that is not empty, and a reader of the message in it.
  */
 Writer writer_make(Array_Slice buffer);
-void writer_u8(Writer *writer, uint8_t value);
+void writer_u8(Writer *writer, byte value);
 void writer_u32(Writer *writer, uint32_t value);
 void writer_i32(Writer *writer, int32_t value);
 void writer_u64(Writer *writer, uint64_t value);
@@ -110,7 +111,7 @@ void writer_link_target(Writer *writer, Link_Target const *target);
 void writer_task_occurrence(Writer *writer, Task_Occurrence const *occurrence);
 
 Reader reader_make(Array_Slice buffer);
-uint8_t reader_u8(Reader *reader);
+byte reader_u8(Reader *reader);
 uint32_t reader_u32(Reader *reader);
 int32_t reader_i32(Reader *reader);
 uint64_t reader_u64(Reader *reader);
@@ -164,7 +165,7 @@ bool protocol_link_parse(Str link, Str *address, uint16_t *port);
 /**
  * Little-endian length prefix of a message.
  */
-void protocol_length_write(uint8_t *bytes, uint32_t length);
-uint32_t protocol_length_read(uint8_t const *bytes);
+void protocol_length_write(byte *bytes, uint32_t length);
+uint32_t protocol_length_read(byte const *bytes);
 
 #endif

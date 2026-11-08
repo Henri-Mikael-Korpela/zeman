@@ -3,6 +3,7 @@
 // nothing uses. Built and run on request, see desktop/CMakeLists.txt:
 //   cmake --build <build directory> --target code_digger, then run code_digger [--dead-code]
 //   from it with the project's folder as its argument, or from the project's folder without one.
+#include <zeman/byte.h>
 #include <zeman/str.h>
 
 #include <assert.h>
@@ -134,8 +135,8 @@ typedef struct Token {
     // whose body it is in, or -1 outside every definition.
     int32_t owner;
     int32_t span_end;    // For a function's name token: the index of the closing brace of its body
-    uint8_t kind;        // Token_Kind
-    uint8_t definition;  // Definition
+    byte kind;        // Token_Kind
+    byte definition;  // Definition
     bool starts_line;
     bool is_member;      // After "." or "->": a field, which is not one of the names analysed
 } Token;
@@ -151,7 +152,7 @@ typedef struct Symbol {
     Str name;
     char const *path;     // Of the file that defines it
     int32_t line;
-    uint8_t definition;   // Definition
+    byte definition;   // Definition
     bool has_body;        // A function that is defined, not only declared
     bool reachable;
     bool used_outside;    // Used where no definition owns the use, so always needed
@@ -170,7 +171,7 @@ typedef struct Finding {
     Str scope;  // For a local variable: the function it is in
     char const *path;
     int32_t line;
-    uint8_t kind;  // Finding_Kind
+    byte kind;  // Finding_Kind
 } Finding;
 
 // What dead code analysis keeps: every name defined at the top level of a file, which of them
@@ -179,7 +180,7 @@ typedef struct Dead_Code {
     Symbol symbols[SYMBOL_COUNT_MAX];
     Finding findings[FINDING_COUNT_MAX];
     // A bit for each pair of symbols: row uses column, in the body or initializer of the row.
-    uint8_t uses[SYMBOL_COUNT_MAX][SYMBOL_COUNT_MAX / 8];
+    byte uses[SYMBOL_COUNT_MAX][SYMBOL_COUNT_MAX / 8];
     int32_t table[SYMBOL_TABLE_SIZE];  // Symbol index plus one, or 0 for a free slot
     char name_pool[NAME_POOL_SIZE];
     size_t name_pool_size;
@@ -740,8 +741,8 @@ static bool token_add(Token_List *list, Str text, Token_Kind kind, int32_t line,
         .line = line,
         .owner = -1,
         .span_end = -1,
-        .kind = (uint8_t)kind,
-        .definition = (uint8_t)DEFINITION_NONE,
+        .kind = (byte)kind,
+        .definition = (byte)DEFINITION_NONE,
         .starts_line = starts_line,
         .is_member = is_member,
     };
@@ -959,7 +960,7 @@ static int32_t classify_function(Token_List *list, int32_t index, int32_t *state
     Token *tokens = list->items;
     int32_t const count = list->count;
     int32_t const close = matching_close(tokens, count, index + 1);
-    tokens[index].definition = (uint8_t)DEFINITION_FUNCTION_PROTOTYPE;
+    tokens[index].definition = (byte)DEFINITION_FUNCTION_PROTOTYPE;
     for (int32_t i = index + 1; i <= close; i++) {
         tokens[i].owner = index;
     }
@@ -971,7 +972,7 @@ static int32_t classify_function(Token_List *list, int32_t index, int32_t *state
     }
     if (next < count && token_is_punctuation(tokens, count, next, '{')) {
         int32_t const body_close = matching_close(tokens, count, next);
-        tokens[index].definition = (uint8_t)DEFINITION_FUNCTION;
+        tokens[index].definition = (byte)DEFINITION_FUNCTION;
         tokens[index].span_end = body_close;
         classify_body(list, next, body_close, index);
         next = body_close;
@@ -996,7 +997,7 @@ static void classify_body(Token_List *list, int32_t open, int32_t close, int32_t
                                           token_is_punctuation(tokens, count, i + 1, ';') ||
                                           token_is_punctuation(tokens, count, i + 1, '[');
         if (next_starts_variable && declares_name(tokens, count, i)) {
-            tokens[i].definition = (uint8_t)DEFINITION_LOCAL;
+            tokens[i].definition = (byte)DEFINITION_LOCAL;
         }
     }
 }
@@ -1030,9 +1031,9 @@ static int32_t classify_object(Token_List *list, int32_t index, int32_t *stateme
         return index + 1;
     }
     if (is_constant) {
-        tokens[index].definition = (uint8_t)DEFINITION_CONSTANT;
+        tokens[index].definition = (byte)DEFINITION_CONSTANT;
     } else {
-        tokens[index].definition = (uint8_t)DEFINITION_VARIABLE;
+        tokens[index].definition = (byte)DEFINITION_VARIABLE;
     }
     int32_t end = index + 1;
     // Past brackets as a whole, so that a semicolon inside an initializer does not end it.
@@ -1074,7 +1075,7 @@ static int32_t classify_enum(Token_List *list, int32_t index) {
             entry++;
             continue;
         }
-        tokens[entry].definition = (uint8_t)DEFINITION_ENUM_CONSTANT;
+        tokens[entry].definition = (byte)DEFINITION_ENUM_CONSTANT;
         int32_t end = entry + 1;
         while (end < close && !token_is_punctuation(tokens, count, end, ',')) {
             if (token_is_punctuation(tokens, count, end, '(')) {
@@ -1109,7 +1110,7 @@ static int32_t classify_directive(Token_List *list, int32_t index) {
                            tokens[name + 1].kind == TOKEN_IDENTIFIER;
     if (is_define && name < count && tokens[name].kind == TOKEN_IDENTIFIER && end > name + 1 &&
         !is_rename) {
-        tokens[name].definition = (uint8_t)DEFINITION_MACRO;
+        tokens[name].definition = (byte)DEFINITION_MACRO;
         for (int32_t i = name + 1; i < end; i++) {
             tokens[i].owner = name;
         }
@@ -1203,7 +1204,7 @@ static bool symbol_define(Dead_Code *dead, Token const *token, char const *path)
         if (has_body && !symbol->has_body) {
             symbol->path = path;
             symbol->line = token->line;
-            symbol->definition = (uint8_t)definition;
+            symbol->definition = (byte)definition;
             symbol->has_body = true;
         }
         return true;
@@ -1220,7 +1221,7 @@ static bool symbol_define(Dead_Code *dead, Token const *token, char const *path)
         .name = name,
         .path = path,
         .line = token->line,
-        .definition = (uint8_t)definition,
+        .definition = (byte)definition,
         .has_body = has_body,
     };
     dead->symbol_count++;
@@ -1258,7 +1259,7 @@ static int32_t symbol_find(Dead_Code const *dead, Str name) {
 static uint32_t name_hash(Str name) {
     uint32_t hash = 2166136261u;
     for (size_t i = 0; i < name.length; i++) {
-        hash ^= (uint8_t)name.data[i];
+        hash ^= (byte)name.data[i];
         hash *= 16777619u;
     }
     return hash;
@@ -1290,7 +1291,7 @@ static void uses_record(Dead_Code *dead, Token_List const *list) {
         if (token->kind != TOKEN_IDENTIFIER || token->is_member) {
             continue;
         }
-        if (token->definition != (uint8_t)DEFINITION_NONE) {
+        if (token->definition != (byte)DEFINITION_NONE) {
             continue;
         }
         int32_t const used = symbol_find(dead, token->text);
@@ -1304,7 +1305,7 @@ static void uses_record(Dead_Code *dead, Token_List const *list) {
         if (user < 0) {
             dead->symbols[used].used_outside = true;
         } else if (user != used) {
-            dead->uses[user][used / 8] |= (uint8_t)(1u << (used % 8));
+            dead->uses[user][used / 8] |= (byte)(1u << (used % 8));
         }
     }
 }
@@ -1318,7 +1319,7 @@ static void uses_record(Dead_Code *dead, Token_List const *list) {
 static bool locals_check(Dead_Code *dead, Token_List const *list, char const *path) {
     for (int32_t i = 0; i < list->count; i++) {
         Token const *token = &list->items[i];
-        if (token->definition != (uint8_t)DEFINITION_LOCAL) {
+        if (token->definition != (byte)DEFINITION_LOCAL) {
             continue;
         }
         Token const *function = &list->items[token->owner];
@@ -1336,7 +1337,7 @@ static bool locals_check(Dead_Code *dead, Token_List const *list, char const *pa
             .scope = name_pool_copy(dead, function->text),
             .path = path,
             .line = token->line,
-            .kind = (uint8_t)FINDING_LOCAL,
+            .kind = (byte)FINDING_LOCAL,
         };
         if (finding.name.data == NULL || finding.scope.data == NULL ||
             !finding_add(dead, finding)) {
@@ -1427,7 +1428,7 @@ static bool symbols_collect(Dead_Code *dead) {
             .scope = (Str){ NULL, 0 },
             .path = symbol->path,
             .line = symbol->line,
-            .kind = (uint8_t)kind,
+            .kind = (byte)kind,
         };
         if (!finding_add(dead, finding)) {
             return false;

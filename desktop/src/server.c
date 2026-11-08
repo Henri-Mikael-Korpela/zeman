@@ -1,3 +1,4 @@
+#include <zeman/byte.h>
 #include <zeman/server.h>
 
 #include <assert.h>
@@ -240,7 +241,7 @@ static void server_client_drop(Server_Client *client) {
 }
 
 static void server_handle(Server *server, Reader *request, Writer *response) {
-    uint8_t const operation = reader_u8(request);
+    byte const operation = reader_u8(request);
     // The byte comes from the network, so values that are no operation are answered, not
     // asserted; the switch below then names every operation, so that a new one cannot be missed.
     if (operation < PROTOCOL_HELLO || operation >= PROTOCOL_OPERATION_END) {
@@ -331,7 +332,7 @@ static void server_handle_load_range(Server *server, Reader *request, Writer *re
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_u8(response, (uint8_t)truncated);
+    writer_u8(response, (byte)truncated);
     writer_i32(response, count);
     for (int32_t i = 0; i < count; i++) {
         writer_event(response, &server->events[i]);
@@ -358,7 +359,7 @@ static void server_handle_load_completions(Server *server, Reader *request, Writ
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_u8(response, (uint8_t)truncated);
+    writer_u8(response, (byte)truncated);
     writer_i32(response, count);
     for (int32_t i = 0; i < count; i++) {
         writer_completion(response, &server->completions[i]);
@@ -404,7 +405,7 @@ static void server_handle_update(Server *server, Reader *request, Writer *respon
 static void server_handle_set_task_done(Server *server, Reader *request, Writer *response) {
     int64_t id = reader_i64(request);
     Date occurrence_start = reader_date(request);
-    uint8_t done = reader_u8(request);
+    byte done = reader_u8(request);
     if (!reader_done(request) || id <= 0 || done > 1) {
         server_fail(response, STR("Invalid request."));
         return;
@@ -453,7 +454,7 @@ static void server_handle_load_target_tasks(Server *server, Reader *request, Wri
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_u8(response, (uint8_t)truncated);
+    writer_u8(response, (byte)truncated);
     writer_i32(response, count);
     for (int32_t i = 0; i < count; i++) {
         writer_linked_task(response, &server->linked_tasks[i]);
@@ -465,7 +466,7 @@ static void server_handle_load_target_tasks(Server *server, Reader *request, Wri
  */
 static void server_handle_load_task_targets(Server *server, Reader *request, Writer *response) {
     int64_t task_id = reader_i64(request);
-    uint8_t problems_only = reader_u8(request);
+    byte problems_only = reader_u8(request);
     int32_t count_max = reader_i32(request);
     if (!reader_done(request) || task_id < 0 || problems_only > 1 || count_max < 1) {
         server_fail(response, STR("Invalid request."));
@@ -483,7 +484,7 @@ static void server_handle_load_task_targets(Server *server, Reader *request, Wri
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_u8(response, (uint8_t)truncated);
+    writer_u8(response, (byte)truncated);
     writer_i32(response, count);
     for (int32_t i = 0; i < count; i++) {
         writer_link_target(response, &server->link_targets[i]);
@@ -542,7 +543,7 @@ static void server_handle_load_tasks(Server *server, Reader *request, Writer *re
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_u8(response, (uint8_t)truncated);
+    writer_u8(response, (byte)truncated);
     writer_i32(response, count);
     for (int32_t i = 0; i < count; i++) {
         writer_task_occurrence(response, &server->task_occurrences[i]);

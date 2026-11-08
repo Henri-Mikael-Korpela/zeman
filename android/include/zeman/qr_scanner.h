@@ -12,6 +12,8 @@
 
 #include "raylib.h"
 
+#include <zeman/byte.h>
+
 enum {
     // Frames small enough to decode every frame, large enough for a code on a screen across a
     // desk. Every Android camera offers this size.
@@ -41,7 +43,7 @@ typedef struct QR_Scanner {
     int32_t sensor_orientation;  // Degrees clockwise that frames turn to be upright
     bool running;
     bool has_frame;  // A frame has arrived, so the preview shows something
-    uint8_t luminance[QR_SCANNER_WIDTH * QR_SCANNER_HEIGHT];
+    byte luminance[QR_SCANNER_WIDTH * QR_SCANNER_HEIGHT];
     char error[QR_SCANNER_ERROR_SIZE];
 } QR_Scanner;
 

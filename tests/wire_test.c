@@ -5,12 +5,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <zeman/byte.h>
 #include <zeman/protocol.h>
 #include <zeman/str.h>
 #include <zeman/text_box.h>
 
 static void test_text_round_trip(void) {
-    uint8_t bytes[64] = { 0 };
+    byte bytes[64] = { 0 };
     Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
     writer_text(&writer, STR("Dentist"));
     writer_text(&writer, STR(""));
@@ -36,25 +37,25 @@ static void test_text_round_trip(void) {
 
 static void test_text_rejects_bad_messages(void) {
     // A length that goes past the end of the message.
-    uint8_t cut[4] = { 9, 0, 'a', 'b' };
+    byte cut[4] = { 9, 0, 'a', 'b' };
     Reader reader = reader_make(array_slice_make(cut, (int32_t)sizeof(cut)));
     assert(reader_str(&reader).length == 0);
     assert(reader.failed);
 
     // A terminator inside the text would make it shorter than it claims to be.
-    uint8_t embedded[5] = { 3, 0, 'a', 0, 'b' };
+    byte embedded[5] = { 3, 0, 'a', 0, 'b' };
     reader = reader_make(array_slice_make(embedded, (int32_t)sizeof(embedded)));
     assert(reader_str(&reader).length == 0);
     assert(reader.failed);
 
     // Not even the two length bytes.
-    uint8_t one[1] = { 1 };
+    byte one[1] = { 1 };
     reader = reader_make(array_slice_make(one, (int32_t)sizeof(one)));
     assert(reader_str(&reader).length == 0);
     assert(reader.failed);
 
     // A text too long for the field fails the copying reader, as before.
-    uint8_t long_text[6] = { 4, 0, 'a', 'b', 'c', 'd' };
+    byte long_text[6] = { 4, 0, 'a', 'b', 'c', 'd' };
     reader = reader_make(array_slice_make(long_text, (int32_t)sizeof(long_text)));
     char small[4] = "";
     reader_text(&reader, small, sizeof(small));
@@ -136,7 +137,7 @@ static void test_occurrence_due(void) {
 }
 
 static void test_task_occurrence_round_trip(void) {
-    static uint8_t bytes[1024];
+    static byte bytes[1024];
     Task_Occurrence occurrence = {
         .task = test_task_make((Date){ 2026, 10, 1 }, REPEAT_WEEK, 1),
         .start_day = test_day(2026, 10, 29),
@@ -164,7 +165,7 @@ static void test_task_occurrence_round_trip(void) {
 }
 
 static void test_linked_task_round_trip(void) {
-    static uint8_t bytes[1024];
+    static byte bytes[1024];
     Linked_Task linked = {
         .task = test_task_make((Date){ 2026, 10, 20 }, REPEAT_NONE, 1),
         .occurrence_start_day = test_day(2026, 10, 20),
@@ -192,7 +193,7 @@ static void test_linked_task_round_trip(void) {
 }
 
 static Event test_event_round_trip(Event const *event, bool *accepted) {
-    static uint8_t bytes[1024];
+    static byte bytes[1024];
     Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
     writer_event(&writer, event);
     assert(!writer.overflow);

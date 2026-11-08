@@ -1,3 +1,4 @@
+#include <zeman/byte.h>
 #include <zeman/qr_scanner.h>
 
 #include <assert.h>
@@ -134,7 +135,7 @@ bool qr_scanner_poll(QR_Scanner *scanner, char *text, size_t text_size) {
 
     int width = 0;
     int height = 0;
-    uint8_t *buffer = quirc_begin(scanner->decoder, &width, &height);
+    byte *buffer = quirc_begin(scanner->decoder, &width, &height);
     assert(width == QR_SCANNER_WIDTH);
     assert(height == QR_SCANNER_HEIGHT);
     memcpy(buffer, scanner->luminance, sizeof(scanner->luminance));
@@ -249,7 +250,7 @@ static bool qr_scanner_open_session(QR_Scanner *scanner) {
         ACaptureRequest_addTarget(scanner->request, scanner->target) != ACAMERA_OK) {
         return false;
     }
-    uint8_t focus = ACAMERA_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
+    byte focus = ACAMERA_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
     ACaptureRequest_setEntry_u8(scanner->request, ACAMERA_CONTROL_AF_MODE, 1, &focus);
     scanner->session_callbacks = (ACameraCaptureSession_stateCallbacks){
         .context = scanner,
@@ -273,7 +274,7 @@ static bool qr_scanner_copy_frame(QR_Scanner *scanner, AImage *image) {
     int32_t width = 0;
     int32_t height = 0;
     int32_t row_stride = 0;
-    uint8_t *data = NULL;
+    byte *data = NULL;
     int length = 0;
     if (AImage_getWidth(image, &width) != AMEDIA_OK ||
         AImage_getHeight(image, &height) != AMEDIA_OK ||

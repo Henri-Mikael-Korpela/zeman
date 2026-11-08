@@ -1,3 +1,4 @@
+#include <zeman/byte.h>
 #include <zeman/str.h>
 
 #include <assert.h>
@@ -217,7 +218,7 @@ static size_t utf8_length_at_most(Str s, size_t length_max) {
     size_t length = length_max;
     // A continuation byte, 10xxxxxx, belongs to the character before it. At most three of them
     // follow a start byte, so this moves back a few bytes at most.
-    while (length > 0 && ((unsigned char)s.data[length] & 0xC0) == 0x80) {
+    while (length > 0 && ((byte)s.data[length] & 0xC0) == 0x80) {
         length--;
     }
     return length;

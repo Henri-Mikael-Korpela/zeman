@@ -1,3 +1,4 @@
+#include <zeman/byte.h>
 #include <zeman/client.h>
 
 #include <assert.h>
@@ -175,7 +176,7 @@ static bool client_set_task_done(void *context, int64_t id, Date occurrence_star
     Writer request = client_request_begin(client, PROTOCOL_SET_TASK_DONE);
     writer_i64(&request, id);
     writer_date(&request, occurrence_start);
-    writer_u8(&request, (uint8_t)done);
+    writer_u8(&request, (byte)done);
     Reader response = { 0 };
     return client_call(client, &request, &response) && client_response_done(client, &response);
 }
@@ -226,7 +227,7 @@ static int32_t client_load_task_targets(void *context, int64_t task_id, bool pro
     Link_Target *target_items = targets.items;
     Writer request = client_request_begin(client, PROTOCOL_LOAD_TASK_TARGETS);
     writer_i64(&request, task_id);
-    writer_u8(&request, (uint8_t)problems_only);
+    writer_u8(&request, (byte)problems_only);
     writer_i32(&request, targets.count);
     Reader response = { 0 };
     if (!client_call(client, &request, &response)) {
@@ -351,7 +352,7 @@ static bool client_connect(Client *client) {
 
     // In its own buffer: connecting happens inside a call whose request is already waiting in
     // client->request, and must not overwrite it.
-    uint8_t hello[PROTOCOL_LENGTH_SIZE + 8] = { 0 };
+    byte hello[PROTOCOL_LENGTH_SIZE + 8] = { 0 };
     Writer request = writer_make(
         array_slice_make(hello + PROTOCOL_LENGTH_SIZE,
                          (int32_t)sizeof(hello) - PROTOCOL_LENGTH_SIZE));
@@ -389,7 +390,7 @@ static Writer client_request_begin(Client *client, Protocol_Operation operation)
 
     Writer request = writer_make(
         array_slice_make(client->request + PROTOCOL_LENGTH_SIZE, PROTOCOL_REQUEST_SIZE_MAX));
-    writer_u8(&request, (uint8_t)operation);
+    writer_u8(&request, (byte)operation);
     return request;
 }
 
@@ -404,8 +405,8 @@ static bool client_exchange(Client *client, Writer const *request, Reader *respo
     // Every request is far smaller than its buffer; overflowing it is a programmer error.
     assert(!request->overflow);
 
-    uint8_t *payload = request->buffer.items;
-    uint8_t *message = payload - PROTOCOL_LENGTH_SIZE;
+    byte *payload = request->buffer.items;
+    byte *message = payload - PROTOCOL_LENGTH_SIZE;
     protocol_length_write(message, (uint32_t)request->length);
     int32_t message_size = (int32_t)(PROTOCOL_LENGTH_SIZE + request->length);
     if (!net_send_all(client->socket, array_slice_make(message, message_size),
@@ -413,7 +414,7 @@ static bool client_exchange(Client *client, Writer const *request, Reader *respo
         client_disconnect(client, "The connection to the desktop app was lost.");
         return false;
     }
-    uint8_t prefix[PROTOCOL_LENGTH_SIZE] = { 0 };
+    byte prefix[PROTOCOL_LENGTH_SIZE] = { 0 };
     if (!net_recv_all(client->socket, array_slice_make(prefix, (int32_t)sizeof(prefix)),
                       CLIENT_IO_TIMEOUT_MS)) {
         client_disconnect(client, "The connection to the desktop app was lost.");

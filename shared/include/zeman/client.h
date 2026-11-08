@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <zeman/backend.h>
+#include <zeman/byte.h>
 #include <zeman/net.h>
 #include <zeman/protocol.h>
 
@@ -24,8 +25,8 @@ typedef struct Client {
     uint16_t port;
     bool connected;
     bool net_started;
-    uint8_t request[PROTOCOL_LENGTH_SIZE + PROTOCOL_REQUEST_SIZE_MAX];
-    uint8_t response[PROTOCOL_RESPONSE_SIZE_MAX];
+    byte request[PROTOCOL_LENGTH_SIZE + PROTOCOL_REQUEST_SIZE_MAX];
+    byte response[PROTOCOL_RESPONSE_SIZE_MAX];
     char host[CLIENT_HOST_SIZE];
     char error[CLIENT_ERROR_SIZE];
 } Client;
