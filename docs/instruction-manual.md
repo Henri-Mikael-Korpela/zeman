@@ -26,7 +26,7 @@ The navigation on the left of the desktop app switches between **Calendar**, **P
 
 - **Calendar** shows your events, tasks and problems by month, week or day, with the selected day's items in a panel on the right.
 - **Problems** shows every problem in four columns, from the least to the most complete: No planned tasks, Planned, Partly completed and Completed, each with how many problems it holds.
-- **Tasks** shows every task in four columns: Overdue, Today, Upcoming and Completed. A repeating task is shown once, at the occurrence that covers today or the next one, so a missed repeat gives way to the next. Click a task's checkbox to mark it completed, or anywhere else on it to open its day in the calendar.
+- **Tasks** shows every task in four columns: Overdue, Today, Upcoming and Completed. A repeating task is shown once, at the occurrence that covers today or the next one, so a missed repeat gives way to the next. Click a task's checkbox to mark it completed, or anywhere else on it to open its day in the calendar. The search bar above the columns narrows them to the tasks it finds: type part of a task's name (in any case) and, optionally, a range with **From** and **To**, each a date (`YYYY-MM-DD`) and an optional time (`HH:MM`). A task is found when the occurrence shown overlaps the range; without a time, From starts at 00:00 and To ends at 23:59. A box left empty sets no limit, so an empty From or To leaves that end of the range open, and **Clear** empties every box to show all tasks again. A box that cannot be read is ignored, and the header says why.
 - **Connected Devices** shows the QR code that phones scan to connect, the address to type instead, and the phones connected now.
 
 ## Connecting a phone

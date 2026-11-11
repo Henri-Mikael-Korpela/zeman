@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 
 #include "raygui.h"
@@ -18,11 +19,29 @@ enum {
     LABEL_SIZE = 96,
     // Right of the checkbox, still counted as a click on it, so that it is easy to hit.
     CHECK_BOX_MARGIN_PIXELS = 4,
+    // As tall as the text boxes and buttons of the calendar's form and the Settings view.
+    SEARCH_HEIGHT_PIXELS = 32,
+    SEARCH_GAP_PIXELS = 8,
+    // Room for "YYYY-MM-DD" and "HH:MM" with the box's padding, and no more, so that the name
+    // gets the rest of the row.
+    SEARCH_DATE_WIDTH_PIXELS = 116,
+    SEARCH_TIME_WIDTH_PIXELS = 68,
+    SEARCH_BUTTON_WIDTH_PIXELS = 80,
+    // Where a text box's own text starts and the calendar's text size, so that a hint drawn in an
+    // empty box sits where typed text will.
+    SEARCH_TEXT_INSET_PIXELS = 6,
+    SEARCH_TEXT_HEIGHT_PIXELS = 18,
 };
 
 // Column headings, indexed by Task_Group.
 static char const *const TASK_GROUP_NAMES[TASK_GROUP_COUNT] = { "Overdue", "Today", "Upcoming",
                                                                 "Completed" };
+
+// What an empty box of the search bar shows, so that the user sees what to type, indexed by
+// Tasks_View_Field.
+static char const *const SEARCH_HINTS[TASKS_VIEW_FIELD_COUNT] = { "Search by name", "YYYY-MM-DD",
+                                                                  "HH:MM", "YYYY-MM-DD",
+                                                                  "HH:MM" };
 
 // The task under the pointer while drawing, acted on once every column is drawn.
 typedef struct Tasks_View_Hit {
@@ -30,12 +49,33 @@ typedef struct Tasks_View_Hit {
     bool check_box;   // Over the task's checkbox rather than the rest of its bar
 } Tasks_View_Hit;
 
+// The search bar read into what a task must match, once a frame. Times are minutes since
+// 1970-01-01, so that a date and a time compare as one number; a bound left empty is the end
+// of the range of int64_t, which every task is within.
+typedef struct Tasks_View_Filter {
+    int64_t from_minute;  // The task must end at or after it
+    int64_t to_minute;    // The task must start at or before it
+    Str name;             // Case-folded, see tasks_view_fold; empty matches every title
+    Str problem;          // Why a box could not be read, for the header; empty when none
+} Tasks_View_Filter;
+
 static void tasks_view_load(Tasks_View *view, Backend *backend, uint64_t revision, Date today);
-static void tasks_view_draw_header(Tasks_View const *view, App const *app, float x, float y,
+static void tasks_view_draw_header(Tasks_View const *view, App const *app, Str problem, float x,
+                                   float y, float width);
+static void tasks_view_draw_search(Tasks_View *view, App const *app, float x, float y,
                                    float width);
+static float tasks_view_draw_search_field(Tasks_View *view, App const *app, int32_t field,
+                                          Rectangle box);
+static Tasks_View_Filter tasks_view_filter_read(Tasks_View const *view, char *name_buffer,
+                                                size_t name_capacity);
+static Str tasks_view_filter_bound(Str date_text, Str time_text, char const *date_problem,
+                                   char const *time_problem, int32_t minute_default,
+                                   int64_t *minute);
+static bool tasks_view_matches(Task_Occurrence const *occurrence, Tasks_View_Filter const *filter);
+static Str tasks_view_fold(Str text, char *buffer, size_t capacity);
 static Tasks_View_Hit tasks_view_draw_column(Tasks_View const *view, App const *app,
-                                             Task_Group group, int32_t count, Rectangle header,
-                                             Rectangle cell);
+                                             Tasks_View_Filter const *filter, Task_Group group,
+                                             int32_t count, Rectangle header, Rectangle cell);
 static Tasks_View_Choice tasks_view_click(Tasks_View *view, Backend *backend, Tasks_View_Hit hit);
 static Task_Group tasks_view_group(Task_Occurrence const *occurrence, Date today);
 
@@ -43,9 +83,14 @@ void tasks_view_init(Tasks_View *view) {
     view->revision = 0;
     view->today = date_today();
     view->task_count = 0;
+    view->field_active = TASKS_VIEW_FIELD_NONE;
     view->loaded = false;
     view->truncated = false;
     view->error[0] = '\0';
+    // Every box empty: no limit on the name or the dates, so that every task shows at first.
+    for (int32_t field = 0; field < TASKS_VIEW_FIELD_COUNT; field++) {
+        view->search[field][0] = '\0';
+    }
 }
 
 Tasks_View_Choice tasks_view_draw(Tasks_View *view, Backend *backend, App const *app,
@@ -64,13 +109,21 @@ Tasks_View_Choice tasks_view_draw(Tasks_View *view, Backend *backend, App const 
     float const x = area.x + PADDING_PIXELS;
     float const width = area.width - 2 * PADDING_PIXELS;
     float y = area.y + PADDING_PIXELS;
-    tasks_view_draw_header(view, app, x, y, width);
-    y += HEADER_HEIGHT_PIXELS + PADDING_PIXELS / 2;
+    // The search bar before the filter is read, so that what was typed this frame shows at once.
+    float const search_y = y + HEADER_HEIGHT_PIXELS + PADDING_PIXELS / 2;
+    tasks_view_draw_search(view, app, x, search_y, width);
+    char name_buffer[EVENT_TITLE_SIZE] = "";
+    Tasks_View_Filter const filter = tasks_view_filter_read(view, name_buffer,
+                                                            sizeof(name_buffer));
+    tasks_view_draw_header(view, app, filter.problem, x, y, width);
+    y = search_y + SEARCH_HEIGHT_PIXELS + PADDING_PIXELS / 2;
 
-    // One pass for the counts that the headers show.
+    // One pass for the counts that the headers show, of the tasks the search finds.
     int32_t counts[TASK_GROUP_COUNT] = { 0 };
     for (int32_t i = 0; i < view->task_count; i++) {
-        counts[tasks_view_group(&view->tasks[i], view->today)]++;
+        if (tasks_view_matches(&view->tasks[i], &filter)) {
+            counts[tasks_view_group(&view->tasks[i], view->today)]++;
+        }
     }
     float const column_width = width / (float)TASK_GROUP_COUNT;
     float const cell_y = y + COLUMN_HEADER_HEIGHT_PIXELS;
@@ -81,7 +134,7 @@ Tasks_View_Choice tasks_view_draw(Tasks_View *view, Backend *backend, App const 
         float const column_x = x + (float)group * column_width;
         Rectangle header = { column_x, y, column_width, COLUMN_HEADER_HEIGHT_PIXELS };
         Rectangle cell = { column_x, cell_y, column_width, cell_height };
-        Tasks_View_Hit column_hit = tasks_view_draw_column(view, app, (Task_Group)group,
+        Tasks_View_Hit column_hit = tasks_view_draw_column(view, app, &filter, (Task_Group)group,
                                                            counts[group], header, cell);
         if (column_hit.index >= 0) {
             hit = column_hit;
@@ -116,16 +169,20 @@ static void tasks_view_load(Tasks_View *view, Backend *backend, uint64_t revisio
 }
 
 /**
- * The heading, and at the right what went wrong or, failing that, that some tasks are left out.
- * The columns stay below an error, so that a failed check-off does not hide the tasks.
+ * The heading, and at the right what went wrong, else why the search cannot be read, else that
+ * some tasks are left out. The columns stay below a note, so that a failed check-off or a date
+ * half typed does not hide the tasks.
  */
-static void tasks_view_draw_header(Tasks_View const *view, App const *app, float x, float y,
-                                   float width) {
+static void tasks_view_draw_header(Tasks_View const *view, App const *app, Str problem, float x,
+                                   float y, float width) {
     assert(width > 0.0f);
 
     app_draw_text(app, APP_TEXT_HEADING, STR("Tasks"), x, y + 4);
     char text[LABEL_SIZE] = "";
     Str note = str_from_cstr(view->error);
+    if (note.length == 0) {
+        note = problem;
+    }
     if (note.length == 0 && view->truncated) {
         snprintf(text, sizeof(text), "Showing %d tasks; the oldest are left out.",
                  TASKS_VIEW_COUNT_MAX);
@@ -139,13 +196,213 @@ static void tasks_view_draw_header(Tasks_View const *view, App const *app, float
 }
 
 /**
+ * One row: the name, which takes the room left, then "From" and "To", each a date and a time,
+ * and a button that empties every box, which lifts every limit again.
+ */
+static void tasks_view_draw_search(Tasks_View *view, App const *app, float x, float y,
+                                   float width) {
+    assert(width > 0.0f);
+
+    float const gap = (float)SEARCH_GAP_PIXELS;
+    float const from_width = app_measure_text(app, APP_TEXT_NORMAL, STR("From"));
+    float const to_width = app_measure_text(app, APP_TEXT_NORMAL, STR("To"));
+    float const bound_width = SEARCH_DATE_WIDTH_PIXELS + gap + SEARCH_TIME_WIDTH_PIXELS;
+    float const fixed_width = 2 * gap + from_width + gap + bound_width + 2 * gap + to_width +
+                              gap + bound_width + gap + SEARCH_BUTTON_WIDTH_PIXELS;
+    // Never narrower than a date box, so that a narrow window still leaves room to type in it.
+    float const name_width = fmaxf(width - fixed_width, (float)SEARCH_DATE_WIDTH_PIXELS);
+    float const height = (float)SEARCH_HEIGHT_PIXELS;
+    float const label_y = y + (height - SEARCH_TEXT_HEIGHT_PIXELS) / 2;
+
+    float left = x;
+    left += tasks_view_draw_search_field(view, app, TASKS_VIEW_FIELD_NAME,
+                                         (Rectangle){ left, y, name_width, height });
+    left += 2 * gap;
+    app_draw_text(app, APP_TEXT_NORMAL, STR("From"), left, label_y);
+    left += from_width + gap;
+    left += tasks_view_draw_search_field(view, app, TASKS_VIEW_FIELD_FROM_DATE,
+                                         (Rectangle){ left, y, SEARCH_DATE_WIDTH_PIXELS, height });
+    left += gap;
+    left += tasks_view_draw_search_field(view, app, TASKS_VIEW_FIELD_FROM_TIME,
+                                         (Rectangle){ left, y, SEARCH_TIME_WIDTH_PIXELS, height });
+    left += 2 * gap;
+    app_draw_text(app, APP_TEXT_NORMAL, STR("To"), left, label_y);
+    left += to_width + gap;
+    left += tasks_view_draw_search_field(view, app, TASKS_VIEW_FIELD_TO_DATE,
+                                         (Rectangle){ left, y, SEARCH_DATE_WIDTH_PIXELS, height });
+    left += gap;
+    left += tasks_view_draw_search_field(view, app, TASKS_VIEW_FIELD_TO_TIME,
+                                         (Rectangle){ left, y, SEARCH_TIME_WIDTH_PIXELS, height });
+    left += gap;
+    if (GuiButton((Rectangle){ left, y, SEARCH_BUTTON_WIDTH_PIXELS, height }, "Clear")) {
+        for (int32_t field = 0; field < TASKS_VIEW_FIELD_COUNT; field++) {
+            view->search[field][0] = '\0';
+        }
+        view->field_active = TASKS_VIEW_FIELD_NONE;
+    }
+}
+
+/**
+ * One text box of the search bar, with its hint while it is empty and not being edited. Returns
+ * its width, for the next box to start after it.
+ */
+static float tasks_view_draw_search_field(Tasks_View *view, App const *app, int32_t field,
+                                          Rectangle box) {
+    assert(field >= 0);
+    assert(field < TASKS_VIEW_FIELD_COUNT);
+
+    bool const editing = view->field_active == field;
+    // raygui returns true when edit mode should toggle: a click on the box, or Enter or a click
+    // elsewhere while editing, as in the calendar's form.
+    if (GuiTextBox(box, view->search[field], (int)sizeof(view->search[field]), editing)) {
+        if (editing) {
+            view->field_active = TASKS_VIEW_FIELD_NONE;
+        } else {
+            view->field_active = field;
+        }
+    }
+    if (view->search[field][0] == '\0' && view->field_active != field) {
+        app_draw_text(app, APP_TEXT_DIM, str_from_cstr(SEARCH_HINTS[field]),
+                      box.x + SEARCH_TEXT_INSET_PIXELS,
+                      box.y + (box.height - SEARCH_TEXT_HEIGHT_PIXELS) / 2);
+    }
+    return box.width;
+}
+
+/**
+ * The search bar as a filter. The range takes in a whole day at each end when its time is left
+ * out: From at 00:00 and To at 23:59. A box that cannot be read sets no limit, and says why.
+ */
+static Tasks_View_Filter tasks_view_filter_read(Tasks_View const *view, char *name_buffer,
+                                                size_t name_capacity) {
+    assert(name_capacity > 0);
+
+    Tasks_View_Filter filter = { .from_minute = INT64_MIN, .to_minute = INT64_MAX,
+                                 .name = STR(""), .problem = STR("") };
+    Str const spaces = STR(" ");
+    Str const name = str_trim_any(str_from_cstr(view->search[TASKS_VIEW_FIELD_NAME]), spaces);
+    filter.name = tasks_view_fold(name, name_buffer, name_capacity);
+    Str const from_problem = tasks_view_filter_bound(
+        str_trim_any(str_from_cstr(view->search[TASKS_VIEW_FIELD_FROM_DATE]), spaces),
+        str_trim_any(str_from_cstr(view->search[TASKS_VIEW_FIELD_FROM_TIME]), spaces),
+        "From date is not YYYY-MM-DD.", "From time is not HH:MM, or has no date.", 0,
+        &filter.from_minute);
+    Str const to_problem = tasks_view_filter_bound(
+        str_trim_any(str_from_cstr(view->search[TASKS_VIEW_FIELD_TO_DATE]), spaces),
+        str_trim_any(str_from_cstr(view->search[TASKS_VIEW_FIELD_TO_TIME]), spaces),
+        "To date is not YYYY-MM-DD.", "To time is not HH:MM, or has no date.",
+        MINUTES_PER_DAY - 1, &filter.to_minute);
+    filter.problem = from_problem;
+    if (filter.problem.length == 0) {
+        filter.problem = to_problem;
+    }
+    // Both read, yet nothing can be found: say so, rather than show empty columns unexplained.
+    if (filter.problem.length == 0 && filter.from_minute > filter.to_minute) {
+        filter.problem = STR("From is after To.");
+    }
+    return filter;
+}
+
+/**
+ * Sets *minute to the date and time typed, with minute_default as the time when none is typed.
+ * Leaves *minute, an open end, when both are empty. Returns why they cannot be read, from the
+ * messages given, or an empty Str; a time without a date cannot be, since it has no day.
+ */
+static Str tasks_view_filter_bound(Str date_text, Str time_text, char const *date_problem,
+                                   char const *time_problem, int32_t minute_default,
+                                   int64_t *minute) {
+    assert(minute_default >= 0);
+    assert(minute_default < MINUTES_PER_DAY);
+
+    if (date_text.length == 0 && time_text.length == 0) {
+        return STR("");
+    }
+    Date date = { 0 };
+    if (!date_parse_iso(date_text, &date)) {
+        if (date_text.length == 0) {
+            return str_from_cstr(time_problem);
+        }
+        return str_from_cstr(date_problem);
+    }
+    int32_t minute_of_day = minute_default;
+    if (time_text.length > 0 && !time_parse(time_text, &minute_of_day)) {
+        return str_from_cstr(time_problem);
+    }
+    assert(minute_of_day >= 0);
+    assert(minute_of_day < MINUTES_PER_DAY);
+    *minute = (int64_t)date_to_day_number(date) * MINUTES_PER_DAY + minute_of_day;
+    return STR("");
+}
+
+/**
+ * Whether the occurrence shows: its title holds the name, in any case, and it overlaps the
+ * range, from its start to its end. A day without a time counts from 00:00 to 23:59, so that a
+ * task of the day is found by any time within it.
+ */
+static bool tasks_view_matches(Task_Occurrence const *occurrence, Tasks_View_Filter const *filter) {
+    Event const *task = &occurrence->task;
+    if (filter->name.length > 0) {
+        char title_buffer[EVENT_TITLE_SIZE] = "";
+        Str const title = tasks_view_fold(str_from_cstr(task->title), title_buffer,
+                                          sizeof(title_buffer));
+        if (str_find(title, filter->name) == STR_NOT_FOUND) {
+            return false;
+        }
+    }
+    int32_t start_minute = 0;
+    if (task->start_minute != TIME_NONE) {
+        start_minute = task->start_minute;
+    }
+    int32_t end_minute = MINUTES_PER_DAY - 1;
+    if (task->end_minute != TIME_NONE) {
+        end_minute = task->end_minute;
+    }
+    int32_t const end_day = occurrence->start_day + event_duration_days(task);
+    int64_t const start = (int64_t)occurrence->start_day * MINUTES_PER_DAY + start_minute;
+    int64_t const end = (int64_t)end_day * MINUTES_PER_DAY + end_minute;
+    if (start > filter->to_minute) {
+        return false;
+    }
+    return end >= filter->from_minute;
+}
+
+/**
+ * text in lower case, copied into buffer, so that a search finds a title in any case: A to Z,
+ * and the capitals of Latin-1 in UTF-8, such as A and O with umlauts, which Finnish titles use.
+ * Other bytes are copied as they are. Cut at capacity, as both texts fit in a title's size.
+ */
+static Str tasks_view_fold(Str text, char *buffer, size_t capacity) {
+    assert(capacity > 0);
+
+    size_t length = text.length;
+    if (length > capacity) {
+        length = capacity;
+    }
+    // Latin-1's capitals are U+00C0 to U+00DE, except U+00D7, the multiplication sign; in UTF-8
+    // 0xC3 then 0x80 to 0x9E, and their small letters 0x20 above.
+    unsigned char const lead_latin1 = 0xC3;
+    for (size_t i = 0; i < length; i++) {
+        unsigned char byte = (unsigned char)text.data[i];
+        if (byte >= 'A' && byte <= 'Z') {
+            byte = (unsigned char)(byte + ('a' - 'A'));
+        }
+        bool const after_lead = i > 0 && (unsigned char)text.data[i - 1] == lead_latin1;
+        if (after_lead && byte >= 0x80 && byte <= 0x9E && byte != 0x97) {
+            byte = (unsigned char)(byte + 0x20);
+        }
+        buffer[i] = (char)byte;
+    }
+    return str_make(buffer, length);
+}
+
+/**
  * The group and its count above, and its tasks as bars in a cell below, like a weekday name
  * above its day. When not all fit, the last line counts the rest. Returns the task under the
  * pointer, if it is in this column.
  */
 static Tasks_View_Hit tasks_view_draw_column(Tasks_View const *view, App const *app,
-                                             Task_Group group, int32_t count, Rectangle header,
-                                             Rectangle cell) {
+                                             Tasks_View_Filter const *filter, Task_Group group,
+                                             int32_t count, Rectangle header, Rectangle cell) {
     assert(count >= 0);
     assert(count <= view->task_count);
 
@@ -181,6 +438,9 @@ static Tasks_View_Hit tasks_view_draw_column(Tasks_View const *view, App const *
         }
         Task_Occurrence const *occurrence = &view->tasks[index];
         if (tasks_view_group(occurrence, view->today) != group) {
+            continue;
+        }
+        if (!tasks_view_matches(occurrence, filter)) {
             continue;
         }
         // Inset as a one-day bar is in its day cell.
