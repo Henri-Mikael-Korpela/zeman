@@ -47,6 +47,15 @@ void writer_text(Writer *writer, Str text) {
     writer_bytes(writer, text.data, text.length);
 }
 
+void writer_blob(Writer *writer, Array_Slice bytes) {
+    assert(bytes.count >= 0);
+
+    writer_u32(writer, (uint32_t)bytes.count);
+    if (bytes.count > 0) {
+        writer_bytes(writer, bytes.items, (size_t)bytes.count);
+    }
+}
+
 void writer_date(Writer *writer, Date date) {
     writer_i32(writer, date.year);
     writer_i32(writer, date.month);
@@ -202,6 +211,21 @@ Str reader_str(Reader *reader) {
         return str_make("", 0);
     }
     return text;
+}
+
+Array_Slice reader_blob(Reader *reader, int32_t size_max) {
+    assert(size_max >= 0);
+
+    uint32_t const size = reader_u32(reader);
+    size_t const available = (size_t)reader->buffer.count - reader->position;
+    if (reader->failed || size > (uint32_t)size_max || size > available) {
+        reader->failed = true;
+        return array_slice_make(NULL, 0);
+    }
+    byte *items = reader->buffer.items;
+    Array_Slice const blob = array_slice_make(items + reader->position, (int32_t)size);
+    reader->position += size;
+    return blob;
 }
 
 Date reader_date(Reader *reader) {

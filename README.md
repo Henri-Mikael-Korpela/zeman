@@ -23,7 +23,7 @@
 - **Tasks:** check tasks off (each occurrence of a repeating task separately), give them a deadline, and see them in four columns: Overdue, Today, Upcoming and Completed.
 - **Problems:** link tasks to the problems they solve, and see which problems are solved or still need work, in four columns from No planned tasks to Completed.
 - **Fast time editing:** draw a new event on the hours, or drag an item's edges or body to change its time; a five-minute zoom makes small steps easy.
-- **Locations and descriptions:** events and tasks can have a shared location and a short description.
+- **Locations and rich descriptions:** events and tasks can have a shared location, and a description of several paragraphs with images and clickable links; paste a screenshot with Ctrl+V or drop image files on it.
 - **Android companion:** the phone shows and edits the desktop's calendar, and changes appear on both within about a second. Connect by scanning a QR code, by picking the desktop the phone finds on the network, or by typing its address.
 - **Private by design:** your data lives in one SQLite file on your computer, and devices talk directly over your local network; nothing goes through the internet or a cloud service.
 - **Portable:** build a self-contained release folder that runs on any Windows 10 or 11 computer, with no installer.

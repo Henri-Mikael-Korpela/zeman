@@ -178,6 +178,35 @@ bool str_copy_truncated(Str s, char *buffer, size_t capacity) {
     return complete;
 }
 
+int32_t str_utf8_sequence_size(Str text) {
+    assert(text.length > 0);
+    assert(text.data != NULL);
+
+    byte const first = (byte)text.data[0];
+    int32_t size = 0;
+    if (first < 0x80) {
+        size = 1;
+    } else if (first >= 0xC2 && first <= 0xDF) {
+        size = 2;
+    } else if (first >= 0xE0 && first <= 0xEF) {
+        size = 3;
+    } else if (first >= 0xF0 && first <= 0xF4) {
+        size = 4;
+    } else {
+        return 0;
+    }
+    // A sequence cut short by the end of the text is not valid either.
+    if ((size_t)size > text.length) {
+        return 0;
+    }
+    for (int32_t i = 1; i < size; i++) {
+        if (((byte)text.data[i] & 0xC0) != 0x80) {
+            return 0;
+        }
+    }
+    return size;
+}
+
 void str_builder_init(Str_Builder *builder, char *buffer, size_t capacity) {
     assert(builder != NULL);
     assert(buffer != NULL || capacity == 0);

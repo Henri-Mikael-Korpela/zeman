@@ -1,6 +1,7 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -18,28 +19,44 @@
 // waits for its response before sending the next.
 //
 // Integers are little-endian; a text is a 16-bit length followed by its bytes, without a
-// terminator; a date is its year, month and day as 32-bit integers.
+// terminator; a blob, such as an image file, is a 32-bit length followed by its bytes; a date
+// is its year, month and day as 32-bit integers.
 
 enum {
     // Raised whenever a message changes shape, so that old apps say so instead of misreading.
     // 2 added the links between problems and the tasks that solve them, 3 whether a problem is
     // done to each event, 4 opportunities as link targets beside problems, and 5 the list of
     // every task for the Tasks view, 6 the deadline of a task, and 7 the whole task with each
-    // task linked to a target.
-    PROTOCOL_VERSION = 7,
+    // task linked to a target, and 8 rich descriptions: longer, with images.
+    PROTOCOL_VERSION = 8,
     PROTOCOL_PORT_DEFAULT = 47800,
     // UDP port where the desktop app answers phones looking for it on the local network.
     PROTOCOL_DISCOVERY_PORT = 47801,
     PROTOCOL_DISCOVERY_SIZE_MAX = 64,
     PROTOCOL_LENGTH_SIZE = 4,
-    // The largest request is an event, well under this.
-    PROTOCOL_REQUEST_SIZE_MAX = 4096,
+    // An event as writer_event writes it, with every text as long as it can be: two ids, four
+    // texts with their 16-bit lengths, five dates, seven integers and three flags.
+    PROTOCOL_EVENT_SIZE_MAX = 2 * 8 + (2 + LOCATION_ADDRESS_SIZE - 1) +
+                              (2 + LOCATION_CITY_SIZE - 1) + 5 * 12 + 7 * 4 + 3 +
+                              (2 + EVENT_TITLE_SIZE - 1) + (2 + EVENT_DESCRIPTION_SIZE - 1),
+    // The largest request is an image being stored: the operation and the image, as a blob.
+    // An event is far smaller.
+    PROTOCOL_REQUEST_SIZE_MAX = 1 + 4 + DESCRIPTION_IMAGE_SIZE_BYTES_MAX,
     // Bounds what one response carries, so that both sides can use fixed buffers.
     PROTOCOL_EVENT_COUNT_MAX = 512,
     PROTOCOL_COMPLETION_COUNT_MAX = 1024,
-    // The largest response, a full range of events, is about 250 KiB.
-    PROTOCOL_RESPONSE_SIZE_MAX = 512 * 1024,
+    // The largest response is a full list of tasks, each an event and five bytes, when every
+    // description is as long as it can be: about 2.2 MiB. An image is about 1 MiB. The usual
+    // response is far smaller, because texts are sent at their own length.
+    PROTOCOL_RESPONSE_SIZE_MAX = 2304 * 1024,
 };
+// Cast because the constants come from different enums.
+static_assert((int64_t)PROTOCOL_REQUEST_SIZE_MAX >= 1 + (int64_t)PROTOCOL_EVENT_SIZE_MAX,
+              "A request holds an event.");
+static_assert(6 + (int64_t)PROTOCOL_EVENT_COUNT_MAX * ((int64_t)PROTOCOL_EVENT_SIZE_MAX + 5) <=
+              (int64_t)PROTOCOL_RESPONSE_SIZE_MAX, "A response holds a full list of tasks.");
+static_assert(1 + 4 + (int64_t)DESCRIPTION_IMAGE_SIZE_BYTES_MAX <=
+              (int64_t)PROTOCOL_RESPONSE_SIZE_MAX, "A response holds an image.");
 
 // Discovery: a phone broadcasts PROTOCOL_DISCOVERY_PROBE to PROTOCOL_DISCOVERY_PORT; each desktop
 // app on the network answers the sender with PROTOCOL_DISCOVERY_REPLY followed by its TCP port
@@ -69,6 +86,10 @@ typedef enum Protocol_Operation {
     PROTOCOL_LOAD_TASK_TARGETS,
     PROTOCOL_SET_TASK_TARGETS,   // task id, count, target ids ->
     PROTOCOL_LOAD_TASKS,         // today, count_max -> truncated, count, task occurrences
+    PROTOCOL_IMAGE_INSERT,       // PNG blob -> id
+    PROTOCOL_IMAGE_LOAD,         // id -> PNG blob
+    PROTOCOL_LOAD_EVENT_IMAGES,  // event id, count_max -> count, image ids
+    PROTOCOL_SET_EVENT_IMAGES,   // event id, count, image ids ->
     PROTOCOL_OPERATION_END,
 } Protocol_Operation;
 
@@ -103,6 +124,10 @@ void writer_i32(Writer *writer, int32_t value);
 void writer_u64(Writer *writer, uint64_t value);
 void writer_i64(Writer *writer, int64_t value);
 void writer_text(Writer *writer, Str text);
+/**
+ * bytes, a slice of bytes, as a blob.
+ */
+void writer_blob(Writer *writer, Array_Slice bytes);
 void writer_date(Writer *writer, Date date);
 void writer_event(Writer *writer, Event const *event);
 void writer_completion(Writer *writer, Task_Completion const *completion);
@@ -126,6 +151,12 @@ void reader_text(Reader *reader, char *text, size_t text_size);
  * reader and is empty.
  */
 Str reader_str(Reader *reader);
+/**
+ * A blob as a slice of the reader's own bytes, valid while that buffer is, without a copy. One
+ * longer than size_max bytes, or cut short by the end of the message, fails the reader and is
+ * empty.
+ */
+Array_Slice reader_blob(Reader *reader, int32_t size_max);
 /**
  * A date that is not a real date fails the reader.
  */

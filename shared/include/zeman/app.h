@@ -18,6 +18,10 @@ typedef struct App_Config {
     // Screen pixels per layout pixel. 1 on the desktop; on a phone, large enough that the
     // portrait layout is 420 layout pixels wide.
     float scale;
+    // The image on the clipboard, for pasting into a description, or NULL where the platform
+    // cannot read one. A function rather than raylib's own, because raylib implements it only
+    // on some platforms, and leaves it undefined on the others.
+    Image (*clipboard_image)(void);
     // Touch screen: swipes change month and the keyboard hints are left out.
     bool touch;
 } App_Config;
@@ -93,6 +97,7 @@ typedef enum App_Cursor {
     APP_CURSOR_HAND,    // Over an item that a click selects or opens
     APP_CURSOR_RESIZE,  // Over, or dragging, the top or bottom edge of an item on the hours
     APP_CURSOR_MOVE,    // Dragging an item on the hours to another time or day
+    APP_CURSOR_TEXT,    // Over a description's text, where a click places the caret
 } App_Cursor;
 
 /**

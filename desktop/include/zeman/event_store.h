@@ -12,7 +12,7 @@ enum {
     // Bytes including the terminator for messages returned to the user interface.
     EVENT_STORE_ERROR_SIZE = 160,
     // Statements prepared at open; event_store.c names them and checks this count.
-    EVENT_STORE_STATEMENT_COUNT = 14,
+    EVENT_STORE_STATEMENT_COUNT = 20,
 };
 
 typedef struct Event_Store {
@@ -109,5 +109,32 @@ bool event_store_set_task_targets(Event_Store *store, int64_t task_id, Array_Sli
  */
 int32_t event_store_load_tasks(Event_Store *store, Date today, Array_Slice tasks,
                                bool *truncated);
+
+/**
+ * Stores the image, png_bytes being a slice of bytes that passes description_image_is_valid,
+ * with no item yet, and returns its id, or 0 on failure.
+ */
+int64_t event_store_image_insert(Event_Store *store, Array_Slice png_bytes);
+
+/**
+ * Copies the bytes of the image with id into png_bytes, a slice of bytes. Returns how many, or
+ * -1 when it fails, the image is not there, or it does not fit.
+ */
+int32_t event_store_image_load(Event_Store *store, int64_t id, Array_Slice png_bytes);
+
+/**
+ * Loads the ids of the item's images in their order into image_ids, a slice of int64_t.
+ * Returns the count, or -1, also when it has more than fit, which only happens to a database
+ * changed by another program.
+ */
+int32_t event_store_load_event_images(Event_Store *store, int64_t event_id,
+                                      Array_Slice image_ids);
+
+/**
+ * Makes image_ids, a slice of int64_t with each given once, the item's images in this order,
+ * and deletes those it had that are not among them. Fails, changing nothing, if one is gone or
+ * belongs to another item.
+ */
+bool event_store_set_event_images(Event_Store *store, int64_t event_id, Array_Slice image_ids);
 
 #endif

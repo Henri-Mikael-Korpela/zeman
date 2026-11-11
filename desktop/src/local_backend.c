@@ -21,6 +21,10 @@ static int32_t local_load_task_targets(void *context, int64_t task_id, bool prob
                                        Array_Slice targets, bool *truncated);
 static bool local_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
 static int32_t local_load_tasks(void *context, Date today, Array_Slice tasks, bool *truncated);
+static int64_t local_image_insert(void *context, Array_Slice png_bytes);
+static int32_t local_image_load(void *context, int64_t id, Array_Slice png_bytes);
+static int32_t local_load_event_images(void *context, int64_t event_id, Array_Slice image_ids);
+static bool local_set_event_images(void *context, int64_t event_id, Array_Slice image_ids);
 static uint64_t local_revision(void *context);
 static Str local_error(void const *context);
 
@@ -36,6 +40,10 @@ static Backend_Ops const LOCAL_OPS = {
     .load_task_targets = local_load_task_targets,
     .set_task_targets = local_set_task_targets,
     .load_tasks = local_load_tasks,
+    .image_insert = local_image_insert,
+    .image_load = local_image_load,
+    .load_event_images = local_load_event_images,
+    .set_event_images = local_set_event_images,
     .revision = local_revision,
     .error = local_error,
 };
@@ -248,6 +256,56 @@ static int32_t local_load_tasks(void *context, Date today, Array_Slice tasks, bo
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
     }
     return count;
+}
+
+static int64_t local_image_insert(void *context, Array_Slice png_bytes) {
+    Local_Backend *local = context;
+    if (!local_available(local)) {
+        return 0;
+    }
+    int64_t const id = event_store_image_insert(&local->store, png_bytes);
+    if (id == 0) {
+        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
+    }
+    // No revision change: the image shows nowhere until an item is given it.
+    return id;
+}
+
+static int32_t local_image_load(void *context, int64_t id, Array_Slice png_bytes) {
+    Local_Backend *local = context;
+    if (!local_available(local)) {
+        return -1;
+    }
+    int32_t const size = event_store_image_load(&local->store, id, png_bytes);
+    if (size < 0) {
+        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
+    }
+    return size;
+}
+
+static int32_t local_load_event_images(void *context, int64_t event_id, Array_Slice image_ids) {
+    Local_Backend *local = context;
+    if (!local_available(local)) {
+        return -1;
+    }
+    int32_t const count = event_store_load_event_images(&local->store, event_id, image_ids);
+    if (count < 0) {
+        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
+    }
+    return count;
+}
+
+static bool local_set_event_images(void *context, int64_t event_id, Array_Slice image_ids) {
+    Local_Backend *local = context;
+    if (!local_available(local)) {
+        return false;
+    }
+    if (!event_store_set_event_images(&local->store, event_id, image_ids)) {
+        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
+        return false;
+    }
+    local_changed(local);
+    return true;
 }
 
 static uint64_t local_revision(void *context) {

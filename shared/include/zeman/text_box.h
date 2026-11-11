@@ -1,6 +1,7 @@
 #ifndef TEXT_BOX_H
 #define TEXT_BOX_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <zeman/str.h>
@@ -18,6 +19,20 @@ enum {
  */
 int32_t text_box_cursor_index(void);
 void text_box_cursor_index_set(int32_t index);
+
+/**
+ * The next character typed this frame, as a Unicode code point, or 0 when none is left; a line
+ * break is '\n' where the platform types one as a character. For text that the calendar edits
+ * itself rather than through raygui, such as a description. Each app's raygui_impl.c defines it
+ * as raygui reads typing there, because Android delivers typing in its own way.
+ */
+int32_t text_input_char_pressed(void);
+
+/**
+ * Whether the key was pressed this frame, or repeats while held, as text editing wants it.
+ * Defined beside text_input_char_pressed, for the same reason.
+ */
+bool text_input_key_pressed(int32_t key);
 
 /**
  * Inserts the clipboard's text into text at cursor_index as one line, because every text box is

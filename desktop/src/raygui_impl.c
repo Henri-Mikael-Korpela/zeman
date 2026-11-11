@@ -20,3 +20,14 @@ void text_box_cursor_index_set(int32_t index) {
     assert(index >= 0);
     textBoxCursorIndex = (int)index;
 }
+
+int32_t text_input_char_pressed(void) {
+    return (int32_t)GetCharPressed();
+}
+
+/**
+ * GLFW repeats a held key, which raylib reports apart from the first press.
+ */
+bool text_input_key_pressed(int32_t key) {
+    return IsKeyPressed((int)key) || IsKeyPressedRepeat((int)key);
+}

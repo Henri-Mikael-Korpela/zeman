@@ -184,7 +184,13 @@ int main(int argc, char **argv) {
     phone.scale = (float)shorter_side / LAYOUT_WIDTH_PIXELS;
     client_init(&phone.client);
     phone.backend = client_backend(&phone.client);
-    App_Config config = { .font_directory = "", .scale = phone.scale, .touch = true };
+    // raylib has no clipboard on Android, for text or images.
+    App_Config config = {
+        .font_directory = "",
+        .scale = phone.scale,
+        .clipboard_image = NULL,
+        .touch = true,
+    };
     phone.app = app_create(&phone.backend, &config);
     phone.view = VIEW_CALENDAR;
     if (settings_load(phone.address, sizeof(phone.address))) {

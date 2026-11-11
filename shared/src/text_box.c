@@ -17,8 +17,6 @@ enum {
 static_assert((int32_t)CLIPBOARD_READ_SIZE_MAX >= (int32_t)TEXT_BOX_SIZE_MAX,
               "A paste can fill any text box.");
 
-static int32_t utf8_sequence_size(Str text);
-
 int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str clipboard) {
     int32_t const length = (int32_t)strlen(text);
     assert(length < text_size);
@@ -37,7 +35,7 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str 
     while (i < read_count && pasted_length < room) {
         Str const rest = str_slice(clipboard, (size_t)i, (size_t)read_count);
         byte const character = (byte)rest.data[0];
-        int32_t const size = utf8_sequence_size(rest);
+        int32_t const size = str_utf8_sequence_size(rest);
         if (character == '\n' || character == '\t') {
             pasted[pasted_length] = ' ';
             pasted_length++;
@@ -58,36 +56,4 @@ int32_t text_box_paste(char *text, int32_t text_size, int32_t cursor_index, Str 
     memcpy(text + cursor_index, pasted, (size_t)pasted_length);
     assert((int32_t)strlen(text) == length + pasted_length);
     return cursor_index + pasted_length;
-}
-
-/**
- * Bytes in the UTF-8 character that text starts with, or 0 when it is not valid UTF-8 there,
- * such as a stray continuation byte or a sequence cut short by the end of the text.
- */
-static int32_t utf8_sequence_size(Str text) {
-    assert(text.length > 0);
-
-    byte const first = (byte)text.data[0];
-    int32_t size = 0;
-    if (first < 0x80) {
-        size = 1;
-    } else if (first >= 0xC2 && first <= 0xDF) {
-        size = 2;
-    } else if (first >= 0xE0 && first <= 0xEF) {
-        size = 3;
-    } else if (first >= 0xF0 && first <= 0xF4) {
-        size = 4;
-    } else {
-        return 0;
-    }
-    // A sequence cut short by the end of the text is not valid either.
-    if ((size_t)size > text.length) {
-        return 0;
-    }
-    for (int32_t i = 1; i < size; i++) {
-        if (((byte)text.data[i] & 0xC0) != 0x80) {
-            return 0;
-        }
-    }
-    return size;
 }

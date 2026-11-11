@@ -76,7 +76,13 @@ A task that does not repeat can have an optional **Deadline**: a date, and optio
 
 An event or task can have a location: fill in its address, its city, or both. Locations are shared, so every item saved with the same address and city links to the same location, and the card shows it below the dates.
 
-Events and tasks also have an optional one-line description (up to 199 characters). Cards show it under the dates and location, wrapped over up to three lines.
+Every item can also have a description: text of several paragraphs, with images and links, of up to 4,095 bytes of text (about a page) and 8 images. Click the **Description** row of the form to open it on a page of its own, where there is room to write; **Done** or Escape goes back to the other fields, and **Save** saves the description with the rest.
+
+- **Typing:** Enter starts a new line. Click to place the cursor, drag or use Shift with the arrow keys to select, and Ctrl+A selects everything. Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selection.
+- **Images:** paste one with Ctrl+V, such as a screenshot or an image copied in a browser, or drop image files (PNG, JPEG, BMP, GIF) on the window while the description is open. An image sits on a line of its own, at the place of the cursor, and is deleted with Backspace or Delete like a character. Images larger than 1,024 pixels on a side are scaled down, and each is stored on the desktop, in the database, as a PNG file of at most 1 MB. Copying text leaves its images out.
+- **Links:** any web address in the text that starts with `http://`, `https://` or `www.` becomes a link by itself, underlined in blue. Ctrl+click a link in the description to open it in your browser, or click it on the item's card in the day's list. On a phone, tap it.
+
+Cards show the start of the description under the dates and location, over up to three lines, with how many images it has. The images show when the item is opened. The phone shows and edits descriptions too, but cannot add images, as it has no clipboard for them.
 
 ### Problems
 
@@ -128,10 +134,12 @@ The mouse wheel scrolls the hours; on a phone, dragging scrolls them.
 | M, W, D | Switch between month, week and day |
 | Z | Toggle the five-minute zoom on the hours |
 | Home | Jump to today |
-| Tab | Move between form fields |
-| Escape | Cancel the form, a drag, a drawn block or a confirmation |
-| Ctrl+V | Paste at the cursor in a field being typed into (line breaks become spaces) |
-| Ctrl+C, Ctrl+X | Copy or cut the whole field, because the text boxes have no selection |
+| Tab | Move between form fields (the description is opened with a click) |
+| Escape | Go back from the description to the form; cancel the form, a drag, a drawn block or a confirmation |
+| Ctrl+V | Paste at the cursor in a field being typed into (line breaks become spaces); in a description, paste text or an image |
+| Ctrl+C, Ctrl+X | Copy or cut the whole field, because the text boxes have no selection; in a description, the selection |
+| Ctrl+A | Select the whole description |
+| Ctrl+click | Open a link in a description |
 
 ## Where your data is kept
 

@@ -174,6 +174,8 @@ int main(int argc, char **argv) {
     App_Config config = {
         .font_directory = GetApplicationDirectory(),
         .scale = 1.0f,
+        // raylib reads the clipboard's image on Windows, which the desktop app runs on.
+        .clipboard_image = GetClipboardImage,
         .touch = false,
     };
     App *app = app_create(&desktop.backend, &config);
@@ -432,8 +434,8 @@ static void desktop_draw(Desktop *desktop, App *app, float width, float height) 
 }
 
 /**
- * The system cursor for each of the app's: a hand as links show, and the arrows that window
- * systems use for resizing and moving.
+ * The system cursor for each of the app's: a hand as links show, the arrows that window
+ * systems use for resizing and moving, and the I-beam of text that can be edited.
  */
 static int desktop_cursor_shape(App_Cursor cursor) {
     switch (cursor) {
@@ -445,6 +447,8 @@ static int desktop_cursor_shape(App_Cursor cursor) {
         return MOUSE_CURSOR_RESIZE_NS;
     case APP_CURSOR_MOVE:
         return MOUSE_CURSOR_RESIZE_ALL;
+    case APP_CURSOR_TEXT:
+        return MOUSE_CURSOR_IBEAM;
     }
 
     assert(false); // Every App_Cursor is handled above.

@@ -156,6 +156,18 @@ static char const *const MIGRATIONS_SQL[] = {
     "        AND deadline_date >= start_date));"
     "ALTER TABLE events ADD COLUMN deadline_time TEXT"
     "    CHECK (deadline_time IS NULL OR deadline_date IS NOT NULL);",
+    // The images of descriptions, as PNG files, in the order of the markers in the description
+    // that stand for them (see rich_text.h). An image is stored as soon as it is pasted, with no
+    // item yet, and given its item when the form is saved; one never given an item is deleted
+    // when the database is next opened. Deleting the item deletes its images. A negative
+    // position marks an image that is being replaced (see event_store_set_event_images).
+    "CREATE TABLE description_images ("
+    "    id INTEGER PRIMARY KEY,"
+    "    event_id INTEGER REFERENCES events (id) ON DELETE CASCADE,"
+    "    position INTEGER NOT NULL DEFAULT 0,"
+    "    png BLOB NOT NULL CHECK (length(png) > 0)"
+    ");"
+    "CREATE INDEX description_images_by_event ON description_images (event_id, position);",
 };
 enum { SCHEMA_VERSION = sizeof(MIGRATIONS_SQL) / sizeof(MIGRATIONS_SQL[0]) };
 
@@ -183,6 +195,12 @@ typedef enum Statement {
     STATEMENT_TASK_TARGETS,
     STATEMENT_TASKS,
     STATEMENT_COMPLETION_EXISTS,
+    STATEMENT_IMAGE_INSERT,
+    STATEMENT_IMAGE_SELECT,
+    STATEMENT_EVENT_IMAGES,
+    STATEMENT_IMAGES_RELEASE,
+    STATEMENT_IMAGE_CLAIM,
+    STATEMENT_IMAGES_DELETE_RELEASED,
     STATEMENT_COUNT,
 } Statement;
 
@@ -294,6 +312,20 @@ static char const *const STATEMENTS_SQL[STATEMENT_COUNT] = {
         " ORDER BY e.repeat_unit IS NULL, e.start_date DESC, e.id DESC LIMIT ?1;",
     [STATEMENT_COMPLETION_EXISTS] =
         "SELECT 1 FROM task_completions WHERE event_id = ?1 AND occurrence_date = ?2;",
+    [STATEMENT_IMAGE_INSERT] = "INSERT INTO description_images (png) VALUES (?1);",
+    [STATEMENT_IMAGE_SELECT] = "SELECT png FROM description_images WHERE id = ?1;",
+    [STATEMENT_EVENT_IMAGES] =
+        "SELECT id FROM description_images WHERE event_id = ?1 ORDER BY position, id LIMIT ?2;",
+    // The three steps of replacing an item's images: mark every one it has as released, claim
+    // the ones it keeps or gains, in order, then delete those still released. ?3 of the claim
+    // is an image of this item or of none, so that one item cannot take another's.
+    [STATEMENT_IMAGES_RELEASE] =
+        "UPDATE description_images SET position = -1 WHERE event_id = ?1;",
+    [STATEMENT_IMAGE_CLAIM] =
+        "UPDATE description_images SET event_id = ?1, position = ?2"
+        " WHERE id = ?3 AND (event_id IS NULL OR event_id = ?1);",
+    [STATEMENT_IMAGES_DELETE_RELEASED] =
+        "DELETE FROM description_images WHERE event_id = ?1 AND position < 0;",
 };
 
 enum {
@@ -341,6 +373,8 @@ static bool event_store_load_target_tasks_row(sqlite3_stmt *statement, Linked_Ta
 static bool event_store_load_task_targets_row(sqlite3_stmt *statement, Link_Target *target);
 static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_id,
                                               Array_Slice target_ids);
+static bool event_store_set_event_images_rows(Event_Store *store, int64_t event_id,
+                                              Array_Slice image_ids);
 static int event_store_load_tasks_done(Event_Store *store, Task_Occurrence *occurrence);
 static int event_store_load_tasks_compare(void const *a, void const *b);
 static bool event_store_migrate(Event_Store *store);
@@ -399,6 +433,12 @@ bool event_store_open(Event_Store *store, char const *path, bool create) {
     if (sqlite3_exec(store->database, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL) !=
         SQLITE_OK) {
         return event_store_fail(store, "Cannot enable foreign keys");
+    }
+    // Images pasted into a form that was then cancelled, or whose saving failed, belong to no
+    // item, and no form of this run can still save them.
+    if (sqlite3_exec(store->database, "DELETE FROM description_images WHERE event_id IS NULL;",
+                     NULL, NULL, NULL) != SQLITE_OK) {
+        return event_store_fail(store, "Cannot delete unused images");
     }
     // Persistent: these statements live for the whole session.
     for (int32_t i = 0; i < STATEMENT_COUNT; i++) {
@@ -810,6 +850,164 @@ int32_t event_store_load_tasks(Event_Store *store, Date today, Array_Slice tasks
     assert(task_count <= task_count_max);
     qsort(task_items, (size_t)task_count, sizeof(task_items[0]), event_store_load_tasks_compare);
     return task_count;
+}
+
+int64_t event_store_image_insert(Event_Store *store, Array_Slice png_bytes) {
+    assert(store != NULL);
+    assert(description_image_is_valid(png_bytes));
+
+    sqlite3_stmt *statement = store->statements[STATEMENT_IMAGE_INSERT];
+    // SQLITE_STATIC: the bytes stay put until the statement has run, below.
+    int result = sqlite3_bind_blob(statement, 1, png_bytes.items, png_bytes.count,
+                                   SQLITE_STATIC);
+    if (!event_store_write(store, statement, result, "Cannot save the image", false)) {
+        return 0;
+    }
+    int64_t const id = sqlite3_last_insert_rowid(store->database);
+    assert(id > 0);
+    return id;
+}
+
+int32_t event_store_image_load(Event_Store *store, int64_t id, Array_Slice png_bytes) {
+    assert(store != NULL);
+    assert(id > 0);
+    assert(png_bytes.count > 0);
+
+    sqlite3_stmt *statement = store->statements[STATEMENT_IMAGE_SELECT];
+    int result = sqlite3_bind_int64(statement, 1, id);
+    int32_t size = -1;
+    if (result == SQLITE_OK) {
+        result = sqlite3_step(statement);
+    }
+    if (result == SQLITE_ROW) {
+        int const stored_size = sqlite3_column_bytes(statement, 0);
+        void const *stored = sqlite3_column_blob(statement, 0);
+        if (stored != NULL && stored_size > 0 && stored_size <= png_bytes.count) {
+            memcpy(png_bytes.items, stored, (size_t)stored_size);
+            size = (int32_t)stored_size;
+        }
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    if (result != SQLITE_ROW && result != SQLITE_DONE) {
+        event_store_fail(store, "Cannot load the image");
+        return -1;
+    }
+    if (size < 0) {
+        snprintf(store->error, sizeof(store->error), "The image is gone, or too large.");
+        return -1;
+    }
+    assert(size <= png_bytes.count);
+    return size;
+}
+
+int32_t event_store_load_event_images(Event_Store *store, int64_t event_id,
+                                      Array_Slice image_ids) {
+    assert(event_id > 0);
+    assert(image_ids.count > 0);
+
+    int64_t *ids = image_ids.items;
+    int32_t const id_count_max = image_ids.count;
+    sqlite3_stmt *statement = store->statements[STATEMENT_EVENT_IMAGES];
+    int result = bind_id_and_limit(statement, event_id, id_count_max);
+    int32_t id_count = 0;
+    bool too_many = false;
+    // Bounded by the LIMIT: at most id_count_max + 1 rows come back.
+    for (int32_t row_index = 0; result == SQLITE_OK && row_index <= id_count_max; row_index++) {
+        int const step = sqlite3_step(statement);
+        if (step == SQLITE_DONE) {
+            break;
+        }
+        if (step != SQLITE_ROW) {
+            result = step;
+            break;
+        }
+        if (row_index == id_count_max) {
+            too_many = true;
+            break;
+        }
+        ids[id_count] = sqlite3_column_int64(statement, 0);
+        id_count++;
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    if (result != SQLITE_OK) {
+        event_store_fail(store, "Cannot load the images");
+        return -1;
+    }
+    if (too_many) {
+        snprintf(store->error, sizeof(store->error), "The item has more images than allowed.");
+        return -1;
+    }
+    assert(id_count <= id_count_max);
+    return id_count;
+}
+
+/**
+ * One transaction, as for a task's links, so that an image that cannot be kept leaves the
+ * item's images as they were.
+ */
+bool event_store_set_event_images(Event_Store *store, int64_t event_id, Array_Slice image_ids) {
+    assert(event_id > 0);
+    assert(image_ids.count >= 0);
+    assert(image_ids.count <= DESCRIPTION_IMAGE_COUNT_MAX);
+
+    if (sqlite3_exec(store->database, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
+        return event_store_fail(store, "Cannot save the images");
+    }
+    bool ok = event_store_set_event_images_rows(store, event_id, image_ids);
+    if (ok) {
+        if (sqlite3_exec(store->database, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
+            ok = event_store_fail(store, "Cannot save the images");
+        }
+    }
+    if (!ok) {
+        // The message is already copied, so the rollback cannot overwrite it.
+        sqlite3_exec(store->database, "ROLLBACK;", NULL, NULL, NULL);
+    }
+    return ok;
+}
+
+/**
+ * Releases the item's images, claims the given ones in order, and deletes the rest, inside the
+ * caller's transaction.
+ */
+static bool event_store_set_event_images_rows(Event_Store *store, int64_t event_id,
+                                              Array_Slice image_ids) {
+    int64_t const *ids = image_ids.items;
+    sqlite3_stmt *statement = store->statements[STATEMENT_IMAGES_RELEASE];
+    int result = sqlite3_bind_int64(statement, 1, event_id);
+    // No row check: the item may have had no images.
+    if (!event_store_write(store, statement, result, "Cannot save the images", false)) {
+        return false;
+    }
+    statement = store->statements[STATEMENT_IMAGE_CLAIM];
+    for (int32_t i = 0; i < image_ids.count; i++) {
+        assert(ids[i] > 0);
+        for (int32_t j = 0; j < i; j++) {
+            assert(ids[j] != ids[i]); // The caller sends each image once.
+        }
+        result = sqlite3_bind_int64(statement, 1, event_id);
+        if (result == SQLITE_OK) {
+            result = sqlite3_bind_int(statement, 2, i);
+        }
+        if (result == SQLITE_OK) {
+            result = sqlite3_bind_int64(statement, 3, ids[i]);
+        }
+        if (!event_store_write(store, statement, result, "Cannot save the images", false)) {
+            return false;
+        }
+        // No row means the image is gone, or belongs to another item (see the statement).
+        if (sqlite3_changes(store->database) != 1) {
+            snprintf(store->error, sizeof(store->error),
+                     "An image of the description is gone or belongs to another item; add it "
+                     "again.");
+            return false;
+        }
+    }
+    statement = store->statements[STATEMENT_IMAGES_DELETE_RELEASED];
+    result = sqlite3_bind_int64(statement, 1, event_id);
+    return event_store_write(store, statement, result, "Cannot save the images", false);
 }
 
 /**

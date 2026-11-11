@@ -128,6 +128,13 @@ bool str_to_cstr(Str s, char *buffer, size_t capacity);
 bool str_copy_truncated(Str s, char *buffer, size_t capacity);
 
 /**
+ * Bytes in the UTF-8 character that text starts with, which is not empty, or 0 when it is not
+ * valid UTF-8 there, such as a stray continuation byte or a sequence cut short by the end of
+ * the text.
+ */
+int32_t str_utf8_sequence_size(Str text);
+
+/**
  * Starts an empty builder that writes into buffer, which has room for capacity bytes.
  */
 void str_builder_init(Str_Builder *builder, char *buffer, size_t capacity);

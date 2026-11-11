@@ -27,7 +27,7 @@ The Android app is a native activity: all of its logic is the C library `libmain
 - `assets/` App icons.
 - `cmake/` `dependencies.cmake`, which downloads the third-party code.
 - `external/` The downloaded third-party code (not committed; see below).
-- `tests/` Tests of shared code that need no window or database (`str_test`, `wire_test`).
+- `tests/` Tests of shared code that need no window or database (`str_test`, `wire_test`, `rich_text_test`).
 - `tools/` Small programs that help with developing the project and are not shipped with the apps; see [Code Digger](#development-tools-code-digger).
 - `docs/` This documentation.
 
@@ -52,7 +52,9 @@ The Android build also downloads its own build tools into `android/tools/`: a JD
 
 ## Data storage
 
-Events are stored in `zeman.db`, an SQLite database in the repository root, whichever build directory the executable is in. CMake gives the executable that absolute path, so deleting a build directory does not delete the events; moving the repository means building again. The file is not committed. Databases from earlier versions are upgraded automatically when opened.
+Events are stored in `zeman.db`, an SQLite database in the repository root, whichever build directory the executable is in.
+
+A description is rich text (see `shared/include/zeman/rich_text.h`): UTF-8 text with line breaks in the `description` column of `events`, in which each image is one U+FFFC OBJECT REPLACEMENT CHARACTER. The images are PNG files in the `description_images` table, in the order of their markers, so the nth marker shows the nth image; they are loaded only when an item's form opens, so that the calendar's lists stay small. An image is stored as soon as it is pasted, with no item, and given its item when the form is saved; one that is never given one is deleted the next time the database is opened. Links are not stored: a web address in the text is found when it is drawn. CMake gives the executable that absolute path, so deleting a build directory does not delete the events; moving the repository means building again. The file is not committed. Databases from earlier versions are upgraded automatically when opened.
 
 A `desktop/release/` build is the exception: it is built with `ZEMAN_DATABASE_NEXT_TO_EXECUTABLE`, so `zeman.db` sits next to `zeman.exe` and the whole folder can be copied elsewhere as one self-contained unit. That executable is statically linked against raylib, raygui and SQLite; its only external dependencies are Windows system DLLs and the Universal CRT, which Windows 10 and 11 already ship.
 

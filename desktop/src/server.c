@@ -29,6 +29,10 @@ static void server_handle_load_target_tasks(Server *server, Reader *request, Wri
 static void server_handle_load_task_targets(Server *server, Reader *request, Writer *response);
 static void server_handle_set_task_targets(Server *server, Reader *request, Writer *response);
 static void server_handle_load_tasks(Server *server, Reader *request, Writer *response);
+static void server_handle_image_insert(Server *server, Reader *request, Writer *response);
+static void server_handle_image_load(Server *server, Reader *request, Writer *response);
+static void server_handle_load_event_images(Server *server, Reader *request, Writer *response);
+static void server_handle_set_event_images(Server *server, Reader *request, Writer *response);
 static bool server_range_is_valid(Date first, Date last);
 static void server_fail(Writer *response, Str message);
 
@@ -203,7 +207,7 @@ static void server_client_poll(Server *server, Server_Client *client) {
     Writer response = writer_make(
         array_slice_make(client->response + PROTOCOL_LENGTH_SIZE, PROTOCOL_RESPONSE_SIZE_MAX));
     server_handle(server, &request, &response);
-    // The largest response, a full range of events, fits with room to spare.
+    // The largest response, a full list of tasks, fits (see PROTOCOL_RESPONSE_SIZE_MAX).
     assert(!response.overflow);
     protocol_length_write(client->response, (uint32_t)response.length);
     client->response_length = PROTOCOL_LENGTH_SIZE + (int32_t)response.length;
@@ -306,6 +310,18 @@ static void server_handle(Server *server, Reader *request, Writer *response) {
         return;
     case PROTOCOL_LOAD_TASKS:
         server_handle_load_tasks(server, request, response);
+        return;
+    case PROTOCOL_IMAGE_INSERT:
+        server_handle_image_insert(server, request, response);
+        return;
+    case PROTOCOL_IMAGE_LOAD:
+        server_handle_image_load(server, request, response);
+        return;
+    case PROTOCOL_LOAD_EVENT_IMAGES:
+        server_handle_load_event_images(server, request, response);
+        return;
+    case PROTOCOL_SET_EVENT_IMAGES:
+        server_handle_set_event_images(server, request, response);
         return;
     case PROTOCOL_OPERATION_END:
         assert(false); // Excluded by the range check above.
@@ -548,6 +564,96 @@ static void server_handle_load_tasks(Server *server, Reader *request, Writer *re
     for (int32_t i = 0; i < count; i++) {
         writer_task_occurrence(response, &server->task_occurrences[i]);
     }
+}
+
+/**
+ * Only PNG files are stored, so that what the store holds is what the apps can draw.
+ */
+static void server_handle_image_insert(Server *server, Reader *request, Writer *response) {
+    // A view over the request, which outlives this call.
+    Array_Slice const png_bytes = reader_blob(request, DESCRIPTION_IMAGE_SIZE_BYTES_MAX);
+    if (!reader_done(request) || !description_image_is_valid(png_bytes)) {
+        server_fail(response, STR("Invalid image."));
+        return;
+    }
+    int64_t const id = backend_image_insert(server->backend, png_bytes);
+    if (id == 0) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+    writer_i64(response, id);
+}
+
+static void server_handle_image_load(Server *server, Reader *request, Writer *response) {
+    int64_t const id = reader_i64(request);
+    if (!reader_done(request) || id <= 0) {
+        server_fail(response, STR("Invalid request."));
+        return;
+    }
+    int32_t const size = backend_image_load(
+        server->backend, id, array_slice_make(server->image, DESCRIPTION_IMAGE_SIZE_BYTES_MAX));
+    if (size < 0) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+    writer_blob(response, array_slice_make(server->image, size));
+}
+
+static void server_handle_load_event_images(Server *server, Reader *request, Writer *response) {
+    int64_t const event_id = reader_i64(request);
+    int32_t count_max = reader_i32(request);
+    if (!reader_done(request) || event_id <= 0 || count_max < 1) {
+        server_fail(response, STR("Invalid request."));
+        return;
+    }
+    if (count_max > DESCRIPTION_IMAGE_COUNT_MAX) {
+        count_max = DESCRIPTION_IMAGE_COUNT_MAX;
+    }
+    int64_t image_ids[DESCRIPTION_IMAGE_COUNT_MAX] = { 0 };
+    int32_t const count = backend_load_event_images(server->backend, event_id,
+                                                    array_slice_make(image_ids, count_max));
+    if (count < 0) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+    writer_i32(response, count);
+    for (int32_t i = 0; i < count; i++) {
+        writer_i64(response, image_ids[i]);
+    }
+}
+
+/**
+ * The store asserts that each image comes once, so repeats from the network are refused here,
+ * as for a task's links.
+ */
+static void server_handle_set_event_images(Server *server, Reader *request, Writer *response) {
+    int64_t const event_id = reader_i64(request);
+    int32_t const count = reader_i32(request);
+    if (event_id <= 0 || count < 0 || count > DESCRIPTION_IMAGE_COUNT_MAX) {
+        server_fail(response, STR("Invalid request."));
+        return;
+    }
+    int64_t image_ids[DESCRIPTION_IMAGE_COUNT_MAX] = { 0 };
+    bool valid = true;
+    for (int32_t i = 0; i < count; i++) {
+        image_ids[i] = reader_i64(request);
+        valid = valid && image_ids[i] > 0;
+        for (int32_t j = 0; j < i; j++) {
+            valid = valid && image_ids[j] != image_ids[i];
+        }
+    }
+    if (!reader_done(request) || !valid) {
+        server_fail(response, STR("Invalid request."));
+        return;
+    }
+    if (!backend_set_event_images(server->backend, event_id, array_slice_make(image_ids, count))) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
 }
 
 static bool server_range_is_valid(Date first, Date last) {

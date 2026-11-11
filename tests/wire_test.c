@@ -1,6 +1,7 @@
 // Tests of the texts that cross the network and the text boxes: the length-prefixed text of the
 // protocol, the link to the desktop app, and pasting into a text box. Also which occurrence of a
-// task is due, and the task as it crosses the network for the Tasks view.
+// task is due, the task as it crosses the network for the Tasks view, and the blobs and long
+// descriptions of rich text.
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -276,6 +277,69 @@ static void test_paste(void) {
     assert(cursor == 2);
 }
 
+static void test_blob_round_trip(void) {
+    byte bytes[32] = { 0 };
+    byte const image[5] = { 1, 2, 3, 4, 5 };
+    Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+    writer_blob(&writer, array_slice_make((void *)image, (int32_t)sizeof(image)));
+    writer_blob(&writer, array_slice_make(NULL, 0));
+    assert(!writer.overflow);
+    assert(writer.length == 4 + 5 + 4);
+
+    Reader reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+    Array_Slice const first = reader_blob(&reader, 16);
+    assert(first.count == 5);
+    // A view of the message itself, as for texts.
+    assert(first.items == bytes + 4);
+    assert(memcmp(first.items, image, sizeof(image)) == 0);
+    assert(reader_blob(&reader, 16).count == 0);
+    assert(reader_done(&reader));
+
+    // Longer than the reader allows, or than the message holds.
+    reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+    assert(reader_blob(&reader, 4).count == 0);
+    assert(reader.failed);
+    reader = reader_make(array_slice_make(bytes, 6));
+    assert(reader_blob(&reader, 16).count == 0);
+    assert(reader.failed);
+}
+
+/**
+ * A description as long as it can be, with line breaks and an image's marker, crosses the
+ * network whole, within PROTOCOL_EVENT_SIZE_MAX.
+ */
+static void test_long_description_round_trip(void) {
+    static byte bytes[PROTOCOL_EVENT_SIZE_MAX];
+    Event event = test_task_make((Date){ 2026, 11, 11 }, REPEAT_NONE, 1);
+    memset(event.description, 'x', sizeof(event.description) - 1);
+    event.description[sizeof(event.description) - 1] = '\0';
+    event.description[10] = '\n';
+    memcpy(event.description + 20, "\xEF\xBF\xBC", 3);
+    memset(event.location.address, 'a', sizeof(event.location.address) - 1);
+    memset(event.location.city, 'c', sizeof(event.location.city) - 1);
+    memset(event.title, 't', sizeof(event.title) - 1);
+    event.location.id = 3;
+    assert(event_is_valid(&event));
+
+    Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+    writer_event(&writer, &event);
+    assert(!writer.overflow);
+    assert(writer.length == PROTOCOL_EVENT_SIZE_MAX);
+
+    Reader reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+    Event const read = reader_event(&reader);
+    assert(reader_done(&reader));
+    assert(strcmp(read.description, event.description) == 0);
+}
+
+static void test_image_validity(void) {
+    byte png[16] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0 };
+    assert(description_image_is_valid(array_slice_make(png, (int32_t)sizeof(png))));
+    assert(!description_image_is_valid(array_slice_make(png, 7)));
+    png[1] = 'J';
+    assert(!description_image_is_valid(array_slice_make(png, (int32_t)sizeof(png))));
+}
+
 int main(void) {
     test_text_round_trip();
     test_text_rejects_bad_messages();
@@ -285,6 +349,9 @@ int main(void) {
     test_deadline();
     test_linked_task_round_trip();
     test_paste();
+    test_blob_round_trip();
+    test_long_description_round_trip();
+    test_image_validity();
     printf("wire_test: all passed\n");
     return 0;
 }

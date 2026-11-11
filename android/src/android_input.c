@@ -309,6 +309,11 @@ enum { KEY_SYMBOL_COUNT = sizeof(KEY_SYMBOLS) / sizeof(KEY_SYMBOLS[0]) };
  * The character a key types on a US keyboard, or 0 for keys that type none.
  */
 static int32_t android_key_character(int32_t key_code, int32_t meta_state) {
+    // Enter types a line break, which a description takes; raygui's one-line text boxes ignore
+    // it as a character and still see the key itself.
+    if (key_code == AKEYCODE_ENTER || key_code == AKEYCODE_NUMPAD_ENTER) {
+        return '\n';
+    }
     bool const shift = (meta_state & AMETA_SHIFT_ON) != 0;
     bool const caps_lock = (meta_state & AMETA_CAPS_LOCK_ON) != 0;
     if (key_code >= AKEYCODE_A && key_code <= AKEYCODE_Z) {

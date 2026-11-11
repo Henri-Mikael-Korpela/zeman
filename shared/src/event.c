@@ -16,6 +16,11 @@ enum {
     YEAR_DAYS_MIN = 365,
 };
 
+// The eight bytes every PNG file starts with.
+static char const PNG_SIGNATURE[] = { '\x89', 'P', 'N', 'G', '\r', '\n', '\x1A', '\n' };
+enum { PNG_SIGNATURE_SIZE = sizeof(PNG_SIGNATURE) };
+static_assert(PNG_SIGNATURE_SIZE == 8, "A PNG signature has eight bytes.");
+
 static bool event_occurrence_on_day_monthly(Event const *event, int32_t day_number,
                                             int32_t month_step, int32_t *start_day);
 static int32_t event_occurrence_due_latest(Event const *event, int32_t day_number);
@@ -421,6 +426,18 @@ bool event_is_valid(Event const *event) {
         }
     }
     return event_duration_days(event) < event_repeat_gap_days_min(event);
+}
+
+bool description_image_is_valid(Array_Slice png_bytes) {
+    assert(png_bytes.count >= 0);
+
+    if (png_bytes.count < PNG_SIGNATURE_SIZE) {
+        return false;
+    }
+    if (png_bytes.count > DESCRIPTION_IMAGE_SIZE_BYTES_MAX) {
+        return false;
+    }
+    return memcmp(png_bytes.items, PNG_SIGNATURE, PNG_SIGNATURE_SIZE) == 0;
 }
 
 bool event_kind_is_target(int32_t kind) {

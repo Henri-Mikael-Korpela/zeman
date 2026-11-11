@@ -55,6 +55,21 @@ typedef struct Backend_Ops {
     // slice of Task_Occurrence. Returns the count, or -1. When more than tasks.count exist, the
     // repeating tasks and then the latest to start are kept, and *truncated is set.
     int32_t (*load_tasks)(void *context, Date today, Array_Slice tasks, bool *truncated);
+    // Stores an image of a description, png_bytes being the bytes of a PNG file of at most
+    // DESCRIPTION_IMAGE_SIZE_BYTES_MAX, and returns its new id, or 0. It belongs to no item
+    // until set_event_images gives it one; one that is never given one is deleted the next time
+    // the database is opened, as when a form is cancelled after an image was pasted.
+    int64_t (*image_insert)(void *context, Array_Slice png_bytes);
+    // Loads the PNG bytes of the image with id into png_bytes, a slice of bytes with room for
+    // DESCRIPTION_IMAGE_SIZE_BYTES_MAX. Returns how many there are, or -1.
+    int32_t (*image_load)(void *context, int64_t id, Array_Slice png_bytes);
+    // Loads the ids of the images of the item's description, in the order of their markers,
+    // into image_ids, a slice of int64_t. Returns the count, or -1.
+    int32_t (*load_event_images)(void *context, int64_t event_id, Array_Slice image_ids);
+    // Makes image_ids, a slice of int64_t in the order of the description's markers, the
+    // item's images, all or nothing: those it had and are not given are deleted. Each id is
+    // one of the item's images or one that belongs to no item yet.
+    bool (*set_event_images)(void *context, int64_t event_id, Array_Slice image_ids);
     // A number that changes whenever the data changes, from this program or another, so that
     // the user interface knows when to reload. 0 when unknown, for example while disconnected.
     uint64_t (*revision)(void *context);
@@ -118,6 +133,24 @@ static inline bool backend_set_task_targets(Backend *backend, int64_t task_id,
 static inline int32_t backend_load_tasks(Backend *backend, Date today, Array_Slice tasks,
                                          bool *truncated) {
     return backend->ops->load_tasks(backend->context, today, tasks, truncated);
+}
+
+static inline int64_t backend_image_insert(Backend *backend, Array_Slice png_bytes) {
+    return backend->ops->image_insert(backend->context, png_bytes);
+}
+
+static inline int32_t backend_image_load(Backend *backend, int64_t id, Array_Slice png_bytes) {
+    return backend->ops->image_load(backend->context, id, png_bytes);
+}
+
+static inline int32_t backend_load_event_images(Backend *backend, int64_t event_id,
+                                                Array_Slice image_ids) {
+    return backend->ops->load_event_images(backend->context, event_id, image_ids);
+}
+
+static inline bool backend_set_event_images(Backend *backend, int64_t event_id,
+                                            Array_Slice image_ids) {
+    return backend->ops->set_event_images(backend->context, event_id, image_ids);
 }
 
 static inline uint64_t backend_revision(Backend *backend) {

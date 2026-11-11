@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <zeman/array_slice.h>
 #include <zeman/calendar.h>
 
 enum {
@@ -12,8 +13,20 @@ enum {
     EVENT_TITLE_SIZE = 64,
     // "Every X days" accepts up to this many days, so that X fits a three-digit field.
     REPEAT_INTERVAL_MAX = 999,
-    // Bytes including the terminator. The description is one line of free text.
-    EVENT_DESCRIPTION_SIZE = 200,
+    // Bytes including the terminator. The description is rich text (see rich_text.h): lines
+    // of text, and a marker for each image, whose bytes are stored apart. About a page of
+    // text, which is plenty for notes on a calendar item, while 512 loaded items (see
+    // PROTOCOL_EVENT_COUNT_MAX) still take only about 2 MiB.
+    EVENT_DESCRIPTION_SIZE = 4096,
+    // Images in one description. Each is loaded whole, into a texture, while its item's form
+    // is open, so the bound keeps that memory and the time to load them small.
+    DESCRIPTION_IMAGE_COUNT_MAX = 8,
+    // An image larger than this on either side is scaled down when added: as wide as a phone's
+    // screen, and more than the panel shows on a desktop.
+    DESCRIPTION_IMAGE_SIDE_PIXELS_MAX = 1024,
+    // Bytes of one stored image, a PNG file. A photo at the largest side above compresses to
+    // about this; a larger one is scaled down further. It bounds the network's messages too.
+    DESCRIPTION_IMAGE_SIZE_BYTES_MAX = 1024 * 1024,
     LOCATION_ADDRESS_SIZE = 64,
     LOCATION_CITY_SIZE = 48,
 };
@@ -143,6 +156,13 @@ typedef enum Target_Status {
  * the caller and the database.
  */
 bool event_is_valid(Event const *event);
+
+/**
+ * Whether png_bytes, a slice of bytes, can be a stored image of a description: a PNG file, by
+ * its signature, of at most DESCRIPTION_IMAGE_SIZE_BYTES_MAX. Whether it decodes is left to the
+ * apps that draw it, which show a placeholder for one that does not.
+ */
+bool description_image_is_valid(Array_Slice png_bytes);
 
 /**
  * A link target that tasks can be linked to: a problem or an opportunity.

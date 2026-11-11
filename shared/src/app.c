@@ -9,6 +9,8 @@
 #include <zeman/app.h>
 #include <zeman/array_slice.h>
 #include <zeman/bound.h>
+#include <zeman/byte.h>
+#include <zeman/rich_text.h>
 #include <zeman/str.h>
 #include <zeman/text_box.h>
 
@@ -68,6 +70,25 @@ enum {
     CARD_TEXT_MARGIN_PIXELS = 28,
     // Longer descriptions are cut off with "..." on the last line.
     DESCRIPTION_LINES_MAX = 3,
+    // Links found in the lines of a description that a card shows: three short lines hold far
+    // fewer, and any past this would only lose their highlight.
+    CARD_LINK_COUNT_MAX = 32,
+    // The description editor's lines as laid out: each holds at least one byte of the text, or
+    // is the one after its last line break, so there are never more than its bytes.
+    DESCRIPTION_LINE_COUNT_MAX = EVENT_DESCRIPTION_SIZE,
+    // Links in a description: each takes at least six bytes, "www.a" and a byte that ends it.
+    DESCRIPTION_LINK_COUNT_MAX = EVENT_DESCRIPTION_SIZE / 6 + 1,
+    // Room between the description editor's border and its text.
+    DESCRIPTION_EDITOR_PADDING_PIXELS = 8,
+    // Kept free above and below an image in a description, so that it does not touch the text.
+    DESCRIPTION_IMAGE_GAP_PIXELS = 4,
+    // The frame drawn for an image that could not be loaded: a line of text with room around it.
+    DESCRIPTION_IMAGE_PLACEHOLDER_HEIGHT_PIXELS = 48,
+    // Characters taken from typing in one frame: more than anyone types, and a bound for the loop.
+    TYPED_CHARACTER_COUNT_MAX = 64,
+    // An image whose PNG file is larger than allowed is shrunk to three quarters, at most this
+    // many times: a 1024-pixel photo then ends at about 100 pixels, which always fits.
+    IMAGE_SHRINK_STEP_COUNT_MAX = 8,
     // Day number and creation markers share the top line of a cell; bars start below it.
     CELL_TOP_LINE_PIXELS = 32,
     EVENT_BAR_HEIGHT_PIXELS = APP_BAR_HEIGHT_PIXELS,
@@ -183,7 +204,9 @@ typedef enum Form_Field {
     FORM_FIELD_END_TIME,
     FORM_FIELD_LOCATION_ADDRESS,  // Location fields are optional; empty means no location
     FORM_FIELD_LOCATION_CITY,
-    FORM_FIELD_DESCRIPTION,       // Optional free text
+    // Optional rich text, edited on its own page of the form rather than in a text box, and
+    // kept in Form.description rather than in Form.text.
+    FORM_FIELD_DESCRIPTION,
     FORM_FIELD_REPEAT_DAYS,      // Shown only for "Every X days"
     FORM_FIELD_REPEAT_END_DATE,  // Shown only for repeating events; empty repeats forever
     // Shown only for tasks that do not repeat, in the row of the repeat end, which they cannot
@@ -198,12 +221,15 @@ enum {
     FORM_FIELD_NONE = -1,
     // Three digits for REPEAT_INTERVAL_MAX, plus the terminator.
     REPEAT_DAYS_TEXT_SIZE = 4,
+    // Bytes of the buffer of each one-line field: the longest one, the title.
+    FORM_FIELD_TEXT_SIZE = EVENT_TITLE_SIZE,
 };
 
-// Buffer size of each field, which raygui also uses to cap how much can be typed.
+// Buffer size of each field, which raygui also uses to cap how much can be typed. The
+// description has none here: it is not a text box (see FORM_FIELD_DESCRIPTION).
 static int32_t const FORM_FIELD_SIZES[FORM_FIELD_COUNT] = {
     EVENT_TITLE_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
-    LOCATION_ADDRESS_SIZE, LOCATION_CITY_SIZE, EVENT_DESCRIPTION_SIZE, REPEAT_DAYS_TEXT_SIZE,
+    LOCATION_ADDRESS_SIZE, LOCATION_CITY_SIZE, 0, REPEAT_DAYS_TEXT_SIZE,
     DATE_ISO_SIZE, DATE_ISO_SIZE, TIME_TEXT_SIZE,
 };
 
@@ -250,12 +276,15 @@ static_assert(TIMELINE_MARK_STEP_MINUTES % TIMELINE_MARK_ZOOM_STEP_MINUTES == 0,
 static_assert(60 % TIMELINE_MARK_STEP_MINUTES == 0, "Steps land on every hour.");
 
 // Cast because the constants come from different enums.
-static_assert((int)DATE_ISO_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
-static_assert((int)TIME_TEXT_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
-static_assert((int)EVENT_TITLE_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
-static_assert((int)LOCATION_ADDRESS_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
-static_assert((int)LOCATION_CITY_SIZE <= (int)EVENT_DESCRIPTION_SIZE, "Field fits the buffer.");
-static_assert((int)EVENT_DESCRIPTION_SIZE <= (int)TEXT_BOX_SIZE_MAX, "Every field takes a paste.");
+static_assert((int)DATE_ISO_SIZE <= (int)FORM_FIELD_TEXT_SIZE, "Field fits the buffer.");
+static_assert((int)TIME_TEXT_SIZE <= (int)FORM_FIELD_TEXT_SIZE, "Field fits the buffer.");
+static_assert((int)EVENT_TITLE_SIZE <= (int)FORM_FIELD_TEXT_SIZE, "Field fits the buffer.");
+static_assert((int)LOCATION_ADDRESS_SIZE <= (int)FORM_FIELD_TEXT_SIZE, "Field fits the buffer.");
+static_assert((int)LOCATION_CITY_SIZE <= (int)FORM_FIELD_TEXT_SIZE, "Field fits the buffer.");
+static_assert((int)REPEAT_DAYS_TEXT_SIZE <= (int)FORM_FIELD_TEXT_SIZE, "Field fits the buffer.");
+static_assert((int)FORM_FIELD_TEXT_SIZE <= (int)TEXT_BOX_SIZE_MAX, "Every field takes a paste.");
+static_assert((int)RICH_TEXT_URL_SIZE >= (int)EVENT_DESCRIPTION_SIZE + 8,
+              "Any link of a description, with a scheme put before it, can be opened.");
 
 // Mid-tones: dark enough for white text on a bar, yet bright enough to stand out from the dark
 // surfaces. Picked by event id, so an event keeps its color in every view.
@@ -355,6 +384,52 @@ typedef struct Scroll {
     bool dragging;             // That press moved far enough to scroll instead of click
 } Scroll;
 
+// One image of the description being edited: its stored id and, while the form is open, its
+// texture.
+typedef struct Description_Image {
+    Texture2D texture;  // id 0 when the image could not be loaded or decoded
+    int64_t id;         // 0 for a marker without an image, which saving drops
+} Description_Image;
+
+// One line of the description editor as laid out: a line of text, or an image, which always
+// has a line of its own.
+typedef struct Description_Line {
+    float y_pixels;       // Top, from the top of the first line
+    float height_pixels;
+    int32_t start;        // First byte
+    // Byte after the last one on the line: a line break that ends it is not on it.
+    int32_t end;
+    int32_t image_index;  // The image this line shows, or -1 for a line of text
+} Description_Line;
+
+// The description being edited: the text, its images, and the caret and selection in it.
+// Positions are byte indexes into text, always at the start of a character.
+typedef struct Description_Editor {
+    Description_Line lines[DESCRIPTION_LINE_COUNT_MAX];
+    Rich_Text_Link links[DESCRIPTION_LINK_COUNT_MAX];       // In order, found as laid out
+    Description_Image images[DESCRIPTION_IMAGE_COUNT_MAX];  // In the order of their markers
+    Scroll scroll;
+    float layout_width_pixels;  // Width the lines were laid out for
+    float layout_scale;         // Screen pixels per layout pixel then, which sizes images
+    // x the caret keeps while it moves up and down through shorter lines, or -1 when it has
+    // moved otherwise since.
+    float goal_x_pixels;
+    int32_t length;       // Bytes of text, before its terminator
+    int32_t cursor;       // The caret
+    int32_t anchor;       // The other end of the selection: equal to cursor when there is none
+    int32_t line_count;
+    int32_t link_count;
+    int32_t image_count;  // Equal to the markers in text
+    bool open;            // Shown in place of the form's fields
+    // False when the images could not be loaded: then the description is shown but cannot be
+    // changed, and saving leaves its images as they are, so that nothing is lost.
+    bool images_loaded;
+    bool layout_stale;    // Laid out for text, images or a width that have changed since
+    bool selecting;       // A press in the text is held, and drags the caret
+    bool caret_reveal;    // Scroll so that the caret is in sight, on the next draw
+    char text[EVENT_DESCRIPTION_SIZE];
+} Description_Editor;
+
 typedef struct Form {
     // Links between link targets and the tasks linked to them, loaded when the form opens: an
     // existing target's tasks, or else the targets a task can be linked to, with the user's
@@ -380,7 +455,8 @@ typedef struct Form {
     bool picker_open;
     bool links_loaded;       // False after a failed load, so that saving keeps the stored links
     bool links_truncated;    // More links or targets exist than were loaded
-    char text[FORM_FIELD_COUNT][EVENT_DESCRIPTION_SIZE];
+    Description_Editor description;
+    char text[FORM_FIELD_COUNT][FORM_FIELD_TEXT_SIZE];
     char error[FORM_ERROR_SIZE];  // Why the last save failed, or empty
 } Form;
 
@@ -485,7 +561,10 @@ typedef struct Month_Mark {
 typedef struct App {
     Event events[EVENT_COUNT_MAX];  // Events of the visible six weeks, ordered by start
     Task_Completion completions[COMPLETION_COUNT_MAX];  // Done task occurrences near the view
+    // The PNG file of a description's image as it is loaded, before it becomes a texture.
+    byte image_bytes[DESCRIPTION_IMAGE_SIZE_BYTES_MAX];
     Backend *backend;
+    Image (*clipboard_image)(void);  // See App_Config
     Fonts fonts;
     Form form;
     Timeline_Hit timeline_hit;
@@ -721,8 +800,8 @@ static void draw_panel_event_card_frame(App const *app, Event const *event, Rect
                                         bool hovered, bool focused, bool confirming);
 static void draw_panel_event_card_title(App const *app, Event const *event, Rectangle card,
                                         bool done);
-static void draw_panel_event_card_details(Fonts const *fonts, Event const *event, Date_Time now,
-                                          Rectangle card);
+static Rich_Text_Link draw_panel_event_card_details(Fonts const *fonts, Event const *event,
+                                                    Date_Time now, Rectangle card);
 static void draw_panel_legend(Fonts const *fonts, Rectangle area);
 static void draw_panel_form(App *app, Rectangle body);
 static void draw_panel_form_kinds(App *app, Rectangle body, bool editing);
@@ -790,6 +869,70 @@ static void text_copy_trimmed(char *buffer, size_t buffer_size, Str text);
 static Str text_skip_spaces(Str text);
 static void format_date_time_short(Date date, int32_t minute_of_day, char *buffer,
                                    size_t buffer_size);
+static void draw_panel_form_description_field(App *app, Rectangle box);
+static Str description_first_line(Str text);
+static void description_format_image_count(int32_t count, char *buffer, size_t buffer_size);
+static void draw_panel_description(App *app, Rectangle body);
+static void draw_panel_description_hint(App const *app, Rectangle body, float y);
+static void draw_description_editor(App *app, Rectangle box);
+static void description_editor_pointer(App *app, Rectangle box, Rectangle inner);
+static void description_focus_at(Form *form, int32_t index, bool extend);
+static void description_editor_keys(App *app);
+static void description_editor_shortcuts(App *app);
+static void app_description_paste(App *app);
+static void description_editor_typing(App *app);
+static void description_type(Form *form, Str text);
+static void description_delete(Description_Editor *editor, bool forward);
+static void description_editor_moves(Description_Editor *editor, Text_Style const *style,
+                                     bool shift, bool control);
+static int32_t description_line_end_caret(Description_Editor const *editor, int32_t line_index);
+static void app_description_insert_image(App *app, Image image);
+static void image_fit_side(Image *image, int32_t side_max);
+static void app_take_dropped_files(App *app);
+static void app_open_link(App *app, Str link);
+static void description_open(Form *form);
+static void description_close(Form *form);
+static void description_set_text(Description_Editor *editor, Str text);
+static void description_clear_images(Description_Editor *editor);
+static Str description_text(Description_Editor const *editor);
+static bool description_replace(Description_Editor *editor, int32_t start, int32_t end,
+                                Str insert, Description_Image const *added);
+static void description_layout_update(Description_Editor *editor, Text_Style const *style);
+static void description_layout(Description_Editor *editor, Text_Style const *style);
+static int32_t description_layout_text_line(Text_Style const *style, Str text, int32_t start,
+                                            float width_pixels, int32_t *end);
+static Vector2 description_image_size(Description_Editor const *editor, int32_t image_index,
+                                      float width_pixels);
+static float description_content_height(Description_Editor const *editor);
+static bool description_line_continues(Description_Editor const *editor, int32_t line_index);
+static int32_t description_caret_line(Description_Editor const *editor, int32_t index);
+static float description_caret_x(Description_Editor const *editor, Text_Style const *style,
+                                 int32_t index);
+static int32_t description_line_at(Description_Editor const *editor, float y);
+static int32_t description_index_at(Description_Editor const *editor, Text_Style const *style,
+                                    float x, float y);
+static int32_t description_line_index_at_x(Description_Editor const *editor,
+                                           Text_Style const *style, int32_t line_index,
+                                           float x);
+static Rich_Text_Link description_link_at_point(Description_Editor const *editor,
+                                                Text_Style const *style, float x, float y);
+static void description_caret_reveal(Description_Editor *editor, float view_height,
+                                     float content_height);
+static void draw_description_editor_lines(App const *app, Rectangle inner, bool focused);
+static void draw_description_image(App const *app, Texture2D texture, Rectangle area);
+static void app_form_load_images(App *app, int64_t event_id);
+static Texture2D app_image_texture_load(App *app, int64_t id);
+static bool app_form_save_images(App *app, int64_t id, bool inserted);
+static void form_description_copy(Form const *form, char *buffer, size_t buffer_size);
+static float text_width(Text_Style const *style, Str text);
+static float text_advance(Text_Style const *style, int32_t codepoint);
+static int32_t text_index_at_x(Text_Style const *style, Str text, size_t start, size_t end,
+                               float x);
+static int32_t links_collect(Str text, size_t until, Rich_Text_Link *links, int32_t count_max);
+static Rich_Text_Link links_find_at(Array_Slice links, size_t index);
+static void draw_text_links(Text_Style const *style, Str text, size_t start, size_t end,
+                            Array_Slice links, float x, float y, Color color, Color link_color);
+static size_t text_wrap_skip(Str text, size_t index);
 static void theme_apply(void);
 static Color style_color(int32_t property);
 static void draw_text(Text_Style const *style, Str text, float x, float y, Color color);
@@ -808,6 +951,7 @@ App *app_create(Backend *backend, App_Config const *config) {
     assert(config->scale > 0.0f);
     app.created = true;
     app.backend = backend;
+    app.clipboard_image = config->clipboard_image;
     app.touch = config->touch;
     app.input_enabled = true;
 
@@ -867,6 +1011,7 @@ void app_frame(App *app, Rectangle area) {
         SetMouseOffset(INPUT_OFF_MOUSE_OFFSET_PIXELS, INPUT_OFF_MOUSE_OFFSET_PIXELS);
         GuiLock();
     }
+    app_take_dropped_files(app);
     app_sync(app);
     // Again, because a key may have changed the range or opened the form, and loading may have
     // changed the items without a time.
@@ -960,7 +1105,7 @@ void app_discard_edits(App *app) {
 App_Cursor app_cursor(App const *app) {
     assert(app->created);
     assert(app->cursor >= APP_CURSOR_DEFAULT);
-    assert(app->cursor <= APP_CURSOR_MOVE);
+    assert(app->cursor <= APP_CURSOR_TEXT);
 
     return (App_Cursor)app->cursor;
 }
@@ -1059,6 +1204,11 @@ static void app_handle_keys(App *app, Layout const *layout) {
             app->form.picker_open = false;
             return;
         }
+        if (app->form.open && app->form.description.open) {
+            // The description's page is over the form's fields, which Escape goes back to.
+            description_close(&app->form);
+            return;
+        }
         if (app->form.open) {
             form_close(&app->form);
         }
@@ -1069,6 +1219,11 @@ static void app_handle_keys(App *app, Layout const *layout) {
         app->month_mark = (Month_Mark){ .pressed = false };
         app->timeline_drag = (Timeline_Drag){ .event_id = 0 };
         app->task_drag = (Task_Drag){ .event_id = 0 };
+        return;
+    }
+    if (app->form.open && app->form.description.open) {
+        // Keys belong to the description, which reads them as it is drawn (see
+        // description_editor_keys), and do not move the calendar under it.
         return;
     }
     if (app->form.field_active != FORM_FIELD_NONE) {
@@ -1319,6 +1474,9 @@ static void app_form_submit(App *app) {
         // Saving again after the links fail below updates this entry rather than adding another.
         app->form.editing_id = id;
     }
+    if (!app_form_save_images(app, id, !editing)) {
+        return;
+    }
     if (!app_form_save_links(app, id, event.kind, !editing)) {
         return;
     }
@@ -1350,6 +1508,7 @@ static void app_form_clipboard(App *app) {
     int32_t const field = form->field_active;
     assert(field >= 0);
     assert(field < FORM_FIELD_COUNT);
+    assert(field != FORM_FIELD_DESCRIPTION); // Its page handles its own keys.
     char *text = form->text[field];
     bool const cut = IsKeyPressed(KEY_X);
     if (IsKeyPressed(KEY_C) || cut) {
@@ -1398,6 +1557,7 @@ static void app_form_open_edit(App *app, Event const *event) {
     assert(event->id > 0);
 
     form_open_edit(&app->form, event);
+    app_form_load_images(app, event->id);
     app_form_load_links(app);
 }
 
@@ -4422,7 +4582,16 @@ static bool draw_panel_event_card(App *app, Event const *event, Rectangle card) 
         return false;
     }
 
-    draw_panel_event_card_details(&app->fonts, event, app_now(app), card);
+    Rich_Text_Link const link = draw_panel_event_card_details(&app->fonts, event, app_now(app),
+                                                              card);
+    bool const on_link = link.start != STR_NOT_FOUND;
+    // As for the card itself: the list locks its controls while it is dragged, or while the
+    // pointer is outside it, and only a press that began in it counts.
+    if (on_link && hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && !GuiIsLocked() &&
+        app->panel_scroll.pressed) {
+        app_open_link(app, str_slice(str_from_cstr(event->description), link.start, link.end));
+        return false;
+    }
     if (task) {
         bool checked = done;
         GuiCheckBox(checkbox, NULL, &checked);
@@ -4434,7 +4603,7 @@ static bool draw_panel_event_card(App *app, Event const *event, Rectangle card) 
         app->event_delete_id = event->id;
     }
     bool on_button = CheckCollisionPointRec(mouse, delete_button) ||
-                     (task && CheckCollisionPointRec(mouse, checkbox));
+                     (task && CheckCollisionPointRec(mouse, checkbox)) || on_link;
     // On release rather than press, because the press may still become a drag of the list.
     return hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && !on_button;
 }
@@ -4498,11 +4667,13 @@ static void draw_panel_event_card_title(App const *app, Event const *event, Rect
 }
 
 /**
- * The lines below the title: dates and repeat, location, description, repeat end, and creation,
- * with how long ago that was. A problem shows only its kind, description and creation.
+ * The lines below the title: dates and repeat, location, description, how many images it has,
+ * repeat end, and creation, with how long ago that was. A problem shows only its kind,
+ * description and creation. Returns the link of the description under the pointer, or one with
+ * start STR_NOT_FOUND.
  */
-static void draw_panel_event_card_details(Fonts const *fonts, Event const *event, Date_Time now,
-                                          Rectangle card) {
+static Rich_Text_Link draw_panel_event_card_details(Fonts const *fonts, Event const *event,
+                                                    Date_Time now, Rectangle card) {
     float const x = card.x + 16;
     float const line = (float)TEXT_LINE_HEIGHT_PIXELS_SMALL;
     Text_Style const *style = &fonts->small;
@@ -4516,22 +4687,45 @@ static void draw_panel_event_card_details(Fonts const *fonts, Event const *event
         event_format_location(event, text, sizeof(text));
         draw_text(style, str_from_cstr(text), x, y, style_color(TEXT_COLOR_NORMAL));
     }
-    if (event->description[0] != '\0') {
-        Str const description = str_from_cstr(event->description);
+    Str const description = str_from_cstr(event->description);
+    Rich_Text_Link hovered_link = { .start = STR_NOT_FOUND, .end = STR_NOT_FOUND };
+    if (description.length > 0) {
         Text_Lines lines = text_wrap(style, description,
                                      card.width - (float)CARD_TEXT_MARGIN_PIXELS);
+        size_t shown_end = 0;
+        if (lines.count > 0) {
+            shown_end = (size_t)(lines.start[lines.count - 1] + lines.length[lines.count - 1]);
+        }
+        Rich_Text_Link links[CARD_LINK_COUNT_MAX];
+        int32_t const link_count = links_collect(description, shown_end, links,
+                                                 CARD_LINK_COUNT_MAX);
+        Array_Slice const link_slice = array_slice_make(links, link_count);
+        Vector2 const mouse = GetMousePosition();
         for (int32_t i = 0; i < lines.count; i++) {
             y += line;
-            Str_Builder shown;
-            str_builder_init(&shown, text, sizeof(text));
-            (void)str_builder_append(&shown, str_slice(description, (size_t)lines.start[i],
-                                                       (size_t)(lines.start[i] + lines.length[i])));
+            size_t const start = (size_t)lines.start[i];
+            size_t const end = start + (size_t)lines.length[i];
+            draw_text_links(style, description, start, end, link_slice, x, y,
+                            style_color(TEXT_COLOR_NORMAL), style_color(BORDER_COLOR_PRESSED));
             // The last line says that there is more, as the card cannot show all of it.
             if (lines.cut && i == lines.count - 1) {
-                (void)str_builder_append(&shown, STR("..."));
+                float const shown_width = text_width(style, str_slice(description, start, end));
+                draw_text(style, STR("..."), x + shown_width, y, style_color(TEXT_COLOR_NORMAL));
             }
-            draw_text(style, str_builder_str(&shown), x, y, style_color(TEXT_COLOR_NORMAL));
+            if (CheckCollisionPointRec(mouse, card) && mouse.y >= y && mouse.y < y + line) {
+                int32_t const index = text_index_at_x(style, description, start, end,
+                                                      mouse.x - x);
+                if (index >= 0) {
+                    hovered_link = links_find_at(link_slice, (size_t)index);
+                }
+            }
         }
+    }
+    int32_t const image_count = rich_text_image_count(description);
+    if (image_count > 0) {
+        y += line;
+        description_format_image_count(image_count, text, sizeof(text));
+        draw_text(style, str_from_cstr(text), x, y, style_color(TEXT_COLOR_DISABLED));
     }
     if (event->repeat_has_end) {
         y += line;
@@ -4545,6 +4739,7 @@ static void draw_panel_event_card_details(Fonts const *fonts, Event const *event
     event_format_created(event, now, text, sizeof(text));
     draw_text(style, str_from_cstr(text), x, y, style_color(TEXT_COLOR_DISABLED));
     scissor_end(fonts);
+    return hovered_link;
 }
 
 /**
@@ -4566,6 +4761,10 @@ static void draw_panel_legend(Fonts const *fonts, Rectangle area) {
 
 static void draw_panel_form(App *app, Rectangle body) {
     Form *form = &app->form;
+    if (form->description.open) {
+        draw_panel_description(app, body);
+        return;
+    }
     // While the picker is open, it is on top: the controls under it are locked, so that a
     // press meant for it does not reach them. It reads the pointer itself, below.
     bool const locked_before = GuiIsLocked();
@@ -4778,8 +4977,8 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     draw_panel_form_field(fonts, form, FORM_FIELD_LOCATION_CITY, STR("City"),
                           (Rectangle){ city_x, y, city_width, FIELD_HEIGHT_PIXELS });
     y += row_height;
-    draw_panel_form_field(fonts, form, FORM_FIELD_DESCRIPTION, STR("Description (optional)"),
-                          (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
+    draw_panel_form_description_field(app, (Rectangle){ body.x, y, body.width,
+                                                         FIELD_HEIGHT_PIXELS });
     y += row_height;
     // An opportunity cannot repeat, so its rows end here, and its tasks get the repeat rows'
     // room below.
@@ -4825,8 +5024,8 @@ static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, fl
     draw_panel_form_field(fonts, form, FORM_FIELD_TITLE, STR("Name"),
                           (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
     y += row_height;
-    draw_panel_form_field(fonts, form, FORM_FIELD_DESCRIPTION, STR("Description (optional)"),
-                          (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
+    draw_panel_form_description_field(app, (Rectangle){ body.x, y, body.width,
+                                                         FIELD_HEIGHT_PIXELS });
     y += row_height;
 
     // A new problem is recorded today; an existing one stays on the day it was created, which
@@ -5225,6 +5424,7 @@ static void draw_panel_form_field(Fonts const *fonts, Form *form, int32_t field,
                                   Rectangle box) {
     assert(field >= 0);
     assert(field < FORM_FIELD_COUNT);
+    assert(field != FORM_FIELD_DESCRIPTION); // See draw_panel_form_description_field.
 
     draw_text(&fonts->ui, label, box.x, box.y - FORM_LABEL_HEIGHT_PIXELS,
               style_color(TEXT_COLOR_NORMAL));
@@ -5474,8 +5674,18 @@ static void form_open(Form *form, Date date, int32_t kind) {
     assert(kind >= 0);
     assert(kind < EVENT_KIND_COUNT);
 
-    *form = (Form){ .field_active = FORM_FIELD_TITLE, .repeat_option = REPEAT_OPTION_NONE,
-                    .kind = kind, .open = true };
+    // The textures of the last form's images were unloaded when it closed.
+    assert(form->description.image_count == 0);
+    // Cleared in place rather than assigned a compound literal: the form is large, and a
+    // compiler may build the literal on the stack first.
+    memset(form, 0, sizeof(*form));
+    form->field_active = FORM_FIELD_TITLE;
+    form->repeat_option = REPEAT_OPTION_NONE;
+    form->kind = kind;
+    form->open = true;
+    form->description.images_loaded = true;
+    form->description.layout_stale = true;
+    form->description.goal_x_pixels = -1.0f;
     date_format_iso(date, form->text[FORM_FIELD_START_DATE], DATE_ISO_SIZE);
     date_format_iso(date, form->text[FORM_FIELD_END_DATE], DATE_ISO_SIZE);
     // A starting value, so that choosing "Every X days" shows what to type.
@@ -5525,8 +5735,7 @@ static void form_open_edit(Form *form, Event const *event) {
              event->location.address);
     snprintf(form->text[FORM_FIELD_LOCATION_CITY], LOCATION_CITY_SIZE, "%s",
              event->location.city);
-    snprintf(form->text[FORM_FIELD_DESCRIPTION], EVENT_DESCRIPTION_SIZE, "%s",
-             event->description);
+    description_set_text(&form->description, str_from_cstr(event->description));
     // Start with no field in edit mode, so that a click on Save or Cancel acts at once.
     form->field_active = FORM_FIELD_NONE;
 }
@@ -5536,6 +5745,9 @@ static void form_close(Form *form) {
 
     form->open = false;
     form->picker_open = false;
+    form->description.open = false;
+    form->description.selecting = false;
+    description_clear_images(&form->description);
     form->field_active = FORM_FIELD_NONE;
 }
 
@@ -5553,10 +5765,14 @@ static int32_t form_field_next(Form const *form, bool backwards) {
     }
     int32_t field = (form->field_active + step) % FORM_FIELD_COUNT;
     // Bounded: the title field is always visible, so at most FORM_FIELD_COUNT steps are taken.
-    for (int32_t i = 0; i < FORM_FIELD_COUNT && !form_field_visible(form, field); i++) {
+    // The description is skipped: it is edited on its own page, which a click opens.
+    for (int32_t i = 0; i < FORM_FIELD_COUNT &&
+                        (!form_field_visible(form, field) || field == FORM_FIELD_DESCRIPTION);
+         i++) {
         field = (field + step) % FORM_FIELD_COUNT;
     }
     assert(form_field_visible(form, field));
+    assert(field != FORM_FIELD_DESCRIPTION);
     return field;
 }
 
@@ -5648,8 +5864,7 @@ static Str form_parse_body(Form const *form, Event *event) {
                       str_from_cstr(form->text[FORM_FIELD_LOCATION_ADDRESS]));
     text_copy_trimmed(event->location.city, sizeof(event->location.city),
                       str_from_cstr(form->text[FORM_FIELD_LOCATION_CITY]));
-    text_copy_trimmed(event->description, sizeof(event->description),
-                      str_from_cstr(form->text[FORM_FIELD_DESCRIPTION]));
+    form_description_copy(form, event->description, sizeof(event->description));
     assert(form->kind >= 0);
     assert(form->kind < EVENT_KIND_COUNT);
     int32_t const repeat_option = form_repeat_option(form);
@@ -5750,8 +5965,7 @@ static Str form_parse_problem(Form const *form, Date today, Event *event) {
     event->repeat_unit = REPEAT_NONE;
     event->repeat_interval = 1;
     event->repeat_has_end = false;
-    text_copy_trimmed(event->description, sizeof(event->description),
-                      str_from_cstr(form->text[FORM_FIELD_DESCRIPTION]));
+    form_description_copy(form, event->description, sizeof(event->description));
     assert(event->location.id == 0);
     assert(event->location.address[0] == '\0');
     return STR("");
@@ -5852,15 +6066,17 @@ static bool event_in_day_cell(Event const *event, int32_t range) {
 }
 
 /**
- * One more line for a location, one for a repeating event that ends, to say when, and one per
- * line of description.
+ * One more line for a location, one for a repeating event that ends, to say when, one per line
+ * of description, and one for how many images it has.
  */
 static float event_card_height(Fonts const *fonts, Event const *event, bool confirming,
                                float card_width) {
     int32_t extra_lines = (int32_t)(event->location.id != 0) + (int32_t)event->repeat_has_end;
-    if (event->description[0] != '\0') {
+    Str const description = str_from_cstr(event->description);
+    if (description.length > 0) {
         float width = card_width - (float)CARD_TEXT_MARGIN_PIXELS;
-        extra_lines += text_wrap(&fonts->small, str_from_cstr(event->description), width).count;
+        extra_lines += text_wrap(&fonts->small, description, width).count;
+        extra_lines += (int32_t)(rich_text_image_count(description) > 0);
     }
     float height = (float)(EVENT_CARD_HEIGHT_PIXELS + extra_lines * TEXT_LINE_HEIGHT_PIXELS_SMALL);
     // A confirming card hides its details, but needs room for the question and the buttons.
@@ -5872,50 +6088,54 @@ static float event_card_height(Fonts const *fonts, Event const *event, bool conf
 
 /**
  * Breaks text at spaces into at most DESCRIPTION_LINES_MAX lines that fit width_pixels, and
- * breaks inside a word only when one word alone is wider than a line.
+ * breaks inside a word only when one word alone is wider than a line. A line break or an image
+ * ends a line too; images, and the empty lines between paragraphs, are left out, so that a card
+ * shows as much of the text as it can.
  */
 static Text_Lines text_wrap(Text_Style const *style, Str text, float width_pixels) {
     Text_Lines lines = { .count = 0, .cut = false };
-    int32_t const length = (int32_t)text.length;
-    int32_t position = 0;
+    size_t position = 0;
     // Bounded by DESCRIPTION_LINES_MAX, and each pass either ends the loop or consumes text.
     while (lines.count < DESCRIPTION_LINES_MAX) {
-        while (position < length && text.data[position] == ' ') {
-            position++;
-        }
-        if (position >= length) {
+        position = text_wrap_skip(text, position);
+        if (position >= text.length) {
             break;
+        }
+        // The line ends at the next line break or image at the latest.
+        size_t hard_end = position;
+        while (hard_end < text.length && text.data[hard_end] != '\n' &&
+               !rich_text_is_image_marker(text, hard_end)) {
+            hard_end++;
         }
 
         // Extend the line one word at a time while it still fits.
-        int32_t line_end = position;
-        for (int32_t i = position; i <= length; i++) {
-            if (i == length || text.data[i] == ' ') {
-                if (!text_line_fits(style, str_slice(text, (size_t)position, (size_t)i),
-                                    width_pixels)) {
+        size_t line_end = position;
+        for (size_t i = position; i <= hard_end; i++) {
+            if (i == hard_end || text.data[i] == ' ') {
+                if (!text_line_fits(style, str_slice(text, position, i), width_pixels)) {
                     break;
                 }
                 line_end = i;
             }
         }
-        // One word wider than the line: break it by characters, at least one per line.
+        // One word wider than the line: break it between characters, at least one per line.
         if (line_end == position) {
-            line_end = position + 1;
-            while (line_end < length &&
-                   text_line_fits(style, str_slice(text, (size_t)position, (size_t)line_end + 1),
-                                  width_pixels)) {
-                line_end++;
+            line_end = rich_text_character_next(text, position);
+            while (line_end < hard_end) {
+                size_t const next = rich_text_character_next(text, line_end);
+                if (!text_line_fits(style, str_slice(text, position, next), width_pixels)) {
+                    break;
+                }
+                line_end = next;
             }
         }
-        lines.start[lines.count] = position;
-        lines.length[lines.count] = line_end - position;
+        lines.start[lines.count] = (int32_t)position;
+        lines.length[lines.count] = (int32_t)(line_end - position);
         lines.count++;
         position = line_end;
     }
-    while (position < length && text.data[position] == ' ') {
-        position++;
-    }
-    lines.cut = position < length;
+    position = text_wrap_skip(text, position);
+    lines.cut = position < text.length;
     return lines;
 }
 
@@ -6132,6 +6352,1443 @@ static void format_date_time_short(Date date, int32_t minute_of_day, char *buffe
     char time[TIME_TEXT_SIZE] = "";
     time_format(minute_of_day, time, sizeof(time));
     snprintf(buffer, buffer_size, "%" PRId32 " %.*s %s", date.day, STR_ARGUMENTS(month), time);
+}
+
+/**
+ * The description's row among the form's fields: its first line and how many images it has, in
+ * a box that opens the description's own page, where there is room to write and to see images.
+ */
+static void draw_panel_form_description_field(App *app, Rectangle box) {
+    Form *form = &app->form;
+    Fonts const *fonts = &app->fonts;
+    Description_Editor const *editor = &form->description;
+    draw_text(&fonts->ui, STR("Description (optional)"), box.x, box.y - FORM_LABEL_HEIGHT_PIXELS,
+              style_color(TEXT_COLOR_NORMAL));
+    bool const hovered = !GuiIsLocked() && CheckCollisionPointRec(GetMousePosition(), box);
+    int32_t base_property = BASE_COLOR_NORMAL;
+    int32_t border_property = BORDER_COLOR_NORMAL;
+    if (hovered) {
+        base_property = BASE_COLOR_FOCUSED;
+        border_property = BORDER_COLOR_FOCUSED;
+        app->cursor = APP_CURSOR_HAND;
+    }
+    DrawRectangleRec(box, style_color(base_property));
+    DrawRectangleLinesEx(box, 1.0f, style_color(border_property));
+
+    float const text_x = box.x + DESCRIPTION_EDITOR_PADDING_PIXELS;
+    float const text_y = box.y + (box.height - TEXT_SIZE_PIXELS) / 2;
+    float right_x = box.x + box.width - DESCRIPTION_EDITOR_PADDING_PIXELS;
+    if (editor->image_count > 0) {
+        char count_text[TEXT_LINE_SIZE] = "";
+        description_format_image_count(editor->image_count, count_text, sizeof(count_text));
+        Str const count = str_from_cstr(count_text);
+        right_x -= measure_text(&fonts->small, count).x;
+        draw_text(&fonts->small, count, right_x,
+                  box.y + (box.height - TEXT_SIZE_PIXELS_SMALL) / 2,
+                  style_color(TEXT_COLOR_DISABLED));
+        right_x -= DESCRIPTION_EDITOR_PADDING_PIXELS;
+    }
+    Str const first_line = description_first_line(description_text(editor));
+    scissor_begin(fonts, text_x, box.y, float_max(right_x - text_x, 0.0f), box.height);
+    if (first_line.length > 0) {
+        draw_text(&fonts->ui, first_line, text_x, text_y, style_color(TEXT_COLOR_NORMAL));
+    } else if (editor->image_count == 0) {
+        draw_text(&fonts->ui, STR("Notes, links and images"), text_x, text_y,
+                  style_color(TEXT_COLOR_DISABLED));
+    }
+    scissor_end(fonts);
+    if (hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        description_open(form);
+    }
+}
+
+/**
+ * The first line of text of a description, without the spaces, line breaks and images before
+ * it, as a preview of the whole.
+ */
+static Str description_first_line(Str text) {
+    size_t const start = text_wrap_skip(text, 0);
+    size_t end = start;
+    // Bounded by the length: each pass moves end on by one byte.
+    while (end < text.length && text.data[end] != '\n' && !rich_text_is_image_marker(text, end)) {
+        end++;
+    }
+    return str_slice(text, start, end);
+}
+
+/**
+ * "1 image" or "3 images".
+ */
+static void description_format_image_count(int32_t count, char *buffer, size_t buffer_size) {
+    assert(count > 0);
+
+    char const *noun = "images";
+    if (count == 1) {
+        noun = "image";
+    }
+    snprintf(buffer, buffer_size, "%" PRId32 " %s", count, noun);
+}
+
+/**
+ * The form's page for the description, in place of its fields: the text with its images and
+ * links, a line of help or of what went wrong, and Done, which goes back to the fields.
+ */
+static void draw_panel_description(App *app, Rectangle body) {
+    Form *form = &app->form;
+    assert(form->open);
+    assert(form->description.open);
+
+    draw_text(&app->fonts.ui, STR("Description"), body.x, body.y, style_color(TEXT_COLOR_NORMAL));
+    float const buttons_y = body.y + body.height - BUTTON_HEIGHT_PIXELS;
+    float const hint_y = buttons_y - FORM_ROW_GAP_PIXELS - TEXT_LINE_HEIGHT_PIXELS;
+    float const box_y = body.y + 32;
+    Rectangle const box = { body.x, box_y, body.width, hint_y - FORM_ROW_GAP_PIXELS - box_y };
+    // A window too short for a line of text and the padding around it shows only the buttons.
+    if (box.height > 2 * DESCRIPTION_EDITOR_PADDING_PIXELS + TEXT_LINE_HEIGHT_PIXELS) {
+        draw_description_editor(app, box);
+    }
+    draw_panel_description_hint(app, body, hint_y);
+    if (GuiButton((Rectangle){ body.x, buttons_y, body.width, BUTTON_HEIGHT_PIXELS }, "Done")) {
+        description_close(form);
+    }
+}
+
+/**
+ * What went wrong last, or else how to add images and open links.
+ */
+static void draw_panel_description_hint(App const *app, Rectangle body, float y) {
+    Form const *form = &app->form;
+    Str hint = STR("Paste or drop images. Ctrl+click opens a link.");
+    if (app->touch) {
+        hint = STR("Tap a link to open it.");
+    }
+    Color color = style_color(TEXT_COLOR_DISABLED);
+    if (!form->description.images_loaded) {
+        hint = STR("Images not loaded: the description is read-only.");
+        color = ERROR_COLOR;
+    }
+    if (form->error[0] != '\0') {
+        hint = str_from_cstr(form->error);
+        color = ERROR_COLOR;
+    }
+    scissor_begin(&app->fonts, body.x, y, body.width, TEXT_LINE_HEIGHT_PIXELS);
+    draw_text(&app->fonts.small, hint, body.x, y, color);
+    scissor_end(&app->fonts);
+}
+
+/**
+ * The description's text box: handles the pointer and, while it has the focus, the keys, then
+ * draws the lines, the selection and the caret, scrolled to the caret after it moved.
+ */
+static void draw_description_editor(App *app, Rectangle box) {
+    Form *form = &app->form;
+    Description_Editor *editor = &form->description;
+    Fonts const *fonts = &app->fonts;
+    float const padding = (float)DESCRIPTION_EDITOR_PADDING_PIXELS;
+    // Room for the scroll bar is kept whether it shows or not, so that the lines do not wrap
+    // differently as it comes and goes.
+    Rectangle const inner = { box.x + padding, box.y + padding,
+                              box.width - 2 * padding - SCROLLBAR_GAP_PIXELS,
+                              box.height - 2 * padding };
+    assert(inner.width > 0.0f);
+    assert(inner.height > 0.0f);
+
+    if (editor->layout_width_pixels != inner.width || editor->layout_scale != fonts->scale) {
+        editor->layout_width_pixels = inner.width;
+        editor->layout_scale = fonts->scale;
+        editor->layout_stale = true;
+    }
+    description_layout_update(editor, &fonts->ui);
+    // Before the pointer, so that a release knows whether the press became a drag of the text.
+    scroll_update(&editor->scroll, inner, description_content_height(editor), app->touch);
+    if (!GuiIsLocked()) {
+        description_editor_pointer(app, box, inner);
+    }
+    bool const focused = form->field_active == FORM_FIELD_DESCRIPTION;
+    if (focused && !GuiIsLocked() && editor->images_loaded) {
+        description_editor_keys(app);
+    }
+    description_layout_update(editor, &fonts->ui);
+    float const content_height = description_content_height(editor);
+    if (editor->caret_reveal) {
+        description_caret_reveal(editor, inner.height, content_height);
+    }
+
+    int32_t base_property = BASE_COLOR_NORMAL;
+    int32_t border_property = BORDER_COLOR_NORMAL;
+    if (focused) {
+        base_property = BASE_COLOR_PRESSED;
+        border_property = BORDER_COLOR_PRESSED;
+    }
+    DrawRectangleRec(box, style_color(base_property));
+    DrawRectangleLinesEx(box, 1.0f, style_color(border_property));
+    // Within the border, so that the caret at the start of a line still shows.
+    scissor_begin(fonts, box.x + 1, box.y + 1, box.width - 2, box.height - 2);
+    draw_description_editor_lines(app, inner, focused);
+    scissor_end(fonts);
+    draw_scrollbar((Rectangle){ inner.x, inner.y, inner.width, inner.height }, content_height,
+                   editor->scroll.offset_pixels);
+}
+
+/**
+ * A press in the text gives it the focus and places the caret, and a drag selects; with Ctrl,
+ * a press on a link opens it instead. On a touch screen a drag scrolls, and a tap places the
+ * caret or opens the link under it. A press elsewhere takes the focus away, which on a phone
+ * hides the keyboard.
+ */
+static void description_editor_pointer(App *app, Rectangle box, Rectangle inner) {
+    Form *form = &app->form;
+    Description_Editor *editor = &form->description;
+    Text_Style const *style = &app->fonts.ui;
+    Vector2 const mouse = GetMousePosition();
+    bool const over = CheckCollisionPointRec(mouse, box);
+    float const x = mouse.x - inner.x;
+    float const y = mouse.y - (inner.y - editor->scroll.offset_pixels);
+    bool const control = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    Rich_Text_Link link = { .start = STR_NOT_FOUND, .end = STR_NOT_FOUND };
+    if (over) {
+        link = description_link_at_point(editor, style, x, y);
+        app->cursor = APP_CURSOR_TEXT;
+        if (link.start != STR_NOT_FOUND && (control || app->touch)) {
+            app->cursor = APP_CURSOR_HAND;
+        }
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !over) {
+        if (form->field_active == FORM_FIELD_DESCRIPTION) {
+            form->field_active = FORM_FIELD_NONE;
+        }
+        return;
+    }
+    if (app->touch) {
+        Scroll const *scroll = &editor->scroll;
+        bool const tapped = over && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && scroll->pressed &&
+                            !scroll->dragging;
+        if (!tapped) {
+            return;
+        }
+        if (link.start != STR_NOT_FOUND) {
+            app_open_link(app, str_slice(description_text(editor), link.start, link.end));
+            return;
+        }
+        description_focus_at(form, description_index_at(editor, style, x, y), false);
+        return;
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        if (control && link.start != STR_NOT_FOUND) {
+            app_open_link(app, str_slice(description_text(editor), link.start, link.end));
+            return;
+        }
+        bool const shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+        description_focus_at(form, description_index_at(editor, style, x, y), shift);
+        editor->selecting = true;
+        return;
+    }
+    if (!editor->selecting) {
+        return;
+    }
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        editor->selecting = false;
+        return;
+    }
+    // Dragging past the top or bottom selects on into the lines out of sight, which the caret's
+    // reveal then scrolls to, a line per frame.
+    editor->cursor = description_index_at(editor, style, x, y);
+    editor->caret_reveal = true;
+}
+
+/**
+ * Gives the text the focus with the caret at index, keeping the selection's other end where it
+ * was with extend.
+ */
+static void description_focus_at(Form *form, int32_t index, bool extend) {
+    Description_Editor *editor = &form->description;
+    assert(index >= 0);
+    assert(index <= editor->length);
+
+    if (editor->images_loaded) {
+        form->field_active = FORM_FIELD_DESCRIPTION;
+    }
+    editor->cursor = index;
+    if (!extend) {
+        editor->anchor = index;
+    }
+    editor->goal_x_pixels = -1.0f;
+    editor->caret_reveal = true;
+}
+
+/**
+ * Typing, the clipboard and the keys that move the caret, while the text has the focus.
+ */
+static void description_editor_keys(App *app) {
+    Form *form = &app->form;
+    Description_Editor *editor = &form->description;
+    assert(editor->images_loaded);
+
+    bool const control = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    bool const shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+    if (control) {
+        description_editor_shortcuts(app);
+    }
+    description_editor_typing(app);
+    // Android types Enter as a line break character instead (see android_key_character), and
+    // a hardware keyboard there would otherwise break the line twice.
+    if (!app->touch &&
+        (text_input_key_pressed(KEY_ENTER) || text_input_key_pressed(KEY_KP_ENTER))) {
+        description_type(form, STR("\n"));
+    }
+    if (text_input_key_pressed(KEY_BACKSPACE)) {
+        description_delete(editor, false);
+    }
+    if (text_input_key_pressed(KEY_DELETE)) {
+        description_delete(editor, true);
+    }
+    // The caret moves through the lines as they are after this frame's typing.
+    description_layout_update(editor, &app->fonts.ui);
+    description_editor_moves(editor, &app->fonts.ui, shift, control);
+}
+
+/**
+ * Ctrl+A selects everything, Ctrl+C copies the selection and Ctrl+X cuts it, and Ctrl+V pastes
+ * text, or an image when the clipboard holds no text. Images are not copied: the clipboard holds
+ * the selected text without them.
+ */
+static void description_editor_shortcuts(App *app) {
+    Form *form = &app->form;
+    Description_Editor *editor = &form->description;
+    if (IsKeyPressed(KEY_A)) {
+        editor->anchor = 0;
+        editor->cursor = editor->length;
+        editor->caret_reveal = true;
+    }
+    int32_t const start = int32_min(editor->cursor, editor->anchor);
+    int32_t const end = int32_max(editor->cursor, editor->anchor);
+    bool const cut = IsKeyPressed(KEY_X);
+    if ((IsKeyPressed(KEY_C) || cut) && start < end) {
+        char copied[EVENT_DESCRIPTION_SIZE] = "";
+        Str const selected = str_slice(description_text(editor), (size_t)start, (size_t)end);
+        size_t const length = rich_text_clean(selected, copied, sizeof(copied) - 1);
+        copied[length] = '\0';
+        if (length > 0) {
+            SetClipboardText(copied);
+        }
+        if (cut) {
+            bool const removed = description_replace(editor, start, end, STR(""), NULL);
+            assert(removed); // Removing always fits.
+            (void)removed; // Unused when assertions are compiled out.
+        }
+    }
+    if (IsKeyPressed(KEY_V)) {
+        app_description_paste(app);
+    }
+}
+
+/**
+ * Pastes the clipboard's text at the caret, cleaned as rich_text_clean does and cut short to
+ * the room left, or else its image.
+ */
+static void app_description_paste(App *app) {
+    Form *form = &app->form;
+    Description_Editor *editor = &form->description;
+    // NULL when the clipboard is empty, holds no text, or does not exist.
+    char const *clipboard = GetClipboardText();
+    if (clipboard != NULL && clipboard[0] != '\0') {
+        int32_t const selected = int32_max(editor->cursor, editor->anchor) -
+                                 int32_min(editor->cursor, editor->anchor);
+        // The room the text has, with the selection replaced, before its terminator.
+        int32_t const room = EVENT_DESCRIPTION_SIZE - 1 - (editor->length - selected);
+        assert(room >= 0);
+        char pasted[EVENT_DESCRIPTION_SIZE] = "";
+        size_t const length = rich_text_clean(str_from_cstr(clipboard), pasted, (size_t)room);
+        if (length > 0) {
+            description_type(form, str_make(pasted, length));
+            return;
+        }
+    }
+    if (app->clipboard_image == NULL) {
+        return;
+    }
+    Image const image = app->clipboard_image();
+    if (!IsImageValid(image)) {
+        snprintf(form->error, sizeof(form->error), "The clipboard holds no text or image.");
+        return;
+    }
+    app_description_insert_image(app, image);
+}
+
+/**
+ * The characters typed this frame, at the caret. Control characters other than a line break,
+ * and an image marker, which only an image may bring, are left out.
+ */
+static void description_editor_typing(App *app) {
+    Form *form = &app->form;
+    for (int32_t i = 0; i < TYPED_CHARACTER_COUNT_MAX; i++) {
+        int32_t const codepoint = text_input_char_pressed();
+        if (codepoint == 0) {
+            break;
+        }
+        bool const surrogate = codepoint >= 0xD800 && codepoint <= 0xDFFF;
+        bool const printable = codepoint >= 0x20 && codepoint != 0x7F && codepoint != 0xFFFC &&
+                               codepoint <= 0x10FFFF && !surrogate;
+        if (codepoint != '\n' && !printable) {
+            continue;
+        }
+        char bytes[4] = { 0 };
+        int32_t const size = rich_text_codepoint_encode(codepoint, bytes);
+        description_type(form, str_make(bytes, (size_t)size));
+    }
+}
+
+/**
+ * Puts text in place of the selection, or at the caret, or says that the description is full.
+ */
+static void description_type(Form *form, Str text) {
+    Description_Editor *editor = &form->description;
+    int32_t const start = int32_min(editor->cursor, editor->anchor);
+    int32_t const end = int32_max(editor->cursor, editor->anchor);
+    if (!description_replace(editor, start, end, text, NULL)) {
+        snprintf(form->error, sizeof(form->error), "The description is full.");
+    }
+}
+
+/**
+ * Deletes the selection, or else the character before the caret, or with forward the one
+ * after it. An image is one character.
+ */
+static void description_delete(Description_Editor *editor, bool forward) {
+    Str const text = description_text(editor);
+    int32_t start = int32_min(editor->cursor, editor->anchor);
+    int32_t end = int32_max(editor->cursor, editor->anchor);
+    if (start == end) {
+        if (forward) {
+            if (end == editor->length) {
+                return;
+            }
+            end = (int32_t)rich_text_character_next(text, (size_t)end);
+        } else {
+            if (start == 0) {
+                return;
+            }
+            start = (int32_t)rich_text_character_previous(text, (size_t)start);
+        }
+    }
+    bool const removed = description_replace(editor, start, end, STR(""), NULL);
+    assert(removed); // Removing always fits.
+    (void)removed; // Unused when assertions are compiled out.
+}
+
+/**
+ * The arrow keys, Home and End move the caret, by a character, a line, or with Ctrl to either
+ * end of the text; with Shift they select. Up and Down keep to the column the caret came from.
+ */
+static void description_editor_moves(Description_Editor *editor, Text_Style const *style,
+                                     bool shift, bool control) {
+    assert(!editor->layout_stale);
+
+    Str const text = description_text(editor);
+    int32_t const start = int32_min(editor->cursor, editor->anchor);
+    int32_t const end = int32_max(editor->cursor, editor->anchor);
+    int32_t const line_index = description_caret_line(editor, editor->cursor);
+    Description_Line const *line = &editor->lines[line_index];
+    int32_t target = editor->cursor;
+    bool moved = false;
+    bool vertical = false;
+    if (text_input_key_pressed(KEY_LEFT)) {
+        moved = true;
+        // Without Shift, a selection collapses to its start, as in other editors.
+        if (!shift && start < end) {
+            target = start;
+        } else if (target > 0) {
+            target = (int32_t)rich_text_character_previous(text, (size_t)target);
+        }
+    }
+    if (text_input_key_pressed(KEY_RIGHT)) {
+        moved = true;
+        if (!shift && start < end) {
+            target = end;
+        } else if (target < editor->length) {
+            target = (int32_t)rich_text_character_next(text, (size_t)target);
+        }
+    }
+    int32_t step = 0;
+    if (text_input_key_pressed(KEY_UP)) {
+        step = -1;
+    }
+    if (text_input_key_pressed(KEY_DOWN)) {
+        step = 1;
+    }
+    if (step != 0) {
+        moved = true;
+        vertical = true;
+        if (editor->goal_x_pixels < 0.0f) {
+            editor->goal_x_pixels = description_caret_x(editor, style, editor->cursor);
+        }
+        int32_t const target_line = line_index + step;
+        if (target_line < 0) {
+            target = 0;
+        } else if (target_line >= editor->line_count) {
+            target = editor->length;
+        } else {
+            target = description_line_index_at_x(editor, style, target_line,
+                                                 editor->goal_x_pixels);
+        }
+    }
+    if (text_input_key_pressed(KEY_HOME)) {
+        moved = true;
+        target = line->start;
+        if (control) {
+            target = 0;
+        }
+    }
+    if (text_input_key_pressed(KEY_END)) {
+        moved = true;
+        target = description_line_end_caret(editor, line_index);
+        if (control) {
+            target = editor->length;
+        }
+    }
+    if (!moved) {
+        return;
+    }
+    if (!vertical) {
+        editor->goal_x_pixels = -1.0f;
+    }
+    editor->cursor = target;
+    if (!shift) {
+        editor->anchor = target;
+    }
+    editor->caret_reveal = true;
+    assert(editor->cursor >= 0);
+    assert(editor->cursor <= editor->length);
+}
+
+/**
+ * Where End puts the caret on a line: after its last character, or before the last one of a
+ * line that wraps inside a word, where the end is already the next line's start.
+ */
+static int32_t description_line_end_caret(Description_Editor const *editor, int32_t line_index) {
+    assert(line_index >= 0);
+    assert(line_index < editor->line_count);
+
+    Description_Line const *line = &editor->lines[line_index];
+    if (description_line_continues(editor, line_index) && line->end > line->start) {
+        return (int32_t)rich_text_character_previous(description_text(editor),
+                                                     (size_t)line->end);
+    }
+    return line->end;
+}
+
+/**
+ * Adds an image at the caret, in place of the selection: scaled down to the largest size kept,
+ * stored as a PNG file, and shown from a texture. Takes the image and unloads it. When it
+ * cannot, the form says why. raylib allocates as it converts and encodes, which is fine here:
+ * this runs once per image the user adds, not every frame.
+ */
+static void app_description_insert_image(App *app, Image image) {
+    Form *form = &app->form;
+    Description_Editor *editor = &form->description;
+    assert(IsImageValid(image));
+
+    int32_t const start = int32_min(editor->cursor, editor->anchor);
+    int32_t const end = int32_max(editor->cursor, editor->anchor);
+    Str const text = description_text(editor);
+    int32_t const replaced = rich_text_image_index_at(text, (size_t)end) -
+                             rich_text_image_index_at(text, (size_t)start);
+    if (!editor->images_loaded) {
+        UnloadImage(image);
+        return;
+    }
+    if (editor->image_count - replaced >= DESCRIPTION_IMAGE_COUNT_MAX) {
+        snprintf(form->error, sizeof(form->error), "A description holds at most %d images.",
+                 (int)DESCRIPTION_IMAGE_COUNT_MAX);
+        UnloadImage(image);
+        return;
+    }
+    if (editor->length - (end - start) + RICH_TEXT_IMAGE_MARKER_SIZE >= EVENT_DESCRIPTION_SIZE) {
+        snprintf(form->error, sizeof(form->error), "The description is full.");
+        UnloadImage(image);
+        return;
+    }
+    // Eight bits a channel with alpha, which PNG encodes from any source format, such as a
+    // compressed texture format or a 16-bit one.
+    ImageFormat(&image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    image_fit_side(&image, DESCRIPTION_IMAGE_SIDE_PIXELS_MAX);
+    int png_size = 0;
+    unsigned char *png = ExportImageToMemory(image, ".png", &png_size);
+    // Bounded by IMAGE_SHRINK_STEP_COUNT_MAX: each pass shrinks the image to three quarters.
+    for (int32_t step = 0; png != NULL && png_size > DESCRIPTION_IMAGE_SIZE_BYTES_MAX &&
+                           step < IMAGE_SHRINK_STEP_COUNT_MAX; step++) {
+        MemFree(png);
+        ImageResize(&image, int32_max(image.width * 3 / 4, 1), int32_max(image.height * 3 / 4, 1));
+        png = ExportImageToMemory(image, ".png", &png_size);
+    }
+    if (png == NULL || png_size > DESCRIPTION_IMAGE_SIZE_BYTES_MAX) {
+        snprintf(form->error, sizeof(form->error), "The image could not be made small enough.");
+        MemFree(png);
+        UnloadImage(image);
+        return;
+    }
+    int64_t const id = backend_image_insert(app->backend, array_slice_make(png, png_size));
+    MemFree(png);
+    if (id == 0) {
+        backend_error_copy(app->backend, form->error, sizeof(form->error));
+        UnloadImage(image);
+        return;
+    }
+    Description_Image added = { .texture = LoadTextureFromImage(image), .id = id };
+    UnloadImage(image);
+    // Images are drawn at the panel's width, rarely at their own size, so they are smoothed.
+    SetTextureFilter(added.texture, TEXTURE_FILTER_BILINEAR);
+    bool const inserted = description_replace(editor, start, end, STR(RICH_TEXT_IMAGE_MARKER),
+                                              &added);
+    assert(inserted); // The room and the count were checked above.
+    (void)inserted; // Unused when assertions are compiled out.
+    form->field_active = FORM_FIELD_DESCRIPTION;
+    form->error[0] = '\0';
+}
+
+/**
+ * Scales the image down, keeping its proportions, so that neither side is longer than side_max.
+ */
+static void image_fit_side(Image *image, int32_t side_max) {
+    assert(image->width > 0);
+    assert(image->height > 0);
+    assert(side_max > 0);
+
+    int32_t const side = int32_max(image->width, image->height);
+    if (side <= side_max) {
+        return;
+    }
+    int32_t const width = int32_max((int32_t)((int64_t)image->width * side_max / side), 1);
+    int32_t const height = int32_max((int32_t)((int64_t)image->height * side_max / side), 1);
+    ImageResize(image, width, height);
+    assert(image->width <= side_max);
+    assert(image->height <= side_max);
+}
+
+/**
+ * Image files dropped on the window while the description's page is open are added at the
+ * caret, as many as there is room for. raylib keeps the dropped files until they are unloaded,
+ * so they are taken every frame, and dropped when nothing can use them, so that a drop on
+ * another screen does not land in a description opened later.
+ */
+static void app_take_dropped_files(App *app) {
+    if (!IsFileDropped()) {
+        return;
+    }
+    FilePathList const files = LoadDroppedFiles();
+    Form *form = &app->form;
+    bool const accepting = app->input_enabled && form->open && form->description.open &&
+                           form->description.images_loaded;
+    for (unsigned int i = 0; accepting && i < files.count; i++) {
+        // raylib reads PNG, JPEG, BMP, GIF and a few more, by the name's extension.
+        Image const image = LoadImage(files.paths[i]);
+        if (!IsImageValid(image)) {
+            snprintf(form->error, sizeof(form->error),
+                     "Not an image file that can be added, such as PNG or JPEG.");
+            continue;
+        }
+        app_description_insert_image(app, image);
+    }
+    UnloadDroppedFiles(files);
+}
+
+/**
+ * Opens a link of a description in the system's browser. Only web addresses are links (see
+ * rich_text_link_find), so that nothing else, such as a program, can be started this way.
+ */
+static void app_open_link(App *app, Str link) {
+    char url[RICH_TEXT_URL_SIZE] = "";
+    bool const fits = rich_text_link_url(link, url, sizeof(url));
+    assert(fits); // RICH_TEXT_URL_SIZE holds the longest description and the scheme.
+    if (!fits) {
+        return;
+    }
+    OpenURL(url);
+    app_set_status(app, STR("Opened the link in the browser."));
+}
+
+/**
+ * Shows the description's page with the caret at the end of the text.
+ */
+static void description_open(Form *form) {
+    Description_Editor *editor = &form->description;
+    assert(form->open);
+    assert(!editor->open);
+
+    editor->open = true;
+    form->picker_open = false;
+    form->error[0] = '\0';
+    description_focus_at(form, editor->length, false);
+}
+
+/**
+ * Goes back to the form's fields; the description is kept for saving.
+ */
+static void description_close(Form *form) {
+    Description_Editor *editor = &form->description;
+    assert(editor->open);
+
+    editor->open = false;
+    editor->selecting = false;
+    if (form->field_active == FORM_FIELD_DESCRIPTION) {
+        form->field_active = FORM_FIELD_NONE;
+    }
+}
+
+/**
+ * Starts the editor with text as the description, without images; the caller loads those.
+ */
+static void description_set_text(Description_Editor *editor, Str text) {
+    assert(editor->image_count == 0);
+
+    (void)str_copy_truncated(text, editor->text, sizeof(editor->text)); // Fits: same size.
+    editor->length = (int32_t)strlen(editor->text);
+    editor->cursor = editor->length;
+    editor->anchor = editor->length;
+    editor->layout_stale = true;
+}
+
+/**
+ * Unloads the images' textures, which the GPU holds, and forgets them.
+ */
+static void description_clear_images(Description_Editor *editor) {
+    assert(editor->image_count >= 0);
+    assert(editor->image_count <= DESCRIPTION_IMAGE_COUNT_MAX);
+
+    for (int32_t i = 0; i < editor->image_count; i++) {
+        if (editor->images[i].texture.id != 0) {
+            UnloadTexture(editor->images[i].texture);
+        }
+        editor->images[i] = (Description_Image){ .id = 0 };
+    }
+    editor->image_count = 0;
+}
+
+static Str description_text(Description_Editor const *editor) {
+    assert(editor->length >= 0);
+    assert(editor->length < EVENT_DESCRIPTION_SIZE);
+
+    return str_make(editor->text, (size_t)editor->length);
+}
+
+/**
+ * Replaces the bytes from start up to end with insert, and the images of the markers among them
+ * with added when insert is an image's marker, or else with none. Returns false, changing
+ * nothing, when the text would not fit. The caret ends after the inserted text.
+ */
+static bool description_replace(Description_Editor *editor, int32_t start, int32_t end,
+                                Str insert, Description_Image const *added) {
+    assert(start >= 0);
+    assert(start <= end);
+    assert(end <= editor->length);
+    assert((added != NULL) == str_eq(insert, STR(RICH_TEXT_IMAGE_MARKER)));
+
+    Str const text = description_text(editor);
+    int32_t const first = rich_text_image_index_at(text, (size_t)start);
+    int32_t const removed = rich_text_image_index_at(text, (size_t)end) - first;
+    size_t length = (size_t)editor->length;
+    if (!rich_text_replace(editor->text, &length, sizeof(editor->text), (size_t)start,
+                           (size_t)end, insert)) {
+        return false;
+    }
+    for (int32_t i = first; i < first + removed; i++) {
+        if (editor->images[i].texture.id != 0) {
+            UnloadTexture(editor->images[i].texture);
+        }
+    }
+    int32_t const after = editor->image_count - first - removed;
+    memmove(&editor->images[first], &editor->images[first + removed],
+            (size_t)after * sizeof(editor->images[0]));
+    editor->image_count -= removed;
+    if (added != NULL) {
+        assert(editor->image_count < DESCRIPTION_IMAGE_COUNT_MAX);
+        memmove(&editor->images[first + 1], &editor->images[first],
+                (size_t)after * sizeof(editor->images[0]));
+        editor->images[first] = *added;
+        editor->image_count++;
+    }
+    editor->length = (int32_t)length;
+    editor->cursor = start + (int32_t)insert.length;
+    editor->anchor = editor->cursor;
+    editor->goal_x_pixels = -1.0f;
+    editor->layout_stale = true;
+    editor->caret_reveal = true;
+    assert(editor->image_count == rich_text_image_count(description_text(editor)));
+    return true;
+}
+
+/**
+ * Lays the text out again, if it or the width changed since it was last laid out.
+ */
+static void description_layout_update(Description_Editor *editor, Text_Style const *style) {
+    if (editor->layout_stale) {
+        description_layout(editor, style);
+        editor->layout_stale = false;
+    }
+}
+
+/**
+ * Breaks the text into lines at its line breaks, before and after each image, and where a line
+ * would be wider than the editor, at the last space that fits or else within the word, and
+ * finds its links. A line break right after an image ends the image's line, rather than
+ * leaving an empty line below it. Measures each character once, which keeps this fast enough to
+ * run whenever the text changes.
+ */
+static void description_layout(Description_Editor *editor, Text_Style const *style) {
+    float const width = editor->layout_width_pixels;
+    assert(width > 0.0f);
+
+    Str const text = description_text(editor);
+    int32_t const length = editor->length;
+    int32_t position = 0;
+    int32_t image_index = 0;
+    float y = 0.0f;
+    int32_t count = 0;
+    // Bounded by DESCRIPTION_LINE_COUNT_MAX: every line but the last takes at least one byte.
+    while (count < DESCRIPTION_LINE_COUNT_MAX) {
+        Description_Line line = { .y_pixels = y, .start = position, .image_index = -1 };
+        int32_t next = position;
+        if (rich_text_is_image_marker(text, (size_t)position)) {
+            line.image_index = image_index;
+            image_index++;
+            line.end = position + RICH_TEXT_IMAGE_MARKER_SIZE;
+            line.height_pixels = description_image_size(editor, line.image_index, width).y +
+                                 2 * DESCRIPTION_IMAGE_GAP_PIXELS;
+            next = line.end;
+            if (next < length && text.data[next] == '\n') {
+                next++;
+            }
+        } else {
+            line.height_pixels = TEXT_LINE_HEIGHT_PIXELS;
+            next = description_layout_text_line(style, text, position, width, &line.end);
+        }
+        editor->lines[count] = line;
+        count++;
+        y += line.height_pixels;
+        // A line break that ends the text leaves an empty line after it, for the caret.
+        bool const break_taken = next > line.end && text.data[next - 1] == '\n';
+        if (next >= length && !break_taken) {
+            break;
+        }
+        assert(next > position);
+        position = next;
+    }
+    assert(count >= 1);
+    assert(image_index == editor->image_count);
+    editor->line_count = count;
+    editor->link_count = links_collect(text, text.length, editor->links,
+                                       DESCRIPTION_LINK_COUNT_MAX);
+}
+
+/**
+ * Finds where the line of text that starts at start ends, at width_pixels at the most, into
+ * *end. Returns where the next line starts: after the line break that ends this one, or at the
+ * image or the word that comes next.
+ */
+static int32_t description_layout_text_line(Text_Style const *style, Str text, int32_t start,
+                                            float width_pixels, int32_t *end) {
+    int32_t const length = (int32_t)text.length;
+    float x = 0.0f;
+    int32_t i = start;
+    // Where a line may wrap: after the last space seen, or -1 before the first.
+    int32_t wrap_at = -1;
+    // Bounded by the length: each pass moves i on by a character.
+    while (i < length) {
+        char const character = text.data[i];
+        if (character == '\n') {
+            *end = i;
+            return i + 1;
+        }
+        if (rich_text_is_image_marker(text, (size_t)i)) {
+            *end = i;
+            return i;
+        }
+        int32_t size = 0;
+        float const advance = text_advance(style, rich_text_codepoint(text, (size_t)i, &size));
+        // Spaces may run past the edge, unseen, so that a line never starts with one.
+        if (x + advance > width_pixels && i > start && character != ' ') {
+            if (wrap_at > start) {
+                i = wrap_at;
+            }
+            *end = i;
+            return i;
+        }
+        x += advance;
+        i += size;
+        if (character == ' ') {
+            wrap_at = i;
+        }
+    }
+    *end = length;
+    return length;
+}
+
+/**
+ * The size an image is drawn at: its own size in screen pixels, which is the sharpest, when
+ * that fits the line, or else narrowed to the line, keeping its proportions. One that could not
+ * be loaded is a placeholder across the line.
+ */
+static Vector2 description_image_size(Description_Editor const *editor, int32_t image_index,
+                                      float width_pixels) {
+    assert(image_index >= 0);
+    assert(image_index < editor->image_count);
+    assert(editor->layout_scale > 0.0f);
+
+    Texture2D const texture = editor->images[image_index].texture;
+    if (texture.id == 0) {
+        return (Vector2){ width_pixels, DESCRIPTION_IMAGE_PLACEHOLDER_HEIGHT_PIXELS };
+    }
+    float width = (float)texture.width / editor->layout_scale;
+    float height = (float)texture.height / editor->layout_scale;
+    if (width > width_pixels) {
+        height = height * width_pixels / width;
+        width = width_pixels;
+    }
+    return (Vector2){ width, float_max(height, 1.0f) };
+}
+
+static float description_content_height(Description_Editor const *editor) {
+    assert(!editor->layout_stale);
+    assert(editor->line_count >= 1);
+
+    Description_Line const *last = &editor->lines[editor->line_count - 1];
+    return last->y_pixels + last->height_pixels;
+}
+
+/**
+ * Whether the line after line_index carries on from it without a break: one that wrapped, or
+ * a line of text after an image. At such a line's end, the caret is at the next line's start.
+ */
+static bool description_line_continues(Description_Editor const *editor, int32_t line_index) {
+    assert(line_index >= 0);
+    assert(line_index < editor->line_count);
+
+    if (line_index + 1 >= editor->line_count) {
+        return false;
+    }
+    Description_Line const *line = &editor->lines[line_index];
+    Description_Line const *next = &editor->lines[line_index + 1];
+    // Text that stops before an image keeps the caret at its end, so that typing there goes on
+    // with the text before the image.
+    bool const text_before_image = line->image_index < 0 && next->image_index >= 0;
+    return next->start == line->end && !text_before_image;
+}
+
+/**
+ * The line the caret is drawn on at index.
+ */
+static int32_t description_caret_line(Description_Editor const *editor, int32_t index) {
+    assert(!editor->layout_stale);
+    assert(index >= 0);
+    assert(index <= editor->length);
+
+    for (int32_t i = 0; i < editor->line_count; i++) {
+        Description_Line const *line = &editor->lines[i];
+        if (index < line->start) {
+            break;
+        }
+        if (index > line->end) {
+            continue;
+        }
+        if (index == line->end && description_line_continues(editor, i)) {
+            continue;
+        }
+        return i;
+    }
+    return editor->line_count - 1;
+}
+
+/**
+ * x of the caret at index, from the start of the lines: after the characters before it on its
+ * line, or at either side of an image.
+ */
+static float description_caret_x(Description_Editor const *editor, Text_Style const *style,
+                                 int32_t index) {
+    Description_Line const *line = &editor->lines[description_caret_line(editor, index)];
+    if (line->image_index >= 0) {
+        if (index == line->start) {
+            return 0.0f;
+        }
+        return description_image_size(editor, line->image_index, editor->layout_width_pixels).x;
+    }
+    Str const text = description_text(editor);
+    int32_t const end = int32_max(int32_min(index, line->end), line->start);
+    return text_width(style, str_slice(text, (size_t)line->start, (size_t)end));
+}
+
+/**
+ * The line at y, from the top of the lines; the first above them and the last below them.
+ */
+static int32_t description_line_at(Description_Editor const *editor, float y) {
+    assert(editor->line_count >= 1);
+
+    for (int32_t i = 0; i < editor->line_count; i++) {
+        Description_Line const *line = &editor->lines[i];
+        if (y < line->y_pixels + line->height_pixels) {
+            return i;
+        }
+    }
+    return editor->line_count - 1;
+}
+
+/**
+ * The caret position nearest the point x, y, from the top left of the lines.
+ */
+static int32_t description_index_at(Description_Editor const *editor, Text_Style const *style,
+                                    float x, float y) {
+    return description_line_index_at_x(editor, style, description_line_at(editor, y), x);
+}
+
+/**
+ * The caret position on a line nearest x: between the characters on either side of it, or the
+ * side of an image that x is on.
+ */
+static int32_t description_line_index_at_x(Description_Editor const *editor,
+                                           Text_Style const *style, int32_t line_index,
+                                           float x) {
+    assert(line_index >= 0);
+    assert(line_index < editor->line_count);
+
+    Description_Line const *line = &editor->lines[line_index];
+    if (line->image_index >= 0) {
+        float const width = description_image_size(editor, line->image_index,
+                                                   editor->layout_width_pixels).x;
+        if (x < width / 2) {
+            return line->start;
+        }
+        return line->end;
+    }
+    Str const text = description_text(editor);
+    float left = 0.0f;
+    int32_t i = line->start;
+    // Bounded by the line: each pass moves i on by a character.
+    while (i < line->end) {
+        int32_t size = 0;
+        float const advance = text_advance(style, rich_text_codepoint(text, (size_t)i, &size));
+        if (x < left + advance / 2) {
+            return i;
+        }
+        left += advance;
+        i += size;
+    }
+    // Past the end of a line that wraps inside a word, the caret stays before its last
+    // character, as it would be drawn on the next line otherwise.
+    return description_line_end_caret(editor, line_index);
+}
+
+/**
+ * The link under the point x, y, from the top left of the lines, or one with start
+ * STR_NOT_FOUND when there is none.
+ */
+static Rich_Text_Link description_link_at_point(Description_Editor const *editor,
+                                                Text_Style const *style, float x, float y) {
+    Rich_Text_Link const none = { .start = STR_NOT_FOUND, .end = STR_NOT_FOUND };
+    if (editor->layout_stale || y < 0.0f || y >= description_content_height(editor)) {
+        return none;
+    }
+    Description_Line const *line = &editor->lines[description_line_at(editor, y)];
+    if (line->image_index >= 0) {
+        return none;
+    }
+    Str const text = description_text(editor);
+    int32_t const index = text_index_at_x(style, text, (size_t)line->start, (size_t)line->end, x);
+    if (index < 0) {
+        return none;
+    }
+    return links_find_at(array_slice_make((void *)editor->links, editor->link_count),
+                         (size_t)index);
+}
+
+/**
+ * Scrolls just enough that the caret's line is in sight.
+ */
+static void description_caret_reveal(Description_Editor *editor, float view_height,
+                                     float content_height) {
+    assert(view_height > 0.0f);
+
+    editor->caret_reveal = false;
+    Description_Line const *line =
+        &editor->lines[description_caret_line(editor, editor->cursor)];
+    Scroll *scroll = &editor->scroll;
+    if (line->y_pixels + line->height_pixels > scroll->offset_pixels + view_height) {
+        scroll->offset_pixels = line->y_pixels + line->height_pixels - view_height;
+    }
+    if (line->y_pixels < scroll->offset_pixels) {
+        scroll->offset_pixels = line->y_pixels;
+    }
+    float const offset_max = float_max(content_height - view_height, 0.0f);
+    scroll->offset_pixels = float_max(float_min(scroll->offset_pixels, offset_max), 0.0f);
+}
+
+/**
+ * The lines in sight, each image, the selection behind them and the caret.
+ */
+static void draw_description_editor_lines(App const *app, Rectangle inner, bool focused) {
+    Description_Editor const *editor = &app->form.description;
+    Text_Style const *style = &app->fonts.ui;
+    Str const text = description_text(editor);
+    float const top = inner.y - editor->scroll.offset_pixels;
+    int32_t const selection_start = int32_min(editor->cursor, editor->anchor);
+    int32_t const selection_end = int32_max(editor->cursor, editor->anchor);
+    Color const normal = style_color(TEXT_COLOR_NORMAL);
+    Color const accent = style_color(BORDER_COLOR_PRESSED);
+    Color const selection = Fade(accent, 0.35f);
+    Array_Slice const links = array_slice_make((void *)editor->links, editor->link_count);
+    for (int32_t i = 0; i < editor->line_count; i++) {
+        Description_Line const *line = &editor->lines[i];
+        float const y = top + line->y_pixels;
+        if (y + line->height_pixels < inner.y) {
+            continue;
+        }
+        if (y > inner.y + inner.height) {
+            break;
+        }
+        bool const selected_whole = selection_start <= line->start && line->end <= selection_end &&
+                                    selection_start < selection_end;
+        if (line->image_index >= 0) {
+            Vector2 const size = description_image_size(editor, line->image_index, inner.width);
+            Rectangle const area = { inner.x, y + DESCRIPTION_IMAGE_GAP_PIXELS, size.x, size.y };
+            draw_description_image(app, editor->images[line->image_index].texture, area);
+            if (selected_whole) {
+                DrawRectangleRec(area, selection);
+            }
+            continue;
+        }
+        if (selection_start < selection_end && selection_start <= line->end &&
+            selection_end > line->start) {
+            int32_t const from = int32_max(selection_start, line->start);
+            int32_t const to = int32_min(selection_end, line->end);
+            float const left = text_width(style, str_slice(text, (size_t)line->start,
+                                                           (size_t)from));
+            float width = text_width(style, str_slice(text, (size_t)from, (size_t)to));
+            // A selected line break shows as a space's width after the line.
+            if (selection_end > line->end && line->end < editor->length &&
+                text.data[line->end] == '\n') {
+                width += text_advance(style, ' ');
+            }
+            DrawRectangleRec((Rectangle){ inner.x + left, y, width, TEXT_LINE_HEIGHT_PIXELS },
+                             selection);
+        }
+        draw_text_links(style, text, (size_t)line->start, (size_t)line->end, links, inner.x,
+                        y + (TEXT_LINE_HEIGHT_PIXELS - TEXT_SIZE_PIXELS) / 2, normal, accent);
+    }
+    if (focused) {
+        Description_Line const *line =
+            &editor->lines[description_caret_line(editor, editor->cursor)];
+        float const x = inner.x + description_caret_x(editor, style, editor->cursor);
+        float height = TEXT_LINE_HEIGHT_PIXELS - 4.0f;
+        float y = top + line->y_pixels + 2.0f;
+        if (line->image_index >= 0) {
+            height = line->height_pixels - 2 * DESCRIPTION_IMAGE_GAP_PIXELS;
+            y = top + line->y_pixels + DESCRIPTION_IMAGE_GAP_PIXELS;
+        }
+        DrawRectangleRec((Rectangle){ x - 1.0f, y, 2.0f, height }, accent);
+    }
+}
+
+/**
+ * An image scaled into area, or for one that could not be loaded, a frame saying so.
+ */
+static void draw_description_image(App const *app, Texture2D texture, Rectangle area) {
+    if (texture.id != 0) {
+        Rectangle const source = { 0, 0, (float)texture.width, (float)texture.height };
+        DrawTexturePro(texture, source, area, (Vector2){ 0, 0 }, 0.0f, WHITE);
+        return;
+    }
+    DrawRectangleLinesEx(area, 1.0f, style_color(BORDER_COLOR_FOCUSED));
+    draw_text_centered(&app->fonts.small, STR("The image could not be shown."), area,
+                       style_color(TEXT_COLOR_DISABLED));
+}
+
+/**
+ * Loads the images of the item's description, in the order of their markers, into textures. A
+ * failure to list them makes the description read-only (see Description_Editor.images_loaded);
+ * an image that cannot be loaded or decoded is shown as a placeholder, and kept when saving.
+ */
+static void app_form_load_images(App *app, int64_t event_id) {
+    Form *form = &app->form;
+    Description_Editor *editor = &form->description;
+    assert(event_id > 0);
+    assert(editor->image_count == 0);
+
+    int32_t const marker_count = rich_text_image_count(description_text(editor));
+    if (marker_count == 0) {
+        return; // Nothing to ask the backend, which may be across the network.
+    }
+    if (marker_count > DESCRIPTION_IMAGE_COUNT_MAX) {
+        editor->images_loaded = false;
+        snprintf(form->error, sizeof(form->error), "The description has too many images.");
+        return;
+    }
+    int64_t ids[DESCRIPTION_IMAGE_COUNT_MAX] = { 0 };
+    int32_t const count = backend_load_event_images(
+        app->backend, event_id, array_slice_make(ids, DESCRIPTION_IMAGE_COUNT_MAX));
+    if (count < 0) {
+        editor->images_loaded = false;
+        backend_error_copy(app->backend, form->error, sizeof(form->error));
+        return;
+    }
+    // A marker without an image, which only a database changed by another program has, shows
+    // a placeholder and is dropped when saving; an image without a marker is deleted then.
+    for (int32_t i = 0; i < marker_count; i++) {
+        Description_Image image = { .id = 0 };
+        if (i < count) {
+            image.id = ids[i];
+            image.texture = app_image_texture_load(app, ids[i]);
+        }
+        editor->images[i] = image;
+    }
+    editor->image_count = marker_count;
+    editor->layout_stale = true;
+}
+
+/**
+ * The stored image with id as a texture, or one with id 0 when it cannot be loaded or decoded.
+ */
+static Texture2D app_image_texture_load(App *app, int64_t id) {
+    assert(id > 0);
+
+    Texture2D const none = { .id = 0 };
+    int32_t const size = backend_image_load(
+        app->backend, id, array_slice_make(app->image_bytes, DESCRIPTION_IMAGE_SIZE_BYTES_MAX));
+    if (size <= 0) {
+        return none;
+    }
+    Image const image = LoadImageFromMemory(".png", app->image_bytes, size);
+    if (!IsImageValid(image)) {
+        return none;
+    }
+    Texture2D const texture = LoadTextureFromImage(image);
+    UnloadImage(image);
+    if (!IsTextureValid(texture)) {
+        return none;
+    }
+    // As for an added image (see app_description_insert_image).
+    SetTextureFilter(texture, TEXTURE_FILTER_BILINEAR);
+    return texture;
+}
+
+/**
+ * Gives the saved item the description's images, in the order of their markers; those it had
+ * and no longer shows are deleted. Skipped when they could not be loaded, which keeps them as
+ * they are, and for a new item without images, which has none to delete.
+ */
+static bool app_form_save_images(App *app, int64_t id, bool inserted) {
+    Description_Editor const *editor = &app->form.description;
+    assert(id > 0);
+
+    if (!editor->images_loaded) {
+        return true;
+    }
+    int64_t ids[DESCRIPTION_IMAGE_COUNT_MAX] = { 0 };
+    int32_t count = 0;
+    for (int32_t i = 0; i < editor->image_count; i++) {
+        // An image that was never there is dropped, with its marker (see form_description_copy).
+        if (editor->images[i].id != 0) {
+            ids[count] = editor->images[i].id;
+            count++;
+        }
+    }
+    if (inserted && count == 0) {
+        return true;
+    }
+    if (!backend_set_event_images(app->backend, id, array_slice_make(ids, count))) {
+        backend_error_copy(app->backend, app->form.error, sizeof(app->form.error));
+        return false;
+    }
+    return true;
+}
+
+/**
+ * The description as it is saved: without spaces and empty lines at its ends, and without the
+ * markers of images that were never there, which saving drops (see app_form_save_images).
+ */
+static void form_description_copy(Form const *form, char *buffer, size_t buffer_size) {
+    Description_Editor const *editor = &form->description;
+    assert(buffer_size >= sizeof(editor->text));
+
+    Str const text = description_text(editor);
+    Str_Builder builder;
+    str_builder_init(&builder, buffer, buffer_size - 1);
+    int32_t image_index = 0;
+    size_t i = 0;
+    // Bounded by the length: each pass moves i on by at least one byte.
+    while (i < text.length) {
+        if (rich_text_is_image_marker(text, i)) {
+            assert(image_index < editor->image_count || !editor->images_loaded);
+            bool const kept = !editor->images_loaded || editor->images[image_index].id != 0;
+            if (kept) {
+                (void)str_builder_append(&builder, STR(RICH_TEXT_IMAGE_MARKER));
+            }
+            image_index++;
+            i += RICH_TEXT_IMAGE_MARKER_SIZE;
+            continue;
+        }
+        (void)str_builder_append(&builder, str_slice(text, i, i + 1));
+        i++;
+    }
+    assert(!builder.overflow); // The buffer is as large as the editor's text.
+    Str const trimmed = str_trim_any(str_builder_str(&builder), STR(" \n"));
+    memmove(buffer, trimmed.data, trimmed.length);
+    buffer[trimmed.length] = '\0';
+}
+
+/**
+ * The width of text drawn in style, added up from each character's advance as raylib draws
+ * them, so that the caret and the selection line up with the drawn text.
+ */
+static float text_width(Text_Style const *style, Str text) {
+    float width = 0.0f;
+    size_t i = 0;
+    // Bounded by the length: each pass moves i on by a character.
+    while (i < text.length) {
+        int32_t size = 0;
+        width += text_advance(style, rich_text_codepoint(text, i, &size));
+        i += (size_t)size;
+    }
+    return width;
+}
+
+/**
+ * How far raylib's DrawTextEx moves on after drawing the character, in layout pixels.
+ */
+static float text_advance(Text_Style const *style, int32_t codepoint) {
+    Font const font = style->font;
+    assert(font.baseSize > 0);
+
+    int const glyph = GetGlyphIndex(font, (int)codepoint);
+    float advance = (float)font.glyphs[glyph].advanceX;
+    // raylib's own rule: a glyph without an advance moves by its width.
+    if (font.glyphs[glyph].advanceX == 0) {
+        advance = font.recs[glyph].width;
+    }
+    float const scale_factor = style->size_pixels / (float)font.baseSize;
+    return advance * scale_factor + (float)GuiGetStyle(DEFAULT, TEXT_SPACING);
+}
+
+/**
+ * The index of the character between start and end of text that x is on, from where start is
+ * drawn, or -1 when x is before or after them.
+ */
+static int32_t text_index_at_x(Text_Style const *style, Str text, size_t start, size_t end,
+                               float x) {
+    assert(start <= end);
+    assert(end <= text.length);
+
+    float left = 0.0f;
+    size_t i = start;
+    // Bounded by end: each pass moves i on by a character.
+    while (i < end && x >= 0.0f) {
+        int32_t size = 0;
+        float const advance = text_advance(style, rich_text_codepoint(text, i, &size));
+        if (x < left + advance) {
+            return (int32_t)i;
+        }
+        left += advance;
+        i += (size_t)size;
+    }
+    return -1;
+}
+
+/**
+ * The links of text that start before until, in order, into links, an array of count_max.
+ * Returns how many; more are left out.
+ */
+static int32_t links_collect(Str text, size_t until, Rich_Text_Link *links, int32_t count_max) {
+    assert(count_max > 0);
+
+    int32_t count = 0;
+    size_t from = 0;
+    // Bounded by count_max, and by the length: each link found ends after from.
+    while (count < count_max && from < until) {
+        Rich_Text_Link const link = rich_text_link_find(text, from);
+        if (link.start == STR_NOT_FOUND || link.start >= until) {
+            break;
+        }
+        links[count] = link;
+        count++;
+        from = link.end;
+    }
+    return count;
+}
+
+/**
+ * The link in links, a slice of Rich_Text_Link in order, that holds index, or one with start
+ * STR_NOT_FOUND.
+ */
+static Rich_Text_Link links_find_at(Array_Slice links, size_t index) {
+    Rich_Text_Link const *items = links.items;
+    for (int32_t i = 0; i < links.count; i++) {
+        if (items[i].start <= index && index < items[i].end) {
+            return items[i];
+        }
+    }
+    return (Rich_Text_Link){ .start = STR_NOT_FOUND, .end = STR_NOT_FOUND };
+}
+
+/**
+ * Draws the bytes of text from start up to end on one line at x, y, with the parts in links,
+ * a slice of Rich_Text_Link in order, in link_color and underlined. The links are of the whole
+ * text, so that one that wraps onto the next line shows as a link on both.
+ */
+static void draw_text_links(Text_Style const *style, Str text, size_t start, size_t end,
+                            Array_Slice links, float x, float y, Color color, Color link_color) {
+    assert(start <= end);
+    assert(end <= text.length);
+
+    Rich_Text_Link const *items = links.items;
+    size_t position = start;
+    int32_t link_index = 0;
+    // Bounded by the line: each pass draws up to a link's start or end, or the line's end.
+    while (position < end) {
+        while (link_index < links.count && items[link_index].end <= position) {
+            link_index++;
+        }
+        bool in_link = false;
+        size_t part_end = end;
+        if (link_index < links.count) {
+            Rich_Text_Link const link = items[link_index];
+            if (link.start <= position) {
+                in_link = true;
+                part_end = link.end;
+            } else {
+                part_end = link.start;
+            }
+        }
+        if (part_end > end) {
+            part_end = end;
+        }
+        Str const part = str_slice(text, position, part_end);
+        float const width = text_width(style, part);
+        if (in_link) {
+            draw_text(style, part, x, y, link_color);
+            float const underline_y = y + style->size_pixels + 1.0f;
+            DrawLineEx((Vector2){ x, underline_y }, (Vector2){ x + width, underline_y }, 1.0f,
+                       link_color);
+        } else {
+            draw_text(style, part, x, y, color);
+        }
+        x += width;
+        position = part_end;
+    }
+}
+
+/**
+ * Skips the spaces, line breaks and image markers at index, which a card or a preview does
+ * not show. Returns the index after them.
+ */
+static size_t text_wrap_skip(Str text, size_t index) {
+    // Bounded by the length: each pass moves index on by at least one byte.
+    while (index < text.length) {
+        if (rich_text_is_image_marker(text, index)) {
+            index += RICH_TEXT_IMAGE_MARKER_SIZE;
+        } else if (text.data[index] == ' ' || text.data[index] == '\n') {
+            index++;
+        } else {
+            break;
+        }
+    }
+    return index;
 }
 
 /**

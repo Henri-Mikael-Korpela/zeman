@@ -3,10 +3,11 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 enum {
     CLIENT_CONNECT_TIMEOUT_MS = 1500,
-    // Long enough for a full month of events over a slow Wi-Fi network.
+    // Long enough for a full month of events, or an image, over a slow Wi-Fi network.
     CLIENT_IO_TIMEOUT_MS = 5000,
     CLIENT_RECONNECT_INTERVAL_MS = 3000,
     // How stale the desktop's revision may get before asking again, which is how quickly
@@ -38,6 +39,10 @@ static int32_t client_load_task_targets(void *context, int64_t task_id, bool pro
                                         Array_Slice targets, bool *truncated);
 static bool client_set_task_targets(void *context, int64_t task_id, Array_Slice target_ids);
 static int32_t client_load_tasks(void *context, Date today, Array_Slice tasks, bool *truncated);
+static int64_t client_image_insert(void *context, Array_Slice png_bytes);
+static int32_t client_image_load(void *context, int64_t id, Array_Slice png_bytes);
+static int32_t client_load_event_images(void *context, int64_t event_id, Array_Slice image_ids);
+static bool client_set_event_images(void *context, int64_t event_id, Array_Slice image_ids);
 static uint64_t client_revision(void *context);
 static Str client_error(void const *context);
 
@@ -53,6 +58,10 @@ static Backend_Ops const CLIENT_OPS = {
     .load_task_targets = client_load_task_targets,
     .set_task_targets = client_set_task_targets,
     .load_tasks = client_load_tasks,
+    .image_insert = client_image_insert,
+    .image_load = client_image_load,
+    .load_event_images = client_load_event_images,
+    .set_event_images = client_set_event_images,
     .revision = client_revision,
     .error = client_error,
 };
@@ -287,6 +296,84 @@ static int32_t client_load_tasks(void *context, Date today, Array_Slice tasks, b
         task_items[i] = reader_task_occurrence(&response);
     }
     return client_response_count(client, &response, count);
+}
+
+static int64_t client_image_insert(void *context, Array_Slice png_bytes) {
+    Client *client = context;
+    assert(description_image_is_valid(png_bytes));
+    Writer request = client_request_begin(client, PROTOCOL_IMAGE_INSERT);
+    writer_blob(&request, png_bytes);
+    Reader response = { 0 };
+    if (!client_call(client, &request, &response)) {
+        return 0;
+    }
+    int64_t const id = reader_i64(&response);
+    return client_response_id(client, &response, id);
+}
+
+/**
+ * The bytes are copied out of the response, which the next request overwrites.
+ */
+static int32_t client_image_load(void *context, int64_t id, Array_Slice png_bytes) {
+    Client *client = context;
+    assert(id > 0);
+    assert(png_bytes.count > 0);
+    Writer request = client_request_begin(client, PROTOCOL_IMAGE_LOAD);
+    writer_i64(&request, id);
+    Reader response = { 0 };
+    if (!client_call(client, &request, &response)) {
+        return -1;
+    }
+    Array_Slice const blob = reader_blob(&response, png_bytes.count);
+    if (!client_response_done(client, &response)) {
+        return -1;
+    }
+    if (blob.count > 0) {
+        memcpy(png_bytes.items, blob.items, (size_t)blob.count);
+    }
+    return blob.count;
+}
+
+static int32_t client_load_event_images(void *context, int64_t event_id, Array_Slice image_ids) {
+    Client *client = context;
+    assert(event_id > 0);
+    assert(image_ids.count > 0);
+    int64_t *ids = image_ids.items;
+    Writer request = client_request_begin(client, PROTOCOL_LOAD_EVENT_IMAGES);
+    writer_i64(&request, event_id);
+    writer_i32(&request, image_ids.count);
+    Reader response = { 0 };
+    if (!client_call(client, &request, &response)) {
+        return -1;
+    }
+    int32_t const count = reader_i32(&response);
+    if (count < 0 || count > image_ids.count) {
+        client_disconnect(client, "The desktop app sent an invalid answer.");
+        return -1;
+    }
+    for (int32_t i = 0; i < count; i++) {
+        ids[i] = reader_i64(&response);
+        if (ids[i] <= 0) {
+            response.failed = true;
+        }
+    }
+    return client_response_count(client, &response, count);
+}
+
+static bool client_set_event_images(void *context, int64_t event_id, Array_Slice image_ids) {
+    Client *client = context;
+    assert(event_id > 0);
+    assert(image_ids.count >= 0);
+    assert(image_ids.count <= DESCRIPTION_IMAGE_COUNT_MAX);
+    int64_t const *ids = image_ids.items;
+    Writer request = client_request_begin(client, PROTOCOL_SET_EVENT_IMAGES);
+    writer_i64(&request, event_id);
+    writer_i32(&request, image_ids.count);
+    for (int32_t i = 0; i < image_ids.count; i++) {
+        writer_i64(&request, ids[i]);
+    }
+    Reader response = { 0 };
+    return client_call(client, &request, &response) && client_response_done(client, &response);
 }
 
 /**
