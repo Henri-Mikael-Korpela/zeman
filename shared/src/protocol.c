@@ -131,6 +131,15 @@ void writer_link_target(Writer *writer, Link_Target const *target) {
     writer_text(writer, str_from_cstr(target->title));
 }
 
+/**
+ * Every field, in declaration order; reader_attachment reads them back in the same order.
+ */
+void writer_attachment(Writer *writer, Attachment const *attachment) {
+    writer_i64(writer, attachment->id);
+    writer_i32(writer, attachment->size_bytes);
+    writer_text(writer, str_from_cstr(attachment->name));
+}
+
 void writer_task_occurrence(Writer *writer, Task_Occurrence const *occurrence) {
     writer_event(writer, &occurrence->task);
     writer_i32(writer, occurrence->start_day);
@@ -312,6 +321,20 @@ Linked_Task reader_linked_task(Reader *reader) {
         return (Linked_Task){ 0 };
     }
     return task;
+}
+
+Attachment reader_attachment(Reader *reader) {
+    Attachment attachment = { 0 };
+    attachment.id = reader_i64(reader);
+    attachment.size_bytes = reader_i32(reader);
+    reader_text(reader, attachment.name, sizeof(attachment.name));
+    if (!reader->failed && !attachment_is_valid(&attachment)) {
+        reader->failed = true;
+    }
+    if (reader->failed) {
+        return (Attachment){ 0 };
+    }
+    return attachment;
 }
 
 /**

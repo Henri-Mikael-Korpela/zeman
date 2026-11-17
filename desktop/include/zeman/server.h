@@ -41,8 +41,9 @@ typedef struct Server {
     Linked_Task linked_tasks[LINK_COUNT_MAX];
     Link_Target link_targets[LINK_COUNT_MAX];
     Task_Occurrence task_occurrences[PROTOCOL_EVENT_COUNT_MAX];
-    // An image being sent, loaded here from the backend before it is written to the response.
-    byte image[DESCRIPTION_IMAGE_SIZE_BYTES_MAX];
+    // An image or a file being sent, loaded here from the backend before it is written to the
+    // response. Sized for the larger, the file.
+    byte blob[ATTACHMENT_SIZE_BYTES_MAX];
     Backend *backend;
     Net_Socket listener;
     Net_Socket discovery;  // UDP, or NET_SOCKET_INVALID when the port was taken

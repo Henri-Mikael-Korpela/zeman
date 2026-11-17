@@ -43,6 +43,12 @@ static int64_t client_image_insert(void *context, Array_Slice png_bytes);
 static int32_t client_image_load(void *context, int64_t id, Array_Slice png_bytes);
 static int32_t client_load_event_images(void *context, int64_t event_id, Array_Slice image_ids);
 static bool client_set_event_images(void *context, int64_t event_id, Array_Slice image_ids);
+static int64_t client_attachment_insert(void *context, Str name, Array_Slice bytes);
+static int32_t client_attachment_load(void *context, int64_t id, Array_Slice bytes);
+static int32_t client_load_event_attachments(void *context, int64_t event_id,
+                                             Array_Slice attachments);
+static bool client_set_event_attachments(void *context, int64_t event_id,
+                                         Array_Slice attachment_ids);
 static uint64_t client_revision(void *context);
 static Str client_error(void const *context);
 
@@ -62,6 +68,10 @@ static Backend_Ops const CLIENT_OPS = {
     .image_load = client_image_load,
     .load_event_images = client_load_event_images,
     .set_event_images = client_set_event_images,
+    .attachment_insert = client_attachment_insert,
+    .attachment_load = client_attachment_load,
+    .load_event_attachments = client_load_event_attachments,
+    .set_event_attachments = client_set_event_attachments,
     .revision = client_revision,
     .error = client_error,
 };
@@ -370,6 +380,86 @@ static bool client_set_event_images(void *context, int64_t event_id, Array_Slice
     writer_i64(&request, event_id);
     writer_i32(&request, image_ids.count);
     for (int32_t i = 0; i < image_ids.count; i++) {
+        writer_i64(&request, ids[i]);
+    }
+    Reader response = { 0 };
+    return client_call(client, &request, &response) && client_response_done(client, &response);
+}
+
+static int64_t client_attachment_insert(void *context, Str name, Array_Slice bytes) {
+    Client *client = context;
+    assert(attachment_name_is_valid(name));
+    assert(bytes.count > 0);
+    assert(bytes.count <= ATTACHMENT_SIZE_BYTES_MAX);
+    Writer request = client_request_begin(client, PROTOCOL_ATTACHMENT_INSERT);
+    writer_text(&request, name);
+    writer_blob(&request, bytes);
+    Reader response = { 0 };
+    if (!client_call(client, &request, &response)) {
+        return 0;
+    }
+    int64_t const id = reader_i64(&response);
+    return client_response_id(client, &response, id);
+}
+
+/**
+ * The bytes are copied out of the response, which the next request overwrites.
+ */
+static int32_t client_attachment_load(void *context, int64_t id, Array_Slice bytes) {
+    Client *client = context;
+    assert(id > 0);
+    assert(bytes.count > 0);
+    Writer request = client_request_begin(client, PROTOCOL_ATTACHMENT_LOAD);
+    writer_i64(&request, id);
+    Reader response = { 0 };
+    if (!client_call(client, &request, &response)) {
+        return -1;
+    }
+    Array_Slice const blob = reader_blob(&response, bytes.count);
+    if (!client_response_done(client, &response)) {
+        return -1;
+    }
+    if (blob.count > 0) {
+        memcpy(bytes.items, blob.items, (size_t)blob.count);
+    }
+    return blob.count;
+}
+
+static int32_t client_load_event_attachments(void *context, int64_t event_id,
+                                             Array_Slice attachments) {
+    Client *client = context;
+    assert(event_id > 0);
+    assert(attachments.count > 0);
+    Attachment *items = attachments.items;
+    Writer request = client_request_begin(client, PROTOCOL_LOAD_EVENT_ATTACHMENTS);
+    writer_i64(&request, event_id);
+    writer_i32(&request, attachments.count);
+    Reader response = { 0 };
+    if (!client_call(client, &request, &response)) {
+        return -1;
+    }
+    int32_t const count = reader_i32(&response);
+    if (count < 0 || count > attachments.count) {
+        client_disconnect(client, "The desktop app sent an invalid answer.");
+        return -1;
+    }
+    for (int32_t i = 0; i < count; i++) {
+        items[i] = reader_attachment(&response);
+    }
+    return client_response_count(client, &response, count);
+}
+
+static bool client_set_event_attachments(void *context, int64_t event_id,
+                                         Array_Slice attachment_ids) {
+    Client *client = context;
+    assert(event_id > 0);
+    assert(attachment_ids.count >= 0);
+    assert(attachment_ids.count <= ATTACHMENT_COUNT_MAX);
+    int64_t const *ids = attachment_ids.items;
+    Writer request = client_request_begin(client, PROTOCOL_SET_EVENT_ATTACHMENTS);
+    writer_i64(&request, event_id);
+    writer_i32(&request, attachment_ids.count);
+    for (int32_t i = 0; i < attachment_ids.count; i++) {
         writer_i64(&request, ids[i]);
     }
     Reader response = { 0 };

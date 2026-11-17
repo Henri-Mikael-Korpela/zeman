@@ -27,6 +27,15 @@ enum {
     // Bytes of one stored image, a PNG file. A photo at the largest side above compresses to
     // about this; a larger one is scaled down further. It bounds the network's messages too.
     DESCRIPTION_IMAGE_SIZE_BYTES_MAX = 1024 * 1024,
+    // Files attached to one item. Each is listed in the form with its own row, so the bound keeps
+    // the list to a few screens.
+    ATTACHMENT_COUNT_MAX = 16,
+    // Bytes including the terminator of an attached file's name, without its folder.
+    ATTACHMENT_NAME_SIZE = 256,
+    // Bytes of one attached file. A file travels over the network in one message (see
+    // PROTOCOL_REQUEST_SIZE_MAX), so this is the size of the buffers on both ends: large enough
+    // for a document or a photo, and small enough to hold in memory twice.
+    ATTACHMENT_SIZE_BYTES_MAX = 4 * 1024 * 1024,
     LOCATION_ADDRESS_SIZE = 64,
     LOCATION_CITY_SIZE = 48,
 };
@@ -163,6 +172,29 @@ bool event_is_valid(Event const *event);
  * apps that draw it, which show a placeholder for one that does not.
  */
 bool description_image_is_valid(Array_Slice png_bytes);
+
+// A file attached to an item, without its bytes: those are loaded only when the file is saved
+// out, so that listing an item's attachments stays cheap.
+typedef struct Attachment {
+    int64_t id;
+    int32_t size_bytes;  // 1 ... ATTACHMENT_SIZE_BYTES_MAX
+    char name[ATTACHMENT_NAME_SIZE];  // The file's name, without its folder
+} Attachment;
+
+/**
+ * Whether name can be the name of an attachment: not empty, shorter than
+ * ATTACHMENT_NAME_SIZE, valid UTF-8, and free of control characters and of the characters that
+ * Windows does not allow in a file name, among them the folder separators, so that the name is
+ * safe to offer when the file is saved out. Checks data from outside the program too, such as
+ * the network.
+ */
+bool attachment_name_is_valid(Str name);
+
+/**
+ * Whether the attachment's fields follow their rules: a stored id, a valid name, and a size
+ * within the limit, which is also what the network's reader checks.
+ */
+bool attachment_is_valid(Attachment const *attachment);
 
 /**
  * A link target that tasks can be linked to: a problem or an opportunity.

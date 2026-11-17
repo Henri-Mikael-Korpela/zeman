@@ -168,6 +168,18 @@ static char const *const MIGRATIONS_SQL[] = {
     "    png BLOB NOT NULL CHECK (length(png) > 0)"
     ");"
     "CREATE INDEX description_images_by_event ON description_images (event_id, position);",
+    // Files attached to an item, with their contents, in the order they were given. Stored as
+    // the images are: in the database, so that a backup of one file holds everything, and added
+    // with no item first (see description_images). The name is the file's own, without its
+    // folder. Deleting the item deletes its attachments.
+    "CREATE TABLE attachments ("
+    "    id INTEGER PRIMARY KEY,"
+    "    event_id INTEGER REFERENCES events (id) ON DELETE CASCADE,"
+    "    position INTEGER NOT NULL DEFAULT 0,"
+    "    name TEXT NOT NULL CHECK (length(name) > 0),"
+    "    content BLOB NOT NULL CHECK (length(content) > 0)"
+    ");"
+    "CREATE INDEX attachments_by_event ON attachments (event_id, position);",
 };
 enum { SCHEMA_VERSION = sizeof(MIGRATIONS_SQL) / sizeof(MIGRATIONS_SQL[0]) };
 
@@ -201,6 +213,12 @@ typedef enum Statement {
     STATEMENT_IMAGES_RELEASE,
     STATEMENT_IMAGE_CLAIM,
     STATEMENT_IMAGES_DELETE_RELEASED,
+    STATEMENT_ATTACHMENT_INSERT,
+    STATEMENT_ATTACHMENT_SELECT,
+    STATEMENT_EVENT_ATTACHMENTS,
+    STATEMENT_ATTACHMENTS_RELEASE,
+    STATEMENT_ATTACHMENT_CLAIM,
+    STATEMENT_ATTACHMENTS_DELETE_RELEASED,
     STATEMENT_COUNT,
 } Statement;
 
@@ -326,6 +344,22 @@ static char const *const STATEMENTS_SQL[STATEMENT_COUNT] = {
         " WHERE id = ?3 AND (event_id IS NULL OR event_id = ?1);",
     [STATEMENT_IMAGES_DELETE_RELEASED] =
         "DELETE FROM description_images WHERE event_id = ?1 AND position < 0;",
+    [STATEMENT_ATTACHMENT_INSERT] =
+        "INSERT INTO attachments (name, content) VALUES (?1, ?2);",
+    [STATEMENT_ATTACHMENT_SELECT] = "SELECT content FROM attachments WHERE id = ?1;",
+    // The size is worked out by the database without reading the contents, so that listing an
+    // item's attachments does not load its files.
+    [STATEMENT_EVENT_ATTACHMENTS] =
+        "SELECT id, name, length(content) FROM attachments WHERE event_id = ?1"
+        " ORDER BY position, id LIMIT ?2;",
+    // The three steps of replacing an item's attachments, as for its images.
+    [STATEMENT_ATTACHMENTS_RELEASE] =
+        "UPDATE attachments SET position = -1 WHERE event_id = ?1;",
+    [STATEMENT_ATTACHMENT_CLAIM] =
+        "UPDATE attachments SET event_id = ?1, position = ?2"
+        " WHERE id = ?3 AND (event_id IS NULL OR event_id = ?1);",
+    [STATEMENT_ATTACHMENTS_DELETE_RELEASED] =
+        "DELETE FROM attachments WHERE event_id = ?1 AND position < 0;",
 };
 
 enum {
@@ -375,6 +409,8 @@ static bool event_store_set_task_targets_rows(Event_Store *store, int64_t task_i
                                               Array_Slice target_ids);
 static bool event_store_set_event_images_rows(Event_Store *store, int64_t event_id,
                                               Array_Slice image_ids);
+static bool event_store_set_event_attachments_rows(Event_Store *store, int64_t event_id,
+                                                   Array_Slice attachment_ids);
 static int event_store_load_tasks_done(Event_Store *store, Task_Occurrence *occurrence);
 static int event_store_load_tasks_compare(void const *a, void const *b);
 static bool event_store_migrate(Event_Store *store);
@@ -434,11 +470,13 @@ bool event_store_open(Event_Store *store, char const *path, bool create) {
         SQLITE_OK) {
         return event_store_fail(store, "Cannot enable foreign keys");
     }
-    // Images pasted into a form that was then cancelled, or whose saving failed, belong to no
-    // item, and no form of this run can still save them.
-    if (sqlite3_exec(store->database, "DELETE FROM description_images WHERE event_id IS NULL;",
+    // Images pasted and files attached in a form that was then cancelled, or whose saving
+    // failed, belong to no item, and no form of this run can still save them.
+    if (sqlite3_exec(store->database,
+                     "DELETE FROM description_images WHERE event_id IS NULL;"
+                     "DELETE FROM attachments WHERE event_id IS NULL;",
                      NULL, NULL, NULL) != SQLITE_OK) {
-        return event_store_fail(store, "Cannot delete unused images");
+        return event_store_fail(store, "Cannot delete unused images and files");
     }
     // Persistent: these statements live for the whole session.
     for (int32_t i = 0; i < STATEMENT_COUNT; i++) {
@@ -1008,6 +1046,184 @@ static bool event_store_set_event_images_rows(Event_Store *store, int64_t event_
     statement = store->statements[STATEMENT_IMAGES_DELETE_RELEASED];
     result = sqlite3_bind_int64(statement, 1, event_id);
     return event_store_write(store, statement, result, "Cannot save the images", false);
+}
+
+int64_t event_store_attachment_insert(Event_Store *store, Str name, Array_Slice bytes) {
+    assert(store != NULL);
+    assert(attachment_name_is_valid(name));
+    assert(bytes.count > 0);
+    assert(bytes.count <= ATTACHMENT_SIZE_BYTES_MAX);
+
+    sqlite3_stmt *statement = store->statements[STATEMENT_ATTACHMENT_INSERT];
+    // SQLITE_STATIC: the name and the bytes stay put until the statement has run, below.
+    int result = sqlite3_bind_text(statement, 1, name.data, (int)name.length, SQLITE_STATIC);
+    if (result == SQLITE_OK) {
+        result = sqlite3_bind_blob(statement, 2, bytes.items, bytes.count, SQLITE_STATIC);
+    }
+    if (!event_store_write(store, statement, result, "Cannot save the file", false)) {
+        return 0;
+    }
+    int64_t const id = sqlite3_last_insert_rowid(store->database);
+    assert(id > 0);
+    return id;
+}
+
+int32_t event_store_attachment_load(Event_Store *store, int64_t id, Array_Slice bytes) {
+    assert(store != NULL);
+    assert(id > 0);
+    assert(bytes.count > 0);
+
+    sqlite3_stmt *statement = store->statements[STATEMENT_ATTACHMENT_SELECT];
+    int result = sqlite3_bind_int64(statement, 1, id);
+    int32_t size = -1;
+    if (result == SQLITE_OK) {
+        result = sqlite3_step(statement);
+    }
+    if (result == SQLITE_ROW) {
+        int const stored_size = sqlite3_column_bytes(statement, 0);
+        void const *stored = sqlite3_column_blob(statement, 0);
+        if (stored != NULL && stored_size > 0 && stored_size <= bytes.count) {
+            memcpy(bytes.items, stored, (size_t)stored_size);
+            size = (int32_t)stored_size;
+        }
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    if (result != SQLITE_ROW && result != SQLITE_DONE) {
+        event_store_fail(store, "Cannot load the file");
+        return -1;
+    }
+    if (size < 0) {
+        snprintf(store->error, sizeof(store->error), "The file is gone, or too large.");
+        return -1;
+    }
+    assert(size <= bytes.count);
+    return size;
+}
+
+int32_t event_store_load_event_attachments(Event_Store *store, int64_t event_id,
+                                           Array_Slice attachments) {
+    assert(event_id > 0);
+    assert(attachments.count > 0);
+
+    Attachment *items = attachments.items;
+    int32_t const count_max = attachments.count;
+    sqlite3_stmt *statement = store->statements[STATEMENT_EVENT_ATTACHMENTS];
+    int result = bind_id_and_limit(statement, event_id, count_max);
+    int32_t count = 0;
+    bool too_many = false;
+    bool invalid = false;
+    // Bounded by the LIMIT: at most count_max + 1 rows come back.
+    for (int32_t row_index = 0; result == SQLITE_OK && row_index <= count_max; row_index++) {
+        int const step = sqlite3_step(statement);
+        if (step == SQLITE_DONE) {
+            break;
+        }
+        if (step != SQLITE_ROW) {
+            result = step;
+            break;
+        }
+        if (row_index == count_max) {
+            too_many = true;
+            break;
+        }
+        Str const name = column_text(statement, 1);
+        int64_t const size = sqlite3_column_int64(statement, 2);
+        Attachment attachment = { .id = sqlite3_column_int64(statement, 0) };
+        // A row this program would never write, from a database changed by another program, is
+        // refused rather than shown half read.
+        if (size > ATTACHMENT_SIZE_BYTES_MAX || !attachment_name_is_valid(name)) {
+            invalid = true;
+            break;
+        }
+        attachment.size_bytes = (int32_t)size;
+        snprintf(attachment.name, sizeof(attachment.name), "%.*s", STR_ARGUMENTS(name));
+        if (!attachment_is_valid(&attachment)) {
+            invalid = true;
+            break;
+        }
+        items[count] = attachment;
+        count++;
+    }
+    sqlite3_reset(statement);
+    sqlite3_clear_bindings(statement);
+    if (result != SQLITE_OK) {
+        event_store_fail(store, "Cannot load the files");
+        return -1;
+    }
+    if (too_many || invalid) {
+        snprintf(store->error, sizeof(store->error), "The item has files that cannot be shown.");
+        return -1;
+    }
+    assert(count <= count_max);
+    return count;
+}
+
+/**
+ * One transaction, as for an item's images, so that a file that cannot be kept leaves the
+ * item's files as they were.
+ */
+bool event_store_set_event_attachments(Event_Store *store, int64_t event_id,
+                                       Array_Slice attachment_ids) {
+    assert(event_id > 0);
+    assert(attachment_ids.count >= 0);
+    assert(attachment_ids.count <= ATTACHMENT_COUNT_MAX);
+
+    if (sqlite3_exec(store->database, "BEGIN;", NULL, NULL, NULL) != SQLITE_OK) {
+        return event_store_fail(store, "Cannot save the files");
+    }
+    bool ok = event_store_set_event_attachments_rows(store, event_id, attachment_ids);
+    if (ok) {
+        if (sqlite3_exec(store->database, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
+            ok = event_store_fail(store, "Cannot save the files");
+        }
+    }
+    if (!ok) {
+        // The message is already copied, so the rollback cannot overwrite it.
+        sqlite3_exec(store->database, "ROLLBACK;", NULL, NULL, NULL);
+    }
+    return ok;
+}
+
+/**
+ * Releases the item's files, claims the given ones in order, and deletes the rest, inside the
+ * caller's transaction.
+ */
+static bool event_store_set_event_attachments_rows(Event_Store *store, int64_t event_id,
+                                                   Array_Slice attachment_ids) {
+    int64_t const *ids = attachment_ids.items;
+    sqlite3_stmt *statement = store->statements[STATEMENT_ATTACHMENTS_RELEASE];
+    int result = sqlite3_bind_int64(statement, 1, event_id);
+    // No row check: the item may have had no files.
+    if (!event_store_write(store, statement, result, "Cannot save the files", false)) {
+        return false;
+    }
+    statement = store->statements[STATEMENT_ATTACHMENT_CLAIM];
+    for (int32_t i = 0; i < attachment_ids.count; i++) {
+        assert(ids[i] > 0);
+        for (int32_t j = 0; j < i; j++) {
+            assert(ids[j] != ids[i]); // The caller sends each file once.
+        }
+        result = sqlite3_bind_int64(statement, 1, event_id);
+        if (result == SQLITE_OK) {
+            result = sqlite3_bind_int(statement, 2, i);
+        }
+        if (result == SQLITE_OK) {
+            result = sqlite3_bind_int64(statement, 3, ids[i]);
+        }
+        if (!event_store_write(store, statement, result, "Cannot save the files", false)) {
+            return false;
+        }
+        // No row means the file is gone, or belongs to another item (see the statement).
+        if (sqlite3_changes(store->database) != 1) {
+            snprintf(store->error, sizeof(store->error),
+                     "An attached file is gone or belongs to another item; add it again.");
+            return false;
+        }
+    }
+    statement = store->statements[STATEMENT_ATTACHMENTS_DELETE_RELEASED];
+    result = sqlite3_bind_int64(statement, 1, event_id);
+    return event_store_write(store, statement, result, "Cannot save the files", false);
 }
 
 /**

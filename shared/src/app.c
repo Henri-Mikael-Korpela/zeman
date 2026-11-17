@@ -89,6 +89,15 @@ enum {
     // An image whose PNG file is larger than allowed is shrunk to three quarters, at most this
     // many times: a 1024-pixel photo then ends at about 100 pixels, which always fits.
     IMAGE_SHRINK_STEP_COUNT_MAX = 8,
+    // The Attachments button beside the description's box in the form: wide enough for its label
+    // above it, "Attachments".
+    ATTACHMENT_BUTTON_WIDTH_PIXELS = 112,
+    // The area for adding a file, tall enough to be an easy target, and one row of the attached
+    // files: the name with the size below it, and a Save and a Remove button.
+    ATTACHMENT_ZONE_HEIGHT_PIXELS = 80,
+    ATTACHMENT_ROW_HEIGHT_PIXELS = 48,
+    ATTACHMENT_SAVE_WIDTH_PIXELS = 56,
+    ATTACHMENT_REMOVE_WIDTH_PIXELS = 76,
     // Day number and creation markers share the top line of a cell; bars start below it.
     CELL_TOP_LINE_PIXELS = 32,
     EVENT_BAR_HEIGHT_PIXELS = APP_BAR_HEIGHT_PIXELS,
@@ -283,6 +292,8 @@ static_assert((int)LOCATION_ADDRESS_SIZE <= (int)FORM_FIELD_TEXT_SIZE, "Field fi
 static_assert((int)LOCATION_CITY_SIZE <= (int)FORM_FIELD_TEXT_SIZE, "Field fits the buffer.");
 static_assert((int)REPEAT_DAYS_TEXT_SIZE <= (int)FORM_FIELD_TEXT_SIZE, "Field fits the buffer.");
 static_assert((int)FORM_FIELD_TEXT_SIZE <= (int)TEXT_BOX_SIZE_MAX, "Every field takes a paste.");
+static_assert((int)DESCRIPTION_IMAGE_SIZE_BYTES_MAX <= (int)ATTACHMENT_SIZE_BYTES_MAX,
+              "The App's buffer for files holds an image too.");
 static_assert((int)RICH_TEXT_URL_SIZE >= (int)EVENT_DESCRIPTION_SIZE + 8,
               "Any link of a description, with a scheme put before it, can be opened.");
 
@@ -430,6 +441,27 @@ typedef struct Description_Editor {
     char text[EVENT_DESCRIPTION_SIZE];
 } Description_Editor;
 
+// The files attached to the item being edited, as the form's attachments page shows them. A file
+// is stored as soon as it is added, with no item yet, and the item is given the ones listed when
+// the form is saved (see app_form_save_attachments); removing one from the list takes effect
+// then too.
+typedef struct Attachment_List {
+    Attachment items[ATTACHMENT_COUNT_MAX];
+    Scroll scroll;
+    int32_t count;
+    bool open;    // Shown in place of the form's fields
+    // False when the item's files could not be loaded: then saving leaves its files as they are,
+    // so that nothing is lost, and none can be added or removed.
+    bool loaded;
+} Attachment_List;
+
+// What a button on a row of the attachments page asks for.
+typedef enum Attachment_Action {
+    ATTACHMENT_ACTION_NONE,
+    ATTACHMENT_ACTION_REMOVE,
+    ATTACHMENT_ACTION_SAVE,
+} Attachment_Action;
+
 typedef struct Form {
     // Links between link targets and the tasks linked to them, loaded when the form opens: an
     // existing target's tasks, or else the targets a task can be linked to, with the user's
@@ -456,6 +488,7 @@ typedef struct Form {
     bool links_loaded;       // False after a failed load, so that saving keeps the stored links
     bool links_truncated;    // More links or targets exist than were loaded
     Description_Editor description;
+    Attachment_List attachments;
     char text[FORM_FIELD_COUNT][FORM_FIELD_TEXT_SIZE];
     char error[FORM_ERROR_SIZE];  // Why the last save failed, or empty
 } Form;
@@ -561,10 +594,12 @@ typedef struct Month_Mark {
 typedef struct App {
     Event events[EVENT_COUNT_MAX];  // Events of the visible six weeks, ordered by start
     Task_Completion completions[COMPLETION_COUNT_MAX];  // Done task occurrences near the view
-    // The PNG file of a description's image as it is loaded, before it becomes a texture.
-    byte image_bytes[DESCRIPTION_IMAGE_SIZE_BYTES_MAX];
+    // The bytes of a description's image as it is loaded, before it becomes a texture, and of an
+    // attached file as it is read or saved out. Sized for the larger, the file.
+    byte blob_bytes[ATTACHMENT_SIZE_BYTES_MAX];
     Backend *backend;
     Image (*clipboard_image)(void);  // See App_Config
+    File_Access const *files;        // See App_Config
     Fonts fonts;
     Form form;
     Timeline_Hit timeline_hit;
@@ -933,6 +968,26 @@ static Rich_Text_Link links_find_at(Array_Slice links, size_t index);
 static void draw_text_links(Text_Style const *style, Str text, size_t start, size_t end,
                             Array_Slice links, float x, float y, Color color, Color link_color);
 static size_t text_wrap_skip(Str text, size_t index);
+static void draw_panel_form_description_row(App *app, Rectangle row);
+static void draw_panel_form_attachments_field(App *app, Rectangle box);
+static void attachments_format_count(int32_t count, char *buffer, size_t buffer_size);
+static void attachments_format_size(int32_t size_bytes, char *buffer, size_t buffer_size);
+static void draw_panel_attachments(App *app, Rectangle body);
+static void draw_panel_attachments_hint(App const *app, Rectangle body, float y);
+static void draw_panel_attachments_zone(App *app, Rectangle zone);
+static void draw_dashed_rectangle(Rectangle area, Color color);
+static void draw_panel_attachments_list(App *app, Rectangle list);
+static Attachment_Action draw_panel_attachments_row(App const *app, Attachment const *attachment,
+                                                    Rectangle row);
+static void attachments_open(Form *form);
+static void attachments_close(Form *form);
+static void attachments_remove(Attachment_List *attachments, int32_t index);
+static void app_attachment_choose(App *app);
+static void app_attachment_add(App *app, Str path);
+static void app_attachment_save(App *app, Attachment const *attachment);
+static Str path_file_name(Str path);
+static void app_form_load_attachments(App *app, int64_t event_id);
+static bool app_form_save_attachments(App *app, int64_t id, bool inserted);
 static void theme_apply(void);
 static Color style_color(int32_t property);
 static void draw_text(Text_Style const *style, Str text, float x, float y, Color color);
@@ -952,6 +1007,7 @@ App *app_create(Backend *backend, App_Config const *config) {
     app.created = true;
     app.backend = backend;
     app.clipboard_image = config->clipboard_image;
+    app.files = config->files;
     app.touch = config->touch;
     app.input_enabled = true;
 
@@ -1209,6 +1265,11 @@ static void app_handle_keys(App *app, Layout const *layout) {
             description_close(&app->form);
             return;
         }
+        if (app->form.open && app->form.attachments.open) {
+            // As the description's page is: over the fields, which Escape goes back to.
+            attachments_close(&app->form);
+            return;
+        }
         if (app->form.open) {
             form_close(&app->form);
         }
@@ -1224,6 +1285,10 @@ static void app_handle_keys(App *app, Layout const *layout) {
     if (app->form.open && app->form.description.open) {
         // Keys belong to the description, which reads them as it is drawn (see
         // description_editor_keys), and do not move the calendar under it.
+        return;
+    }
+    if (app->form.open && app->form.attachments.open) {
+        // The attachments' page takes no keys, and the calendar under it must not move.
         return;
     }
     if (app->form.field_active != FORM_FIELD_NONE) {
@@ -1477,6 +1542,9 @@ static void app_form_submit(App *app) {
     if (!app_form_save_images(app, id, !editing)) {
         return;
     }
+    if (!app_form_save_attachments(app, id, !editing)) {
+        return;
+    }
     if (!app_form_save_links(app, id, event.kind, !editing)) {
         return;
     }
@@ -1558,6 +1626,7 @@ static void app_form_open_edit(App *app, Event const *event) {
 
     form_open_edit(&app->form, event);
     app_form_load_images(app, event->id);
+    app_form_load_attachments(app, event->id);
     app_form_load_links(app);
 }
 
@@ -4765,6 +4834,10 @@ static void draw_panel_form(App *app, Rectangle body) {
         draw_panel_description(app, body);
         return;
     }
+    if (form->attachments.open) {
+        draw_panel_attachments(app, body);
+        return;
+    }
     // While the picker is open, it is on top: the controls under it are locked, so that a
     // press meant for it does not reach them. It reads the pointer itself, below.
     bool const locked_before = GuiIsLocked();
@@ -4977,8 +5050,8 @@ static float draw_panel_form_fields(App *app, Rectangle body, float y) {
     draw_panel_form_field(fonts, form, FORM_FIELD_LOCATION_CITY, STR("City"),
                           (Rectangle){ city_x, y, city_width, FIELD_HEIGHT_PIXELS });
     y += row_height;
-    draw_panel_form_description_field(app, (Rectangle){ body.x, y, body.width,
-                                                         FIELD_HEIGHT_PIXELS });
+    draw_panel_form_description_row(
+        app, (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
     y += row_height;
     // An opportunity cannot repeat, so its rows end here, and its tasks get the repeat rows'
     // room below.
@@ -5024,8 +5097,8 @@ static void draw_panel_form_fields_problem(App *app, Rectangle body, float y, fl
     draw_panel_form_field(fonts, form, FORM_FIELD_TITLE, STR("Name"),
                           (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
     y += row_height;
-    draw_panel_form_description_field(app, (Rectangle){ body.x, y, body.width,
-                                                         FIELD_HEIGHT_PIXELS });
+    draw_panel_form_description_row(
+        app, (Rectangle){ body.x, y, body.width, FIELD_HEIGHT_PIXELS });
     y += row_height;
 
     // A new problem is recorded today; an existing one stays on the day it was created, which
@@ -5684,6 +5757,7 @@ static void form_open(Form *form, Date date, int32_t kind) {
     form->kind = kind;
     form->open = true;
     form->description.images_loaded = true;
+    form->attachments.loaded = true;
     form->description.layout_stale = true;
     form->description.goal_x_pixels = -1.0f;
     date_format_iso(date, form->text[FORM_FIELD_START_DATE], DATE_ISO_SIZE);
@@ -5747,6 +5821,7 @@ static void form_close(Form *form) {
     form->picker_open = false;
     form->description.open = false;
     form->description.selecting = false;
+    form->attachments.open = false;
     description_clear_images(&form->description);
     form->field_active = FORM_FIELD_NONE;
 }
@@ -6966,10 +7041,12 @@ static void image_fit_side(Image *image, int32_t side_max) {
 }
 
 /**
- * Image files dropped on the window while the description's page is open are added at the
- * caret, as many as there is room for. raylib keeps the dropped files until they are unloaded,
- * so they are taken every frame, and dropped when nothing can use them, so that a drop on
- * another screen does not land in a description opened later.
+ * Files dropped on the window go where the form's open page takes them: image files into the
+ * description, at the caret, and any files onto the attachments, as many as there is room for.
+ * Anywhere on the window counts, because the window system does not say where above the app a
+ * file is dropped. raylib keeps the dropped files until they are unloaded, so they are taken
+ * every frame, and dropped when nothing can use them, so that a drop on another screen does not
+ * land in a description or an attachment list opened later.
  */
 static void app_take_dropped_files(App *app) {
     if (!IsFileDropped()) {
@@ -6977,17 +7054,25 @@ static void app_take_dropped_files(App *app) {
     }
     FilePathList const files = LoadDroppedFiles();
     Form *form = &app->form;
-    bool const accepting = app->input_enabled && form->open && form->description.open &&
-                           form->description.images_loaded;
-    for (unsigned int i = 0; accepting && i < files.count; i++) {
-        // raylib reads PNG, JPEG, BMP, GIF and a few more, by the name's extension.
-        Image const image = LoadImage(files.paths[i]);
-        if (!IsImageValid(image)) {
-            snprintf(form->error, sizeof(form->error),
-                     "Not an image file that can be added, such as PNG or JPEG.");
-            continue;
+    bool const input = app->input_enabled && form->open;
+    bool const images_accepted = input && form->description.open &&
+                                 form->description.images_loaded;
+    bool const files_accepted = input && form->attachments.open && form->attachments.loaded &&
+                                app->files != NULL;
+    for (unsigned int i = 0; i < files.count; i++) {
+        if (images_accepted) {
+            // raylib reads PNG, JPEG, BMP, GIF and a few more, by the name's extension.
+            Image const image = LoadImage(files.paths[i]);
+            if (!IsImageValid(image)) {
+                snprintf(form->error, sizeof(form->error),
+                         "Not an image file that can be added, such as PNG or JPEG.");
+                continue;
+            }
+            app_description_insert_image(app, image);
         }
-        app_description_insert_image(app, image);
+        if (files_accepted) {
+            app_attachment_add(app, str_from_cstr(files.paths[i]));
+        }
     }
     UnloadDroppedFiles(files);
 }
@@ -7550,11 +7635,11 @@ static Texture2D app_image_texture_load(App *app, int64_t id) {
 
     Texture2D const none = { .id = 0 };
     int32_t const size = backend_image_load(
-        app->backend, id, array_slice_make(app->image_bytes, DESCRIPTION_IMAGE_SIZE_BYTES_MAX));
+        app->backend, id, array_slice_make(app->blob_bytes, DESCRIPTION_IMAGE_SIZE_BYTES_MAX));
     if (size <= 0) {
         return none;
     }
-    Image const image = LoadImageFromMemory(".png", app->image_bytes, size);
+    Image const image = LoadImageFromMemory(".png", app->blob_bytes, size);
     if (!IsImageValid(image)) {
         return none;
     }
@@ -7789,6 +7874,535 @@ static size_t text_wrap_skip(Str text, size_t index) {
         }
     }
     return index;
+}
+
+/**
+ * The description's row among the form's fields: the description's box, and beside it the button
+ * of the attachments, each opening a page of its own, where there is room.
+ */
+static void draw_panel_form_description_row(App *app, Rectangle row) {
+    float const gap = 12;
+    float const attachments_width = (float)ATTACHMENT_BUTTON_WIDTH_PIXELS;
+    draw_panel_form_description_field(
+        app, (Rectangle){ row.x, row.y, row.width - attachments_width - gap, row.height });
+    draw_panel_form_attachments_field(
+        app, (Rectangle){ row.x + row.width - attachments_width, row.y, attachments_width,
+                          row.height });
+}
+
+/**
+ * How many files the item has, in a box that opens the attachments' page.
+ */
+static void draw_panel_form_attachments_field(App *app, Rectangle box) {
+    Form *form = &app->form;
+    Fonts const *fonts = &app->fonts;
+    Attachment_List const *attachments = &form->attachments;
+    draw_text(&fonts->ui, STR("Attachments"), box.x, box.y - FORM_LABEL_HEIGHT_PIXELS,
+              style_color(TEXT_COLOR_NORMAL));
+    bool const hovered = !GuiIsLocked() && CheckCollisionPointRec(GetMousePosition(), box);
+    int32_t base_property = BASE_COLOR_NORMAL;
+    int32_t border_property = BORDER_COLOR_NORMAL;
+    if (hovered) {
+        base_property = BASE_COLOR_FOCUSED;
+        border_property = BORDER_COLOR_FOCUSED;
+        app->cursor = APP_CURSOR_HAND;
+    }
+    DrawRectangleRec(box, style_color(base_property));
+    DrawRectangleLinesEx(box, 1.0f, style_color(border_property));
+
+    char text[TEXT_LINE_SIZE] = "";
+    int32_t text_property = TEXT_COLOR_NORMAL;
+    if (!attachments->loaded) {
+        snprintf(text, sizeof(text), "Unavailable");
+        text_property = TEXT_COLOR_DISABLED;
+    } else if (attachments->count == 0) {
+        snprintf(text, sizeof(text), "None");
+        text_property = TEXT_COLOR_DISABLED;
+    } else {
+        attachments_format_count(attachments->count, text, sizeof(text));
+    }
+    scissor_begin(fonts, box.x, box.y, box.width, box.height);
+    draw_text(&fonts->ui, str_from_cstr(text), box.x + DESCRIPTION_EDITOR_PADDING_PIXELS,
+              box.y + (box.height - TEXT_SIZE_PIXELS) / 2, style_color(text_property));
+    scissor_end(fonts);
+    if (hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        attachments_open(form);
+    }
+}
+
+/**
+ * "1 file" or "3 files".
+ */
+static void attachments_format_count(int32_t count, char *buffer, size_t buffer_size) {
+    assert(count > 0);
+
+    char const *noun = "files";
+    if (count == 1) {
+        noun = "file";
+    }
+    snprintf(buffer, buffer_size, "%" PRId32 " %s", count, noun);
+}
+
+/**
+ * "523 bytes", "12.3 KB" or "1.5 MB".
+ */
+static void attachments_format_size(int32_t size_bytes, char *buffer, size_t buffer_size) {
+    assert(size_bytes >= 0);
+
+    if (size_bytes < 1024) {
+        snprintf(buffer, buffer_size, "%" PRId32 " bytes", size_bytes);
+        return;
+    }
+    if (size_bytes < 1024 * 1024) {
+        snprintf(buffer, buffer_size, "%.1f KB", (double)size_bytes / 1024.0);
+        return;
+    }
+    snprintf(buffer, buffer_size, "%.1f MB", (double)size_bytes / (1024.0 * 1024.0));
+}
+
+/**
+ * The form's page for the attachments, in place of its fields: the area to choose or drop a
+ * file on, the files attached so far, a line of help or of what went wrong, and Done, which
+ * goes back to the fields. Where the platform has no file access, there is no area, and the
+ * files can only be looked at and removed.
+ */
+static void draw_panel_attachments(App *app, Rectangle body) {
+    Form *form = &app->form;
+    Attachment_List const *attachments = &form->attachments;
+    assert(form->open);
+    assert(attachments->open);
+
+    draw_text(&app->fonts.ui, STR("Attachments"), body.x, body.y, style_color(TEXT_COLOR_NORMAL));
+    float const buttons_y = body.y + body.height - BUTTON_HEIGHT_PIXELS;
+    float const hint_y = buttons_y - FORM_ROW_GAP_PIXELS - TEXT_LINE_HEIGHT_PIXELS;
+    float y = body.y + 32;
+    if (attachments->loaded) {
+        if (app->files != NULL) {
+            Rectangle const zone = { body.x, y, body.width, ATTACHMENT_ZONE_HEIGHT_PIXELS };
+            // A window too short for the area and a row shows the files alone.
+            if (zone.y + zone.height + FORM_ROW_GAP_PIXELS + ATTACHMENT_ROW_HEIGHT_PIXELS <
+                hint_y) {
+                draw_panel_attachments_zone(app, zone);
+                y += zone.height + FORM_ROW_GAP_PIXELS;
+            }
+        } else {
+            draw_text(&app->fonts.small, STR("Files are added on the desktop."), body.x, y,
+                      style_color(TEXT_COLOR_DISABLED));
+            y += TEXT_LINE_HEIGHT_PIXELS_SMALL + FORM_ROW_GAP_PIXELS;
+        }
+        if (attachments->count == 0) {
+            draw_text(&app->fonts.ui, STR("No files attached."), body.x, y,
+                      style_color(TEXT_COLOR_DISABLED));
+        }
+    }
+    Rectangle const list = { body.x, y, body.width, hint_y - FORM_ROW_GAP_PIXELS - y };
+    if (attachments->count > 0 && list.height > 0.0f) {
+        draw_panel_attachments_list(app, list);
+    }
+    draw_panel_attachments_hint(app, body, hint_y);
+    if (GuiButton((Rectangle){ body.x, buttons_y, body.width, BUTTON_HEIGHT_PIXELS }, "Done")) {
+        attachments_close(form);
+    }
+}
+
+/**
+ * What went wrong last, or else how the files are kept.
+ */
+static void draw_panel_attachments_hint(App const *app, Rectangle body, float y) {
+    Form const *form = &app->form;
+    Str hint = STR("Files are saved with the item.");
+    Color color = style_color(TEXT_COLOR_DISABLED);
+    if (!form->attachments.loaded) {
+        hint = STR("Files not loaded: they are kept as they are.");
+        color = ERROR_COLOR;
+    }
+    if (form->error[0] != '\0') {
+        hint = str_from_cstr(form->error);
+        color = ERROR_COLOR;
+    }
+    scissor_begin(&app->fonts, body.x, y, body.width, TEXT_LINE_HEIGHT_PIXELS);
+    draw_text(&app->fonts.small, hint, body.x, y, color);
+    scissor_end(&app->fonts);
+}
+
+/**
+ * The area for adding a file: a click opens the system's dialog for choosing one, and files
+ * dropped on the window are added whether or not they land on it (see app_take_dropped_files),
+ * since the window system does not tell where above the app a drag is until it is dropped.
+ * Replaced by a message once the item has as many files as it can.
+ */
+static void draw_panel_attachments_zone(App *app, Rectangle zone) {
+    Attachment_List const *attachments = &app->form.attachments;
+    Fonts const *fonts = &app->fonts;
+    assert(app->files != NULL);
+
+    bool const full = attachments->count >= ATTACHMENT_COUNT_MAX;
+    bool const hovered = !GuiIsLocked() && !full && CheckCollisionPointRec(GetMousePosition(),
+                                                                         zone);
+    int32_t base_property = BASE_COLOR_NORMAL;
+    int32_t border_property = BORDER_COLOR_FOCUSED;
+    if (hovered) {
+        base_property = BASE_COLOR_FOCUSED;
+        border_property = BORDER_COLOR_PRESSED;
+    }
+    DrawRectangleRec(zone, style_color(base_property));
+    draw_dashed_rectangle(zone, style_color(border_property));
+
+    char label_text[TEXT_LINE_SIZE] = "Select file or drag and drop file here";
+    int32_t text_property = TEXT_COLOR_NORMAL;
+    if (full) {
+        snprintf(label_text, sizeof(label_text), "At most %d files can be attached.",
+                 (int)ATTACHMENT_COUNT_MAX);
+        text_property = TEXT_COLOR_DISABLED;
+    }
+    scissor_begin(fonts, zone.x, zone.y, zone.width, zone.height);
+    draw_text_centered(&fonts->ui, str_from_cstr(label_text), zone, style_color(text_property));
+    scissor_end(fonts);
+    if (hovered) {
+        app->cursor = APP_CURSOR_HAND;
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+            app_attachment_choose(app);
+        }
+    }
+}
+
+/**
+ * The outline of area as dashes, which says that something can be dropped in it.
+ */
+static void draw_dashed_rectangle(Rectangle area, Color color) {
+    assert(area.width > 0.0f);
+    assert(area.height > 0.0f);
+
+    float const dash = 8.0f;
+    float const gap = 5.0f;
+    Vector2 const corners[4] = {
+        { area.x, area.y },
+        { area.x + area.width, area.y },
+        { area.x + area.width, area.y + area.height },
+        { area.x, area.y + area.height },
+    };
+    for (int32_t side = 0; side < 4; side++) {
+        Vector2 const from = corners[side];
+        Vector2 const to = corners[(side + 1) % 4];
+        float const dx = to.x - from.x;
+        float const dy = to.y - from.y;
+        float const length = fabsf(dx) + fabsf(dy); // One of them is zero: the sides are straight.
+        // Bounded by the side's length, which a window's size bounds: each pass moves on by a dash
+        // and a gap.
+        for (float at = 0.0f; at < length; at += dash + gap) {
+            float const end = float_min(at + dash, length);
+            DrawLineEx((Vector2){ from.x + dx * at / length, from.y + dy * at / length },
+                       (Vector2){ from.x + dx * end / length, from.y + dy * end / length }, 1.5f,
+                       color);
+        }
+    }
+}
+
+/**
+ * The attached files as rows, scrolling when they do not fit. What a row asks for is done after
+ * the rows are drawn, because the dialog it may show must not open in the middle of drawing
+ * them, and removing a row would move the ones after it.
+ */
+static void draw_panel_attachments_list(App *app, Rectangle list) {
+    Form *form = &app->form;
+    Attachment_List *attachments = &form->attachments;
+    assert(list.height > 0.0f);
+    assert(attachments->count > 0);
+    assert(attachments->count <= ATTACHMENT_COUNT_MAX);
+
+    float const content_height = (float)attachments->count * ATTACHMENT_ROW_HEIGHT_PIXELS;
+    if (content_height > list.height) {
+        list.width -= SCROLLBAR_GAP_PIXELS;
+    }
+    scroll_update(&attachments->scroll, list, content_height, true);
+    Scroll const *scroll = &attachments->scroll;
+    // Controls are locked while the list is dragged, and while the pointer is outside it, so
+    // that neither the end of a drag nor a click on a clipped row acts on a button.
+    bool const locked = scroll->dragging || !CheckCollisionPointRec(GetMousePosition(), list);
+    bool const locked_before = GuiIsLocked();
+    if (locked) {
+        GuiLock();
+    }
+    app->fonts.clip = list;
+    app->fonts.clipping = true;
+    scissor_begin(&app->fonts, list.x, list.y, list.width, list.height);
+    int32_t action_index = -1;
+    Attachment_Action action = ATTACHMENT_ACTION_NONE;
+    for (int32_t i = 0; i < attachments->count; i++) {
+        Rectangle const row = { list.x,
+                                list.y - scroll->offset_pixels +
+                                    (float)i * ATTACHMENT_ROW_HEIGHT_PIXELS,
+                                list.width, ATTACHMENT_ROW_HEIGHT_PIXELS };
+        // Rows scrolled wholly out of the list can be neither seen nor clicked.
+        if (!CheckCollisionRecs(row, list)) {
+            continue;
+        }
+        Attachment_Action const asked = draw_panel_attachments_row(app, &attachments->items[i],
+                                                                   row);
+        if (asked != ATTACHMENT_ACTION_NONE) {
+            action = asked;
+            action_index = i;
+        }
+    }
+    app->fonts.clipping = false;
+    EndScissorMode();
+    if (locked && !locked_before) {
+        GuiUnlock();
+    }
+    draw_scrollbar(list, content_height, scroll->offset_pixels);
+
+    if (action == ATTACHMENT_ACTION_REMOVE) {
+        assert(action_index >= 0);
+        attachments_remove(attachments, action_index);
+        form->error[0] = '\0';
+    }
+    if (action == ATTACHMENT_ACTION_SAVE) {
+        assert(action_index >= 0);
+        app_attachment_save(app, &attachments->items[action_index]);
+    }
+}
+
+/**
+ * One file: its name and size, and the buttons that save it out and remove it. Returns what the
+ * user asked for with a button.
+ */
+static Attachment_Action draw_panel_attachments_row(App const *app, Attachment const *attachment,
+                                                    Rectangle row) {
+    Fonts const *fonts = &app->fonts;
+    float const gap = 6;
+    float const button_height = 28;
+    float const button_y = row.y + (row.height - button_height) / 2;
+    Rectangle const remove_button = { row.x + row.width - gap - ATTACHMENT_REMOVE_WIDTH_PIXELS,
+                                      button_y, ATTACHMENT_REMOVE_WIDTH_PIXELS, button_height };
+    Rectangle const save_button = { remove_button.x - gap - ATTACHMENT_SAVE_WIDTH_PIXELS,
+                                    button_y, ATTACHMENT_SAVE_WIDTH_PIXELS, button_height };
+    // Saving out needs the platform's dialog, which a phone does not have.
+    bool const can_save = app->files != NULL;
+    float text_right = remove_button.x - gap;
+    if (can_save) {
+        text_right = save_button.x - gap;
+    }
+
+    if (CheckCollisionPointRec(GetMousePosition(), row)) {
+        DrawRectangleRec(row, style_color(BASE_COLOR_FOCUSED));
+    }
+    DrawRectangleRec((Rectangle){ row.x, row.y + row.height - 1, row.width, 1 },
+                     style_color(BORDER_COLOR_NORMAL));
+    float const text_x = row.x + gap;
+    char size_text[TEXT_LINE_SIZE] = "";
+    attachments_format_size(attachment->size_bytes, size_text, sizeof(size_text));
+    scissor_begin(fonts, text_x, row.y, text_right - text_x, row.height);
+    draw_text(&fonts->ui, str_from_cstr(attachment->name), text_x, row.y + 3,
+              style_color(TEXT_COLOR_NORMAL));
+    draw_text(&fonts->small, str_from_cstr(size_text), text_x, row.y + 3 + TEXT_LINE_HEIGHT_PIXELS,
+              style_color(TEXT_COLOR_DISABLED));
+    scissor_end(fonts);
+
+    Attachment_Action action = ATTACHMENT_ACTION_NONE;
+    if (can_save && GuiButton(save_button, "Save")) {
+        action = ATTACHMENT_ACTION_SAVE;
+    }
+    if (GuiButton(remove_button, "Remove")) {
+        action = ATTACHMENT_ACTION_REMOVE;
+    }
+    return action;
+}
+
+/**
+ * Shows the attachments' page.
+ */
+static void attachments_open(Form *form) {
+    Attachment_List *attachments = &form->attachments;
+    assert(form->open);
+    assert(!attachments->open);
+
+    attachments->open = true;
+    form->picker_open = false;
+    form->field_active = FORM_FIELD_NONE;
+    form->error[0] = '\0';
+}
+
+/**
+ * Goes back to the form's fields; the files are kept for saving.
+ */
+static void attachments_close(Form *form) {
+    assert(form->attachments.open);
+
+    form->attachments.open = false;
+}
+
+/**
+ * Takes the file at index out of the list, which the form's save then deletes; the later ones
+ * move up. It is not deleted from the database before, so that cancelling the form keeps it.
+ */
+static void attachments_remove(Attachment_List *attachments, int32_t index) {
+    assert(index >= 0);
+    assert(index < attachments->count);
+
+    int32_t const after = attachments->count - index - 1;
+    memmove(&attachments->items[index], &attachments->items[index + 1],
+            (size_t)after * sizeof(attachments->items[0]));
+    attachments->count--;
+    attachments->items[attachments->count] = (Attachment){ .id = 0 };
+}
+
+/**
+ * Asks the system's dialog for a file, and adds it unless the user cancels.
+ */
+static void app_attachment_choose(App *app) {
+    assert(app->files != NULL);
+
+    char path[FILE_PATH_SIZE] = "";
+    if (!app->files->choose(path, sizeof(path))) {
+        return; // Cancelled.
+    }
+    app_attachment_add(app, str_from_cstr(path));
+}
+
+/**
+ * Reads the file at path and stores it as an attachment of the form's item, which keeps it only
+ * once the form is saved. When it cannot, the form says why.
+ */
+static void app_attachment_add(App *app, Str path) {
+    Form *form = &app->form;
+    Attachment_List *attachments = &form->attachments;
+    assert(app->files != NULL);
+    assert(attachments->loaded);
+
+    if (attachments->count >= ATTACHMENT_COUNT_MAX) {
+        snprintf(form->error, sizeof(form->error), "At most %d files can be attached.",
+                 (int)ATTACHMENT_COUNT_MAX);
+        return;
+    }
+    Str const name = path_file_name(path);
+    if (!attachment_name_is_valid(name)) {
+        snprintf(form->error, sizeof(form->error), "That file's name cannot be used.");
+        return;
+    }
+    // The one place the path leaves as a C string: the operating system wants it that way.
+    char c_path[FILE_PATH_SIZE] = "";
+    if (!str_to_cstr(path, c_path, sizeof(c_path))) {
+        snprintf(form->error, sizeof(form->error), "That file's path is too long.");
+        return;
+    }
+    int32_t size = 0;
+    File_Read_Status const status = app->files->read(
+        c_path, array_slice_make(app->blob_bytes, ATTACHMENT_SIZE_BYTES_MAX), &size);
+    switch (status) {
+    case FILE_READ_FAILED:
+        snprintf(form->error, sizeof(form->error), "That file cannot be read, or is a folder.");
+        return;
+    case FILE_READ_OK:
+        break;
+    case FILE_READ_TOO_LARGE:
+        snprintf(form->error, sizeof(form->error), "That file is larger than %d MB.",
+                 (int)(ATTACHMENT_SIZE_BYTES_MAX / (1024 * 1024)));
+        return;
+    }
+    if (size == 0) {
+        snprintf(form->error, sizeof(form->error), "That file is empty.");
+        return;
+    }
+    int64_t const id = backend_attachment_insert(app->backend, name,
+                                                 array_slice_make(app->blob_bytes, size));
+    if (id == 0) {
+        backend_error_copy(app->backend, form->error, sizeof(form->error));
+        return;
+    }
+    Attachment *added = &attachments->items[attachments->count];
+    *added = (Attachment){ .id = id, .size_bytes = size };
+    // The name fits: attachment_name_is_valid bounds it by the field's size.
+    (void)str_copy_truncated(name, added->name, sizeof(added->name));
+    attachments->count++;
+    form->error[0] = '\0';
+}
+
+/**
+ * Asks where to save the file, and writes it there. The name offered is the file's own. When it
+ * cannot be done, the form says why.
+ */
+static void app_attachment_save(App *app, Attachment const *attachment) {
+    Form *form = &app->form;
+    assert(app->files != NULL);
+    assert(attachment->id > 0);
+
+    char path[FILE_PATH_SIZE] = "";
+    if (!app->files->save_as(str_from_cstr(attachment->name), path, sizeof(path))) {
+        return; // Cancelled.
+    }
+    int32_t const size = backend_attachment_load(
+        app->backend, attachment->id, array_slice_make(app->blob_bytes, ATTACHMENT_SIZE_BYTES_MAX));
+    if (size < 0) {
+        backend_error_copy(app->backend, form->error, sizeof(form->error));
+        return;
+    }
+    if (!app->files->write(path, array_slice_make(app->blob_bytes, size))) {
+        snprintf(form->error, sizeof(form->error), "The file could not be written there.");
+        return;
+    }
+    form->error[0] = '\0';
+    app_set_status(app, STR("Saved the file."));
+}
+
+/**
+ * The name of the file at path: what follows the last folder separator, of either kind.
+ */
+static Str path_file_name(Str path) {
+    size_t start = 0;
+    // Bounded by the length: each pass moves i on by a byte.
+    for (size_t i = 0; i < path.length; i++) {
+        if (path.data[i] == '/' || path.data[i] == '\\') {
+            start = i + 1;
+        }
+    }
+    return str_slice(path, start, path.length);
+}
+
+/**
+ * Loads the item's files, without their contents. A failure to list them shows in the form and
+ * leaves loaded false, so that saving cannot delete files that were never shown.
+ */
+static void app_form_load_attachments(App *app, int64_t event_id) {
+    Form *form = &app->form;
+    Attachment_List *attachments = &form->attachments;
+    assert(event_id > 0);
+    assert(attachments->count == 0);
+
+    int32_t const count = backend_load_event_attachments(
+        app->backend, event_id, array_slice_make(attachments->items, ATTACHMENT_COUNT_MAX));
+    if (count < 0) {
+        attachments->loaded = false;
+        backend_error_copy(app->backend, form->error, sizeof(form->error));
+        return;
+    }
+    attachments->count = count;
+}
+
+/**
+ * Gives the saved item its files, in their order; those it had and no longer shows are deleted.
+ * Skipped when they could not be loaded, which keeps them as they are, and for a new item
+ * without files, which has none to delete.
+ */
+static bool app_form_save_attachments(App *app, int64_t id, bool inserted) {
+    Attachment_List const *attachments = &app->form.attachments;
+    assert(id > 0);
+
+    if (!attachments->loaded) {
+        return true;
+    }
+    if (inserted && attachments->count == 0) {
+        return true;
+    }
+    int64_t ids[ATTACHMENT_COUNT_MAX] = { 0 };
+    for (int32_t i = 0; i < attachments->count; i++) {
+        ids[i] = attachments->items[i].id;
+    }
+    if (!backend_set_event_attachments(app->backend, id,
+                                       array_slice_make(ids, attachments->count))) {
+        backend_error_copy(app->backend, app->form.error, sizeof(app->form.error));
+        return false;
+    }
+    return true;
 }
 
 /**

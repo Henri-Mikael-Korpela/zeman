@@ -12,6 +12,7 @@
 
 #include <zeman/client.h>
 #include <zeman/devices_view.h>
+#include <zeman/file_access_system.h>
 #include <zeman/local_backend.h>
 #include <zeman/problems_view.h>
 #include <zeman/settings.h>
@@ -103,6 +104,8 @@ typedef struct Desktop {
     Problems_View problems;
     Tasks_View tasks;
     Backend backend;
+    // What the app attaches and saves files with; the App keeps a pointer to it.
+    File_Access files;
     Redraw redraw;
     View view;
     // The App_Cursor shown. Kept so that it changes only when it must: raylib creates a new
@@ -170,12 +173,14 @@ int main(int argc, char **argv) {
 
     static Desktop desktop;
     desktop_open(&desktop, &options);
+    desktop.files = file_access_system();
 
     App_Config config = {
         .font_directory = GetApplicationDirectory(),
         .scale = 1.0f,
         // raylib reads the clipboard's image on Windows, which the desktop app runs on.
         .clipboard_image = GetClipboardImage,
+        .files = &desktop.files,
         .touch = false,
     };
     App *app = app_create(&desktop.backend, &config);

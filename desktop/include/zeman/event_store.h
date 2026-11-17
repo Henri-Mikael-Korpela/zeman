@@ -12,7 +12,7 @@ enum {
     // Bytes including the terminator for messages returned to the user interface.
     EVENT_STORE_ERROR_SIZE = 160,
     // Statements prepared at open; event_store.c names them and checks this count.
-    EVENT_STORE_STATEMENT_COUNT = 20,
+    EVENT_STORE_STATEMENT_COUNT = 26,
 };
 
 typedef struct Event_Store {
@@ -136,5 +136,34 @@ int32_t event_store_load_event_images(Event_Store *store, int64_t event_id,
  * belongs to another item.
  */
 bool event_store_set_event_images(Event_Store *store, int64_t event_id, Array_Slice image_ids);
+
+/**
+ * Stores a file, with the name that passes attachment_name_is_valid and the contents bytes, a
+ * slice of bytes that is not empty and at most ATTACHMENT_SIZE_BYTES_MAX, with no item yet.
+ * Returns its id, or 0 on failure.
+ */
+int64_t event_store_attachment_insert(Event_Store *store, Str name, Array_Slice bytes);
+
+/**
+ * Copies the contents of the file with id into bytes, a slice of bytes. Returns how many, or -1
+ * when it fails, the file is not there, or it does not fit.
+ */
+int32_t event_store_attachment_load(Event_Store *store, int64_t id, Array_Slice bytes);
+
+/**
+ * Loads the item's files, without their contents, in their order into attachments, a slice of
+ * Attachment. Returns the count, or -1, also when it has more than fit, or one that this program
+ * would not have stored, which only a database changed by another program has.
+ */
+int32_t event_store_load_event_attachments(Event_Store *store, int64_t event_id,
+                                           Array_Slice attachments);
+
+/**
+ * Makes attachment_ids, a slice of int64_t with each given once, the item's files in this order,
+ * and deletes those it had that are not among them. Fails, changing nothing, if one is gone or
+ * belongs to another item.
+ */
+bool event_store_set_event_attachments(Event_Store *store, int64_t event_id,
+                                       Array_Slice attachment_ids);
 
 #endif

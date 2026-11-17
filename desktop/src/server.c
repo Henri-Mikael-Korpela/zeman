@@ -33,6 +33,12 @@ static void server_handle_image_insert(Server *server, Reader *request, Writer *
 static void server_handle_image_load(Server *server, Reader *request, Writer *response);
 static void server_handle_load_event_images(Server *server, Reader *request, Writer *response);
 static void server_handle_set_event_images(Server *server, Reader *request, Writer *response);
+static void server_handle_attachment_insert(Server *server, Reader *request, Writer *response);
+static void server_handle_attachment_load(Server *server, Reader *request, Writer *response);
+static void server_handle_load_event_attachments(Server *server, Reader *request,
+                                                 Writer *response);
+static void server_handle_set_event_attachments(Server *server, Reader *request,
+                                                Writer *response);
 static bool server_range_is_valid(Date first, Date last);
 static void server_fail(Writer *response, Str message);
 
@@ -323,6 +329,18 @@ static void server_handle(Server *server, Reader *request, Writer *response) {
     case PROTOCOL_SET_EVENT_IMAGES:
         server_handle_set_event_images(server, request, response);
         return;
+    case PROTOCOL_ATTACHMENT_INSERT:
+        server_handle_attachment_insert(server, request, response);
+        return;
+    case PROTOCOL_ATTACHMENT_LOAD:
+        server_handle_attachment_load(server, request, response);
+        return;
+    case PROTOCOL_LOAD_EVENT_ATTACHMENTS:
+        server_handle_load_event_attachments(server, request, response);
+        return;
+    case PROTOCOL_SET_EVENT_ATTACHMENTS:
+        server_handle_set_event_attachments(server, request, response);
+        return;
     case PROTOCOL_OPERATION_END:
         assert(false); // Excluded by the range check above.
         return;
@@ -592,13 +610,13 @@ static void server_handle_image_load(Server *server, Reader *request, Writer *re
         return;
     }
     int32_t const size = backend_image_load(
-        server->backend, id, array_slice_make(server->image, DESCRIPTION_IMAGE_SIZE_BYTES_MAX));
+        server->backend, id, array_slice_make(server->blob, DESCRIPTION_IMAGE_SIZE_BYTES_MAX));
     if (size < 0) {
         server_fail(response, backend_error(server->backend));
         return;
     }
     writer_u8(response, PROTOCOL_OK);
-    writer_blob(response, array_slice_make(server->image, size));
+    writer_blob(response, array_slice_make(server->blob, size));
 }
 
 static void server_handle_load_event_images(Server *server, Reader *request, Writer *response) {
@@ -650,6 +668,100 @@ static void server_handle_set_event_images(Server *server, Reader *request, Writ
         return;
     }
     if (!backend_set_event_images(server->backend, event_id, array_slice_make(image_ids, count))) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+}
+
+/**
+ * The name and the contents are views over the request, which outlives this call. Any file may
+ * be attached, but not an empty one, which the store refuses too.
+ */
+static void server_handle_attachment_insert(Server *server, Reader *request, Writer *response) {
+    Str const name = reader_str(request);
+    Array_Slice const bytes = reader_blob(request, ATTACHMENT_SIZE_BYTES_MAX);
+    if (!reader_done(request) || !attachment_name_is_valid(name) || bytes.count < 1) {
+        server_fail(response, STR("Invalid file."));
+        return;
+    }
+    int64_t const id = backend_attachment_insert(server->backend, name, bytes);
+    if (id == 0) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+    writer_i64(response, id);
+}
+
+static void server_handle_attachment_load(Server *server, Reader *request, Writer *response) {
+    int64_t const id = reader_i64(request);
+    if (!reader_done(request) || id <= 0) {
+        server_fail(response, STR("Invalid request."));
+        return;
+    }
+    int32_t const size = backend_attachment_load(
+        server->backend, id, array_slice_make(server->blob, ATTACHMENT_SIZE_BYTES_MAX));
+    if (size < 0) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+    writer_blob(response, array_slice_make(server->blob, size));
+}
+
+static void server_handle_load_event_attachments(Server *server, Reader *request,
+                                                 Writer *response) {
+    int64_t const event_id = reader_i64(request);
+    int32_t count_max = reader_i32(request);
+    if (!reader_done(request) || event_id <= 0 || count_max < 1) {
+        server_fail(response, STR("Invalid request."));
+        return;
+    }
+    if (count_max > ATTACHMENT_COUNT_MAX) {
+        count_max = ATTACHMENT_COUNT_MAX;
+    }
+    Attachment attachments[ATTACHMENT_COUNT_MAX] = { 0 };
+    int32_t const count = backend_load_event_attachments(
+        server->backend, event_id, array_slice_make(attachments, count_max));
+    if (count < 0) {
+        server_fail(response, backend_error(server->backend));
+        return;
+    }
+    writer_u8(response, PROTOCOL_OK);
+    writer_i32(response, count);
+    for (int32_t i = 0; i < count; i++) {
+        writer_attachment(response, &attachments[i]);
+    }
+}
+
+/**
+ * The store asserts that each file comes once, so repeats from the network are refused here, as
+ * for an item's images.
+ */
+static void server_handle_set_event_attachments(Server *server, Reader *request,
+                                                Writer *response) {
+    int64_t const event_id = reader_i64(request);
+    int32_t const count = reader_i32(request);
+    if (event_id <= 0 || count < 0 || count > ATTACHMENT_COUNT_MAX) {
+        server_fail(response, STR("Invalid request."));
+        return;
+    }
+    int64_t attachment_ids[ATTACHMENT_COUNT_MAX] = { 0 };
+    bool valid = true;
+    for (int32_t i = 0; i < count; i++) {
+        attachment_ids[i] = reader_i64(request);
+        valid = valid && attachment_ids[i] > 0;
+        for (int32_t j = 0; j < i; j++) {
+            valid = valid && attachment_ids[j] != attachment_ids[i];
+        }
+    }
+    if (!reader_done(request) || !valid) {
+        server_fail(response, STR("Invalid request."));
+        return;
+    }
+    if (!backend_set_event_attachments(server->backend, event_id,
+                                       array_slice_make(attachment_ids, count))) {
         server_fail(response, backend_error(server->backend));
         return;
     }

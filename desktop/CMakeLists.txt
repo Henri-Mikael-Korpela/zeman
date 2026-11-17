@@ -52,6 +52,7 @@ add_executable(zeman
     src/main.c
     src/devices_view.c
     src/event_store.c
+    src/file_access.c
     src/local_backend.c
     src/problems_view.c
     src/server.c
@@ -105,7 +106,8 @@ if(WIN32)
 endif()
 target_link_libraries(zeman PRIVATE raylib raygui sqlite3)
 if(WIN32)
-    target_link_libraries(zeman PRIVATE ws2_32)
+    # ws2_32 for the network, and comdlg32 for the dialogs that choose and save files.
+    target_link_libraries(zeman PRIVATE ws2_32 comdlg32)
 endif()
 
 # The app loads its fonts from a fonts folder beside the executable, so that it runs offline.

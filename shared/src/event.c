@@ -1,3 +1,4 @@
+#include <zeman/byte.h>
 #include <zeman/event.h>
 
 #include <assert.h>
@@ -438,6 +439,47 @@ bool description_image_is_valid(Array_Slice png_bytes) {
         return false;
     }
     return memcmp(png_bytes.items, PNG_SIGNATURE, PNG_SIGNATURE_SIZE) == 0;
+}
+
+bool attachment_name_is_valid(Str name) {
+    if (name.length == 0 || name.length >= ATTACHMENT_NAME_SIZE) {
+        return false;
+    }
+    // The characters that Windows does not allow in a file name, and so no program offers: the
+    // two folder separators, the drive's colon, the wildcards, quotes, angle brackets and bar.
+    Str const forbidden = STR("/\\:*?\"<>|");
+    size_t i = 0;
+    // Bounded by the length: each pass moves i on by a character.
+    while (i < name.length) {
+        byte const character = (byte)name.data[i];
+        if (character < 0x20 || character == 0x7F) {
+            return false;
+        }
+        if (character < 0x80 && str_find_char(forbidden, (char)character) != STR_NOT_FOUND) {
+            return false;
+        }
+        int32_t const size = str_utf8_sequence_size(str_slice(name, i, name.length));
+        if (size == 0) {
+            return false;
+        }
+        i += (size_t)size;
+    }
+    return true;
+}
+
+bool attachment_is_valid(Attachment const *attachment) {
+    assert(attachment != NULL);
+
+    if (!text_is_terminated(attachment->name, sizeof(attachment->name))) {
+        return false;
+    }
+    if (attachment->id <= 0) {
+        return false;
+    }
+    if (attachment->size_bytes < 1 || attachment->size_bytes > ATTACHMENT_SIZE_BYTES_MAX) {
+        return false;
+    }
+    return attachment_name_is_valid(str_from_cstr(attachment->name));
 }
 
 bool event_kind_is_target(int32_t kind) {

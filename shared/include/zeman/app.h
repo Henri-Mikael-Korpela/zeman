@@ -6,6 +6,7 @@
 #include "raylib.h"
 
 #include <zeman/backend.h>
+#include <zeman/file_access.h>
 #include <zeman/str.h>
 
 // The calendar's user interface, shared by the desktop and Android apps. Each app opens its own
@@ -22,6 +23,10 @@ typedef struct App_Config {
     // cannot read one. A function rather than raylib's own, because raylib implements it only
     // on some platforms, and leaves it undefined on the others.
     Image (*clipboard_image)(void);
+    // The system's file dialogs and file reading and writing, for attaching files to items and
+    // saving them out, or NULL where the platform has none, as on a phone: its files can then be
+    // looked at and removed, but not added. Must outlive the App.
+    File_Access const *files;
     // Touch screen: swipes change month and the keyboard hints are left out.
     bool touch;
 } App_Config;

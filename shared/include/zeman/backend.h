@@ -70,6 +70,22 @@ typedef struct Backend_Ops {
     // item's images, all or nothing: those it had and are not given are deleted. Each id is
     // one of the item's images or one that belongs to no item yet.
     bool (*set_event_images)(void *context, int64_t event_id, Array_Slice image_ids);
+    // Stores a file as an attachment: name is its name without its folder, which passes
+    // attachment_name_is_valid, and bytes, a slice of bytes, its contents, which are not empty
+    // and at most ATTACHMENT_SIZE_BYTES_MAX. Returns the new id, or 0. It belongs to no item
+    // until set_event_attachments gives it one; one never given one is deleted the next time the
+    // database is opened, as when a form is cancelled after a file was added.
+    int64_t (*attachment_insert)(void *context, Str name, Array_Slice bytes);
+    // Loads the contents of the attachment with id into bytes, a slice of bytes with room for
+    // ATTACHMENT_SIZE_BYTES_MAX. Returns how many there are, or -1.
+    int32_t (*attachment_load)(void *context, int64_t id, Array_Slice bytes);
+    // Loads the item's attachments, without their contents, in the order they were given, into
+    // attachments, a slice of Attachment. Returns the count, or -1.
+    int32_t (*load_event_attachments)(void *context, int64_t event_id, Array_Slice attachments);
+    // Makes attachment_ids, a slice of int64_t, the item's attachments in this order, all or
+    // nothing: those it had and are not given are deleted. Each id is one of the item's
+    // attachments or one that belongs to no item yet.
+    bool (*set_event_attachments)(void *context, int64_t event_id, Array_Slice attachment_ids);
     // A number that changes whenever the data changes, from this program or another, so that
     // the user interface knows when to reload. 0 when unknown, for example while disconnected.
     uint64_t (*revision)(void *context);
@@ -151,6 +167,24 @@ static inline int32_t backend_load_event_images(Backend *backend, int64_t event_
 static inline bool backend_set_event_images(Backend *backend, int64_t event_id,
                                             Array_Slice image_ids) {
     return backend->ops->set_event_images(backend->context, event_id, image_ids);
+}
+
+static inline int64_t backend_attachment_insert(Backend *backend, Str name, Array_Slice bytes) {
+    return backend->ops->attachment_insert(backend->context, name, bytes);
+}
+
+static inline int32_t backend_attachment_load(Backend *backend, int64_t id, Array_Slice bytes) {
+    return backend->ops->attachment_load(backend->context, id, bytes);
+}
+
+static inline int32_t backend_load_event_attachments(Backend *backend, int64_t event_id,
+                                                     Array_Slice attachments) {
+    return backend->ops->load_event_attachments(backend->context, event_id, attachments);
+}
+
+static inline bool backend_set_event_attachments(Backend *backend, int64_t event_id,
+                                                 Array_Slice attachment_ids) {
+    return backend->ops->set_event_attachments(backend->context, event_id, attachment_ids);
 }
 
 static inline uint64_t backend_revision(Backend *backend) {

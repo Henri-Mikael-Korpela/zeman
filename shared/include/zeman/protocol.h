@@ -27,8 +27,8 @@ enum {
     // 2 added the links between problems and the tasks that solve them, 3 whether a problem is
     // done to each event, 4 opportunities as link targets beside problems, and 5 the list of
     // every task for the Tasks view, 6 the deadline of a task, and 7 the whole task with each
-    // task linked to a target, and 8 rich descriptions: longer, with images.
-    PROTOCOL_VERSION = 8,
+    // task linked to a target, 8 rich descriptions: longer, with images, and 9 attached files.
+    PROTOCOL_VERSION = 9,
     PROTOCOL_PORT_DEFAULT = 47800,
     // UDP port where the desktop app answers phones looking for it on the local network.
     PROTOCOL_DISCOVERY_PORT = 47801,
@@ -39,16 +39,17 @@ enum {
     PROTOCOL_EVENT_SIZE_MAX = 2 * 8 + (2 + LOCATION_ADDRESS_SIZE - 1) +
                               (2 + LOCATION_CITY_SIZE - 1) + 5 * 12 + 7 * 4 + 3 +
                               (2 + EVENT_TITLE_SIZE - 1) + (2 + EVENT_DESCRIPTION_SIZE - 1),
-    // The largest request is an image being stored: the operation and the image, as a blob.
-    // An event is far smaller.
-    PROTOCOL_REQUEST_SIZE_MAX = 1 + 4 + DESCRIPTION_IMAGE_SIZE_BYTES_MAX,
+    // The largest request is a file being attached: the operation, its name as a text and its
+    // contents as a blob. An event or an image is smaller.
+    PROTOCOL_REQUEST_SIZE_MAX = 1 + (2 + ATTACHMENT_NAME_SIZE - 1) + 4 + ATTACHMENT_SIZE_BYTES_MAX,
     // Bounds what one response carries, so that both sides can use fixed buffers.
     PROTOCOL_EVENT_COUNT_MAX = 512,
     PROTOCOL_COMPLETION_COUNT_MAX = 1024,
-    // The largest response is a full list of tasks, each an event and five bytes, when every
-    // description is as long as it can be: about 2.2 MiB. An image is about 1 MiB. The usual
-    // response is far smaller, because texts are sent at their own length.
-    PROTOCOL_RESPONSE_SIZE_MAX = 2304 * 1024,
+    // The largest response is a file's contents, a blob of ATTACHMENT_SIZE_BYTES_MAX with room
+    // to spare. A full list of tasks, each an event and five bytes, when every description is
+    // as long as it can be, takes about 2.2 MiB, and an image about 1 MiB. The usual response is
+    // far smaller, because texts are sent at their own length.
+    PROTOCOL_RESPONSE_SIZE_MAX = ATTACHMENT_SIZE_BYTES_MAX + 4096,
 };
 // Cast because the constants come from different enums.
 static_assert((int64_t)PROTOCOL_REQUEST_SIZE_MAX >= 1 + (int64_t)PROTOCOL_EVENT_SIZE_MAX,
@@ -57,6 +58,10 @@ static_assert(6 + (int64_t)PROTOCOL_EVENT_COUNT_MAX * ((int64_t)PROTOCOL_EVENT_S
               (int64_t)PROTOCOL_RESPONSE_SIZE_MAX, "A response holds a full list of tasks.");
 static_assert(1 + 4 + (int64_t)DESCRIPTION_IMAGE_SIZE_BYTES_MAX <=
               (int64_t)PROTOCOL_RESPONSE_SIZE_MAX, "A response holds an image.");
+static_assert(1 + 4 + (int64_t)ATTACHMENT_SIZE_BYTES_MAX <= (int64_t)PROTOCOL_RESPONSE_SIZE_MAX,
+              "A response holds an attached file.");
+static_assert(1 + 4 + (int64_t)DESCRIPTION_IMAGE_SIZE_BYTES_MAX <=
+              (int64_t)PROTOCOL_REQUEST_SIZE_MAX, "A request holds an image.");
 
 // Discovery: a phone broadcasts PROTOCOL_DISCOVERY_PROBE to PROTOCOL_DISCOVERY_PORT; each desktop
 // app on the network answers the sender with PROTOCOL_DISCOVERY_REPLY followed by its TCP port
@@ -90,6 +95,11 @@ typedef enum Protocol_Operation {
     PROTOCOL_IMAGE_LOAD,         // id -> PNG blob
     PROTOCOL_LOAD_EVENT_IMAGES,  // event id, count_max -> count, image ids
     PROTOCOL_SET_EVENT_IMAGES,   // event id, count, image ids ->
+    PROTOCOL_ATTACHMENT_INSERT,  // name, contents blob -> id
+    PROTOCOL_ATTACHMENT_LOAD,    // id -> contents blob
+    // event id, count_max -> count, attachments
+    PROTOCOL_LOAD_EVENT_ATTACHMENTS,
+    PROTOCOL_SET_EVENT_ATTACHMENTS,  // event id, count, attachment ids ->
     PROTOCOL_OPERATION_END,
 } Protocol_Operation;
 
@@ -134,6 +144,7 @@ void writer_completion(Writer *writer, Task_Completion const *completion);
 void writer_linked_task(Writer *writer, Linked_Task const *task);
 void writer_link_target(Writer *writer, Link_Target const *target);
 void writer_task_occurrence(Writer *writer, Task_Occurrence const *occurrence);
+void writer_attachment(Writer *writer, Attachment const *attachment);
 
 Reader reader_make(Array_Slice buffer);
 byte reader_u8(Reader *reader);
@@ -177,6 +188,10 @@ Link_Target reader_link_target(Reader *reader);
  * reader.
  */
 Task_Occurrence reader_task_occurrence(Reader *reader);
+/**
+ * An attachment that breaks attachment_is_valid fails the reader.
+ */
+Attachment reader_attachment(Reader *reader);
 /**
  * True when the whole message was read and nothing failed.
  */

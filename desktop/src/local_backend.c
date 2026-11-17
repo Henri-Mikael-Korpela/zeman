@@ -25,6 +25,12 @@ static int64_t local_image_insert(void *context, Array_Slice png_bytes);
 static int32_t local_image_load(void *context, int64_t id, Array_Slice png_bytes);
 static int32_t local_load_event_images(void *context, int64_t event_id, Array_Slice image_ids);
 static bool local_set_event_images(void *context, int64_t event_id, Array_Slice image_ids);
+static int64_t local_attachment_insert(void *context, Str name, Array_Slice bytes);
+static int32_t local_attachment_load(void *context, int64_t id, Array_Slice bytes);
+static int32_t local_load_event_attachments(void *context, int64_t event_id,
+                                            Array_Slice attachments);
+static bool local_set_event_attachments(void *context, int64_t event_id,
+                                        Array_Slice attachment_ids);
 static uint64_t local_revision(void *context);
 static Str local_error(void const *context);
 
@@ -44,6 +50,10 @@ static Backend_Ops const LOCAL_OPS = {
     .image_load = local_image_load,
     .load_event_images = local_load_event_images,
     .set_event_images = local_set_event_images,
+    .attachment_insert = local_attachment_insert,
+    .attachment_load = local_attachment_load,
+    .load_event_attachments = local_load_event_attachments,
+    .set_event_attachments = local_set_event_attachments,
     .revision = local_revision,
     .error = local_error,
 };
@@ -301,6 +311,59 @@ static bool local_set_event_images(void *context, int64_t event_id, Array_Slice 
         return false;
     }
     if (!event_store_set_event_images(&local->store, event_id, image_ids)) {
+        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
+        return false;
+    }
+    local_changed(local);
+    return true;
+}
+
+static int64_t local_attachment_insert(void *context, Str name, Array_Slice bytes) {
+    Local_Backend *local = context;
+    if (!local_available(local)) {
+        return 0;
+    }
+    int64_t const id = event_store_attachment_insert(&local->store, name, bytes);
+    if (id == 0) {
+        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
+    }
+    // No revision change: the file shows nowhere until an item is given it.
+    return id;
+}
+
+static int32_t local_attachment_load(void *context, int64_t id, Array_Slice bytes) {
+    Local_Backend *local = context;
+    if (!local_available(local)) {
+        return -1;
+    }
+    int32_t const size = event_store_attachment_load(&local->store, id, bytes);
+    if (size < 0) {
+        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
+    }
+    return size;
+}
+
+static int32_t local_load_event_attachments(void *context, int64_t event_id,
+                                            Array_Slice attachments) {
+    Local_Backend *local = context;
+    if (!local_available(local)) {
+        return -1;
+    }
+    int32_t const count = event_store_load_event_attachments(&local->store, event_id,
+                                                             attachments);
+    if (count < 0) {
+        snprintf(local->error, sizeof(local->error), "%s", local->store.error);
+    }
+    return count;
+}
+
+static bool local_set_event_attachments(void *context, int64_t event_id,
+                                        Array_Slice attachment_ids) {
+    Local_Backend *local = context;
+    if (!local_available(local)) {
+        return false;
+    }
+    if (!event_store_set_event_attachments(&local->store, event_id, attachment_ids)) {
         snprintf(local->error, sizeof(local->error), "%s", local->store.error);
         return false;
     }

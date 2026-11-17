@@ -1,7 +1,7 @@
 // Tests of the texts that cross the network and the text boxes: the length-prefixed text of the
 // protocol, the link to the desktop app, and pasting into a text box. Also which occurrence of a
 // task is due, the task as it crosses the network for the Tasks view, and the blobs and long
-// descriptions of rich text.
+// descriptions of rich text, and attached files.
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -340,6 +340,82 @@ static void test_image_validity(void) {
     assert(!description_image_is_valid(array_slice_make(png, (int32_t)sizeof(png))));
 }
 
+static void test_attachment_names(void) {
+    assert(attachment_name_is_valid(STR("report.pdf")));
+    assert(attachment_name_is_valid(STR("Kuva \xC3\xA4iti.png"))); // Non-ASCII letters are fine.
+    assert(attachment_name_is_valid(STR(".gitignore")));
+    assert(!attachment_name_is_valid(STR("")));
+    // Folders, drives and the other characters Windows does not allow.
+    assert(!attachment_name_is_valid(STR("a/b.txt")));
+    assert(!attachment_name_is_valid(STR("a\\b.txt")));
+    assert(!attachment_name_is_valid(STR("C:file")));
+    assert(!attachment_name_is_valid(STR("what?.txt")));
+    assert(!attachment_name_is_valid(STR("a*b")));
+    assert(!attachment_name_is_valid(STR("a\"b")));
+    assert(!attachment_name_is_valid(STR("<a>")));
+    assert(!attachment_name_is_valid(STR("a|b")));
+    // Control characters, and bytes that are not UTF-8.
+    assert(!attachment_name_is_valid(STR("a\tb")));
+    assert(!attachment_name_is_valid(STR("a\nb")));
+    assert(!attachment_name_is_valid(STR("a\xFFz")));
+    // As long as the field holds, and one more.
+    char name[ATTACHMENT_NAME_SIZE + 1] = "";
+    memset(name, 'n', ATTACHMENT_NAME_SIZE - 1);
+    assert(attachment_name_is_valid(str_make(name, ATTACHMENT_NAME_SIZE - 1)));
+    assert(!attachment_name_is_valid(str_make(name, ATTACHMENT_NAME_SIZE)));
+}
+
+static void test_attachment_round_trip(void) {
+    byte bytes[ATTACHMENT_NAME_SIZE + 32] = { 0 };
+    Attachment attachment = { .id = 12, .size_bytes = 4096 };
+    snprintf(attachment.name, sizeof(attachment.name), "Offer.pdf");
+    assert(attachment_is_valid(&attachment));
+
+    Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+    writer_attachment(&writer, &attachment);
+    assert(!writer.overflow);
+    Reader reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+    Attachment const read = reader_attachment(&reader);
+    assert(reader_done(&reader));
+    assert(read.id == 12);
+    assert(read.size_bytes == 4096);
+    assert(strcmp(read.name, "Offer.pdf") == 0);
+
+    // Each rule is enforced on what comes from the network: an id, a size within the limit, and
+    // a name that is safe to offer when the file is saved.
+    Attachment const broken[] = {
+        { .id = 0, .size_bytes = 10, .name = "a.txt" },
+        { .id = 1, .size_bytes = 0, .name = "a.txt" },
+        { .id = 1, .size_bytes = ATTACHMENT_SIZE_BYTES_MAX + 1, .name = "a.txt" },
+        { .id = 1, .size_bytes = 10, .name = "" },
+        { .id = 1, .size_bytes = 10, .name = "..\\a.txt" },
+    };
+    for (size_t i = 0; i < sizeof(broken) / sizeof(broken[0]); i++) {
+        writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+        writer_attachment(&writer, &broken[i]);
+        reader = reader_make(array_slice_make(bytes, (int32_t)writer.length));
+        Attachment const refused = reader_attachment(&reader);
+        assert(reader.failed);
+        assert(refused.id == 0);
+    }
+}
+
+/**
+ * The largest request is a file being attached, with the longest name, and fits.
+ */
+static void test_attachment_request_size(void) {
+    static byte bytes[PROTOCOL_REQUEST_SIZE_MAX];
+    static byte contents[ATTACHMENT_SIZE_BYTES_MAX];
+    char name[ATTACHMENT_NAME_SIZE] = "";
+    memset(name, 'n', sizeof(name) - 1);
+    Writer writer = writer_make(array_slice_make(bytes, (int32_t)sizeof(bytes)));
+    writer_u8(&writer, PROTOCOL_ATTACHMENT_INSERT);
+    writer_text(&writer, str_from_cstr(name));
+    writer_blob(&writer, array_slice_make(contents, ATTACHMENT_SIZE_BYTES_MAX));
+    assert(!writer.overflow);
+    assert(writer.length == PROTOCOL_REQUEST_SIZE_MAX);
+}
+
 int main(void) {
     test_text_round_trip();
     test_text_rejects_bad_messages();
@@ -352,6 +428,9 @@ int main(void) {
     test_blob_round_trip();
     test_long_description_round_trip();
     test_image_validity();
+    test_attachment_names();
+    test_attachment_round_trip();
+    test_attachment_request_size();
     printf("wire_test: all passed\n");
     return 0;
 }

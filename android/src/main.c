@@ -189,6 +189,8 @@ int main(int argc, char **argv) {
         .font_directory = "",
         .scale = phone.scale,
         .clipboard_image = NULL,
+        // No file dialogs or paths on a phone: attached files are added on the desktop.
+        .files = NULL,
         .touch = true,
     };
     phone.app = app_create(&phone.backend, &config);

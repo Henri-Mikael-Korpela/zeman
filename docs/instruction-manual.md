@@ -12,6 +12,7 @@ How to use Zeman, on the desktop and on the phone. To build and start the apps, 
   - [Repeating events](#repeating-events)
   - [Tasks](#tasks)
   - [Locations and descriptions](#locations-and-descriptions)
+  - [Attachments](#attachments)
   - [Problems](#problems)
   - [Editing and deleting](#editing-and-deleting)
   - [When an item was created](#when-an-item-was-created)
@@ -84,6 +85,17 @@ Every item can also have a description: text of several paragraphs, with images 
 
 Cards show the start of the description under the dates and location, over up to three lines, with how many images it has. The images show when the item is opened. The phone shows and edits descriptions too, but cannot add images, as it has no clipboard for them.
 
+### Attachments
+
+Every kind of item, events, tasks, problems and opportunities, can have files attached to it: a contract, a ticket, a photo. Click the **Attachments** button beside the description in the form (it says how many files there are) to open a page of its own for them.
+
+- **Adding:** click the area that says "Select file or drag and drop file here" and choose a file in the dialog that opens, or drag a file from the file manager onto the window while the page is open. Each file can be up to 4 MB, and an item can have 16.
+- **Saving a file out:** press **Save** on its row and choose where to put it; the file's own name is offered. A copy is written there; the attached file stays.
+- **Removing:** press **Remove** on its row.
+- **Done** or Escape goes back to the other fields. Added and removed files take effect when you **Save** the form, as the rest of the form does: cancelling the form leaves the item's files as they were.
+
+The files are stored in the database on the desktop (see [Where your data is kept](#where-your-data-is-kept)), so a backup of `zeman.db` holds them. The phone shows an item's files and can remove them, but files are added and saved out on the desktop. Attached files are not opened from the calendar, so that nothing in a file can run by accident: save one out and open it as you would any file.
+
 ### Problems
 
 Use **New problem** to record a problem: something that went wrong, with a name and an optional description. A problem is always recorded on the day it is created, whichever day is selected, and keeps that day when edited; it has no times, location or repeat. Problems show in dark red, marked with "!", and an event or task cannot be turned into a problem or back.
@@ -135,7 +147,7 @@ The mouse wheel scrolls the hours; on a phone, dragging scrolls them.
 | Z | Toggle the five-minute zoom on the hours |
 | Home | Jump to today |
 | Tab | Move between form fields (the description is opened with a click) |
-| Escape | Go back from the description to the form; cancel the form, a drag, a drawn block or a confirmation |
+| Escape | Go back from the description or the attachments to the form; cancel the form, a drag, a drawn block or a confirmation |
 | Ctrl+V | Paste at the cursor in a field being typed into (line breaks become spaces); in a description, paste text or an image |
 | Ctrl+C, Ctrl+X | Copy or cut the whole field, because the text boxes have no selection; in a description, the selection |
 | Ctrl+A | Select the whole description |
@@ -143,4 +155,4 @@ The mouse wheel scrolls the hours; on a phone, dragging scrolls them.
 
 ## Where your data is kept
 
-Events, tasks and problems are stored in `zeman.db`, an SQLite database on the desktop computer. In a build made from the repository it sits in the repository root, next to the README, whichever build folder the executable is in, so deleting a build folder does not delete your data. In the release folder (`desktop/release/`) it sits next to `zeman.exe` instead, so the whole folder can be copied elsewhere as one unit. The file is not committed to git, so back it up like any other file you want to keep. The phone keeps no calendar data of its own, only the address of its desktop. Databases from earlier versions are upgraded automatically when opened.
+Events, tasks and problems, with their descriptions, images and attached files, are stored in `zeman.db`, an SQLite database on the desktop computer. In a build made from the repository it sits in the repository root, next to the README, whichever build folder the executable is in, so deleting a build folder does not delete your data. In the release folder (`desktop/release/`) it sits next to `zeman.exe` instead, so the whole folder can be copied elsewhere as one unit. The file is not committed to git, so back it up like any other file you want to keep. The phone keeps no calendar data of its own, only the address of its desktop. Databases from earlier versions are upgraded automatically when opened.
